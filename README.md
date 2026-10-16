@@ -8,6 +8,8 @@ It can also stream live from an **RTL-SDR v3** or a **USRP B200 / B205mini**, sh
 the spectrum and a scrolling waterfall in real time, and record the stream to SigMF or
 raw IQ files that open straight back up in wvt. See [Live devices](#live-devices).
 
+<img width="2125" height="1407" alt="image" src="https://github.com/user-attachments/assets/71d188af-cc07-4a0c-93ef-36d082b5829b" />
+
 ## Roadmap 
 
 | Version | Features | | 
