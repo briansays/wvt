@@ -1,1 +1,0 @@
-/usr/bin/c++ -O3 -DNDEBUG -arch x86_64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/iqgen.dir/tools/iqgen.cpp.o -o iqgen

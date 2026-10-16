@@ -1,5 +1,0 @@
-/Users/brian/dev/workspace/claude/wvt/build-test/CMakeFiles/imgui_implot.dir
-/Users/brian/dev/workspace/claude/wvt/build-test/CMakeFiles/wvt.dir
-/Users/brian/dev/workspace/claude/wvt/build-test/CMakeFiles/iqgen.dir
-/Users/brian/dev/workspace/claude/wvt/build-test/CMakeFiles/edit_cache.dir
-/Users/brian/dev/workspace/claude/wvt/build-test/CMakeFiles/rebuild_cache.dir

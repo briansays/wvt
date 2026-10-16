@@ -1,7 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"/Users/brian/dev/workspace/claude/wvt/build-test/cmake_install.cmake"
-	],
-	"Parallel" : false
-}
