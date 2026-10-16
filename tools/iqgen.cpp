@@ -4,11 +4,13 @@
 //   iqgen out.cf32 [--fmt cf32|ci16|ci8|cu8] [--rate 2e6] [--dur 2] [--fc 100e6]
 //
 // If the output name ends in .sigmf-data a matching .sigmf-meta is written.
+#include <algorithm>
 #include <cmath>
 #include <complex>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <random>
 #include <string>
 #include <vector>

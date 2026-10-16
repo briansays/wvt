@@ -24,10 +24,10 @@ if(APPLE)
   set(PLATFORM_LIBS ${X11_ROOT}/lib/libX11.dylib ${X11_ROOT}/lib/libGL.dylib)
 else()
   find_package(X11 REQUIRED)
+  # LEGACY selects libGL.so, which provides both GL and GLX entry points.
   set(OpenGL_GL_PREFERENCE LEGACY)
   find_package(OpenGL REQUIRED)
-  set(PLATFORM_INCLUDES ${X11_INCLUDE_DIR} ${OPENGL_INCLUDE_DIR})
-  set(PLATFORM_LIBS ${X11_LIBRARIES} ${OPENGL_LIBRARIES})
+  set(PLATFORM_LIBS X11::X11 OpenGL::GL)
 endif()
 find_package(Threads REQUIRED)
 
@@ -51,6 +51,9 @@ target_include_directories(imgui_implot PUBLIC ${IMGUI_DIR} ${IMGUI_DIR}/backend
 if(APPLE)
   # Make the OpenGL2 backend pick up XQuartz's <GL/gl.h>-compatible prototypes.
   target_include_directories(imgui_implot PRIVATE ${PLATFORM_INCLUDES})
+else()
+  # The OpenGL2 backend needs <GL/gl.h>; the imported target carries its include path.
+  target_link_libraries(imgui_implot PUBLIC OpenGL::GL)
 endif()
 
 add_executable(wvt

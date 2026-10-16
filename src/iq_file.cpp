@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <cstring>
 #include <fstream>
 #include <regex>

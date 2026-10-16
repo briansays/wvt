@@ -8,7 +8,10 @@ all sharing one time axis. Pan or zoom any plot and every other plot follows.
 
 Requirements: a C++20 compiler, CMake ≥ 3.16, X11 + GL headers/libraries.
 
-- **Linux:** `sudo apt install build-essential cmake libx11-dev libgl1-mesa-dev`
+- **Linux:**
+  - Debian/Ubuntu: `sudo apt install build-essential cmake libx11-dev libgl1-mesa-dev`
+  - Fedora: `sudo dnf install gcc-c++ cmake libX11-devel mesa-libGL-devel`
+  - Arch: `sudo pacman -S base-devel cmake libx11 mesa`
 - **macOS:** install [XQuartz](https://www.xquartz.org). The build links `/opt/X11/lib/libX11` and `libGL`, so the binary is a real X11 client.
 
 ```sh
