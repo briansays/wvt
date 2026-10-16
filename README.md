@@ -8,6 +8,15 @@ It can also stream live from an **RTL-SDR v3** or a **USRP B200 / B205mini**, sh
 the spectrum and a scrolling waterfall in real time, and record the stream to SigMF or
 raw IQ files that open straight back up in wvt. See [Live devices](#live-devices).
 
+## Roadmap 
+
+| Version | Features | | 
+|---|---|---| 
+| 1.0 | Receive via UHD and RTL-SDR v3 | ✅ | 
+| 1.1 | Signal Generator Support via UHD | | 
+| 1.2 | Support for Signal Hound SDRs | | 
+| 1.3 | Support for EPIQ SDRs | | 
+
 ## Build
 
 Requirements: a C++20 compiler, CMake ≥ 3.16, X11 + GL headers/libraries.
