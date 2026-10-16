@@ -6,6 +6,7 @@
 #include "engine.h"
 #include "imgui.h"
 #include "implot.h"
+#include "live.h"
 #include "ui_util.h"
 
 class X11Window;
@@ -31,6 +32,12 @@ public:
     bool busy() const;
     void setView(double t0, double t1);
     void setChannel(double offset, double bw);
+
+    // Live device mode (app_live.cpp)
+    bool startDevice(const StreamConfig& cfg);
+    bool startRecording(const RecordConfig& cfg);
+    bool isLive() const { return liveMode_; }
+    int liveRowsReceived() const { return liveFilled_; }
 
 private:
     // UI sections
@@ -67,6 +74,26 @@ private:
     void buildLut();
     double valueAt(const Series& s, double t) const;
     float wfValueAt(double t, double f) const;
+    bool workersBusy() const;
+
+    // live mode (app_live.cpp)
+    void drawSourceSelector();
+    void drawDeviceToolbar();
+    void drawRecordBar();
+    void drawLiveLeft();
+    void drawLiveStatusBar();
+    void handleLiveShortcuts();
+    void enterLive();
+    void leaveLive();
+    void scanDevices();
+    void selectDevice(const DeviceInfo& d);
+    bool restartDevice();
+    void pollLive();
+    void resetLiveHistory(uint64_t gen, int cols);
+    void recolorLiveRow(int row);
+    void recolorLiveAll();
+    float liveValueAt(double ago, double f) const;
+    bool liveRecording() const;
 
     X11Window& win_;
     std::unique_ptr<Worker<WaterfallReq, WaterfallRes>> wfWorker_;
@@ -137,4 +164,42 @@ private:
     std::vector<uint32_t> rgba_;
 
     bool flowFirst_ = true;
+
+    // --- live device mode ---
+    bool liveMode_ = false;
+    std::unique_ptr<LiveEngine> live_;
+    LiveEngine::Stats liveStats_;
+    StreamConfig devCfg_;
+    std::vector<DeviceInfo> devices_;
+    bool devicesScanned_ = false;
+    char devArgs_[256] = {};
+    char antenna_[32] = {};
+    std::string liveErr_;
+    double fileFs_ = 1e6, fileFc_ = 0;  // file-mode values while live mode borrows fs_/fc_
+    double liveViewFc_ = NAN, liveViewFs_ = NAN;
+
+    RecordConfig recCfg_;
+    char recPrefix_[1024] = {};
+    std::string recErr_;
+    std::string lastRecording_;  // path to reopen in file mode
+
+    LiveParams liveParams_;
+    int liveHistory_ = 600;  // waterfall rows kept
+    int specAvgRows_ = 8;    // spectrum average time constant in rows
+    bool liveAutoDb_ = true;
+    double liveAutoAt_ = 0;
+
+    // waterfall history: a ring of liveRows_ x liveCols_, newest row at liveHead_-1
+    uint64_t liveGen_ = 0;
+    int liveCols_ = 0, liveRows_ = 0, liveFilled_ = 0, liveHead_ = 0;
+    double liveF0_ = 0, liveF1_ = 0;
+    std::vector<float> liveDb_;
+    std::vector<uint32_t> liveRgba_;
+    ImTextureID liveTex_ = 0;
+    bool liveTexDirty_ = false;
+    int liveLutCmap_ = -1;
+    float liveDbMin_ = 0, liveDbMax_ = 0;  // range the texture was colored with
+    std::vector<double> liveSpecF_, liveAvgLin_, livePeakLin_, liveAvgDb_, livePeakDb_;
+    bool liveFitY_ = true, liveFitSpecY_ = true;
+    double liveHoverAgo_ = NAN, liveNextHoverAgo_ = NAN;
 };

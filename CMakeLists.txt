@@ -65,10 +65,79 @@ add_executable(wvt
   src/platform_x11.cpp
   src/sw_renderer.cpp
   src/ui_util.cpp
+  src/app_live.cpp
+  src/live.cpp
+  src/recorder.cpp
+  src/sdr_device.cpp
+  src/sdr_sim.cpp
   ${FONT_CPP})
 target_include_directories(wvt PRIVATE src ${PLATFORM_INCLUDES})
 target_link_libraries(wvt PRIVATE imgui_implot ${PLATFORM_LIBS} Threads::Threads)
 target_compile_options(wvt PRIVATE -Wall -Wextra -Wno-unused-parameter)
+
+# ---------------------------------------------------------------------------
+# Optional SDR backends. AUTO uses a library if it is found, ON requires it.
+# ---------------------------------------------------------------------------
+set(WVT_WITH_RTLSDR AUTO CACHE STRING "Build the RTL-SDR backend (AUTO, ON, OFF)")
+set(WVT_WITH_UHD AUTO CACHE STRING "Build the UHD (USRP B200/B205) backend (AUTO, ON, OFF)")
+set_property(CACHE WVT_WITH_RTLSDR PROPERTY STRINGS AUTO ON OFF)
+set_property(CACHE WVT_WITH_UHD PROPERTY STRINGS AUTO ON OFF)
+find_package(PkgConfig QUIET)
+
+if(NOT WVT_WITH_RTLSDR STREQUAL "OFF")
+  if(PKG_CONFIG_FOUND)
+    pkg_check_modules(RTLSDR IMPORTED_TARGET librtlsdr)
+  endif()
+  if(RTLSDR_FOUND)
+    target_sources(wvt PRIVATE src/sdr_rtlsdr.cpp)
+    target_link_libraries(wvt PRIVATE PkgConfig::RTLSDR)
+    target_compile_definitions(wvt PRIVATE WVT_HAVE_RTLSDR)
+    # rtlsdr_set_bias_tee() only exists in librtlsdr 0.6.0+ builds from 2018 on.
+    include(CheckSymbolExists)
+    # Link through the imported target: raw LDFLAGS end up before the test
+    # object on the link line, and the linker then drops the library.
+    set(CMAKE_REQUIRED_LIBRARIES PkgConfig::RTLSDR)
+    check_symbol_exists(rtlsdr_set_bias_tee "rtl-sdr.h" WVT_RTLSDR_HAS_BIAS_TEE)
+    unset(CMAKE_REQUIRED_LIBRARIES)
+    if(WVT_RTLSDR_HAS_BIAS_TEE)
+      target_compile_definitions(wvt PRIVATE WVT_RTLSDR_HAS_BIAS_TEE)
+    endif()
+    message(STATUS "wvt: RTL-SDR support enabled (librtlsdr ${RTLSDR_VERSION})")
+  elseif(WVT_WITH_RTLSDR STREQUAL "ON")
+    message(FATAL_ERROR "WVT_WITH_RTLSDR=ON but librtlsdr was not found (install librtlsdr-dev / librtlsdr)")
+  else()
+    message(STATUS "wvt: RTL-SDR support disabled (librtlsdr not found)")
+  endif()
+endif()
+
+if(NOT WVT_WITH_UHD STREQUAL "OFF")
+  # wvt uses UHD's C API (uhd.h), so Boost headers are not needed.
+  if(PKG_CONFIG_FOUND)
+    pkg_check_modules(UHDPC IMPORTED_TARGET uhd)
+  endif()
+  if(UHDPC_FOUND)
+    target_link_libraries(wvt PRIVATE PkgConfig::UHDPC)
+    set(WVT_UHD_OK TRUE)
+    set(WVT_UHD_VERSION ${UHDPC_VERSION})
+  else()
+    find_package(UHD QUIET)
+    if(UHD_FOUND)
+      target_include_directories(wvt PRIVATE ${UHD_INCLUDE_DIRS})
+      target_link_libraries(wvt PRIVATE ${UHD_LIBRARIES})
+      set(WVT_UHD_OK TRUE)
+      set(WVT_UHD_VERSION ${UHD_VERSION})
+    endif()
+  endif()
+  if(WVT_UHD_OK)
+    target_sources(wvt PRIVATE src/sdr_uhd.cpp)
+    target_compile_definitions(wvt PRIVATE WVT_HAVE_UHD)
+    message(STATUS "wvt: UHD support enabled (UHD ${WVT_UHD_VERSION})")
+  elseif(WVT_WITH_UHD STREQUAL "ON")
+    message(FATAL_ERROR "WVT_WITH_UHD=ON but UHD was not found (install libuhd-dev / uhd)")
+  else()
+    message(STATUS "wvt: UHD support disabled (UHD not found)")
+  endif()
+endif()
 
 # Synthetic test-signal generator
 add_executable(iqgen tools/iqgen.cpp)

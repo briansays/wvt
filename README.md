@@ -4,6 +4,10 @@ An X11 desktop tool for looking at raw IQ recordings from software-defined radio
 On the left is a spectrum and waterfall. On the right are I/Q, AM, FM and PM plots,
 all sharing one time axis. Pan or zoom any plot and every other plot follows.
 
+It can also stream live from an **RTL-SDR v3** or a **USRP B200 / B205mini**, showing
+the spectrum and a scrolling waterfall in real time, and record the stream to SigMF or
+raw IQ files that open straight back up in wvt. See [Live devices](#live-devices).
+
 ## Build
 
 Requirements: a C++20 compiler, CMake ≥ 3.16, X11 + GL headers/libraries.
@@ -23,6 +27,39 @@ cmake --build build -j
 Dear ImGui 1.91.9 and ImPlot 0.16 are vendored in `third_party/`, so the build needs no network access.
 The UI font is compiled into the binary.
 
+### Optional: device support
+
+Live streaming needs librtlsdr (RTL-SDR) and/or UHD (USRP). CMake finds them automatically and
+reports what it enabled (`wvt: RTL-SDR support enabled ...`). Without either library wvt still
+builds, with the file viewer, recording and a built-in signal simulator.
+
+| | RTL-SDR | UHD (USRP B200/B205) |
+|---|---|---|
+| Debian/Ubuntu | `sudo apt install librtlsdr-dev` | `sudo apt install libuhd-dev uhd-host` |
+| Fedora | `sudo dnf install rtl-sdr-devel` | `sudo dnf install uhd-devel` |
+| Arch | `sudo pacman -S rtl-sdr` | `sudo pacman -S libuhd` |
+| macOS | `brew install librtlsdr` | `brew install uhd` |
+
+To require a backend (fail if it's missing) or leave it out:
+`cmake -S . -B build -DWVT_WITH_RTLSDR=ON -DWVT_WITH_UHD=OFF` (each takes `AUTO`, `ON` or `OFF`).
+
+wvt uses UHD's C API, so Boost headers aren't needed to build it.
+
+### Device setup
+
+**RTL-SDR v3 on Linux**
+- Stop the kernel's DVB-T driver from claiming the dongle:
+  `echo 'blacklist dvb_usb_rtl28xxu' | sudo tee /etc/modprobe.d/blacklist-rtlsdr.conf`, then replug
+  (or `sudo modprobe -r dvb_usb_rtl28xxu`).
+- Allow non-root access: the `rtl-sdr` package installs a udev rule on most distributions. If
+  `rtl_test` only works as root, add your user to the `plugdev` group and replug.
+
+**USRP B200 / B205mini**
+- Download the FPGA/firmware images once: `sudo uhd_images_downloader`
+  (macOS/Homebrew: `uhd_images_downloader` without sudo).
+- On Linux, install UHD's udev rule (`uhd-host` does this on Debian/Ubuntu) so it works without root.
+- Use a USB 3 port for rates above about 8 MS/s. Run `uhd_find_devices` to check the device is seen.
+
 ## Running
 
 ```
@@ -38,6 +75,23 @@ wvt [options] [file]
       --scale S        UI scale (or env WVT_SCALE), useful on HiDPI
       --geometry WxH   initial window size
       --screenshot F   render once, write a PPM to F, exit (for automation)
+
+live devices (-c and -r set the tuning):
+      --device DEV     rtlsdr[:INDEX|SERIAL] | uhd[:ARGS] | sim
+      --gain DB|auto   receiver gain (default 30 dB)
+      --antenna NAME   USRP antenna (RX2 or TX/RX)
+      --bandwidth HZ   USRP analog bandwidth (default: automatic)
+      --bias-tee       RTL-SDR: power an LNA / active antenna over the coax
+      --direct-sampling I|Q  RTL-SDR: HF direct sampling (v3: Q)
+      --ppm N          RTL-SDR frequency correction
+      --list-devices   print attached devices and exit
+
+recording (needs --device):
+      --record PREFIX  record to PREFIX_<date>_<time>_<fc>_<rate>.<ext>
+      --record-format sigmf|raw     (default sigmf)
+      --record-sample native|cf32   (default native: cu8 for RTL-SDR, ci16 for USRP)
+      --record-duration T           stop after T seconds
+      --no-gui         record without opening a window (Ctrl+C stops)
 ```
 
 wvt fills in format, sample rate and center frequency from, in order:
@@ -50,6 +104,64 @@ Command-line options override anything detected. Every value can also be changed
 
 The window renders with GLX/OpenGL when the X server offers it. Otherwise it falls back to a
 built-in software rasterizer, so it also works over `ssh -X`, in Xvfb, and in VNC sessions without GL.
+
+## Live devices
+
+Choose **Source → Device** in the toolbar (or start with `--device`). Pick the device, set the
+center frequency, sample rate and gain, and press **Start**. Only one device streams per wvt window.
+
+```sh
+wvt --device rtlsdr -c 100.1M -r 2.4M --gain 30          # RTL-SDR v3, FM broadcast band
+wvt --device rtlsdr -c 7.1M -r 2.4M --direct-sampling Q  # RTL-SDR v3, HF
+wvt --device uhd:type=b200 -c 915M -r 20M --gain 40      # USRP B200 / B205mini
+wvt --device sim -c 100M -r 2.4M                         # built-in simulator, no hardware
+```
+
+| | RTL-SDR v3 | USRP B200 / B205mini |
+|---|---|---|
+| Tuning | 24 MHz - 1.766 GHz; HF below that with direct sampling (Q) | 70 MHz - 6 GHz |
+| Sample rate | 225-300 kS/s or 0.9-3.2 MS/s (2.4 MS/s or less is reliable) | up to 56 MS/s (USB 3) |
+| Gain | 0-49.6 dB in tuner steps, or AGC | 0-76 dB, or AGC |
+| Extras | bias-tee, PPM correction | antenna RX2 / TX/RX, analog bandwidth |
+| Samples | cu8 | ci16 (sc16) |
+
+- **Frequency and gain** change while streaming. Changing the rate or a device option restarts the stream.
+- The **waterfall** scrolls with the newest row at the top; its vertical axis is seconds ago.
+  *Rows/s* sets the scroll speed and *History* how many rows are kept. *Avg* `auto` averages every
+  sample received since the previous row (up to 20 MS/s; the status bar shows what fraction the
+  FFT sees). Lower it to see short bursts more sharply.
+- The **spectrum** shows a running average (*Spec avg* sets its time constant in rows) and a peak
+  hold (*reset* restarts it).
+- The **status bar** shows the device, actual rate and frequency (devices may adjust what you asked
+  for), and any overflows: samples the device produced but the computer didn't receive in time.
+- The time-domain plots (I/Q, AM, FM, PM) are not available while live. Record, then use
+  **Open recording** to analyze the capture in file mode.
+
+### Recording
+
+The second toolbar row records the live stream. **Record to** is a path prefix: wvt appends the
+date, time, frequency and rate, e.g. `~/wvt-recordings/wvt_20261016_142233_915.000MHz_2.4MSps.sigmf-data`,
+and creates missing folders.
+
+- **SigMF** (default) writes `.sigmf-data` and `.sigmf-meta`. The metadata holds the sample format,
+  rate, device, start time and frequency. Retuning while recording starts a new capture segment at
+  that sample, and every gap (dropped samples) gets an annotation saying where and how many. The
+  metadata is rewritten as the recording goes, so it's usable even if wvt is killed.
+- **Raw** writes bare samples (`.cu8`, `.cs16` or `.cf32`) with the rate and frequency in the file
+  name, where wvt's metadata detection finds them. A raw file can't record a frequency change, so
+  tuning is locked while recording raw.
+- **Samples**: *native* saves exactly what the device sends (cu8 for RTL-SDR, ci16 for USRP;
+  smallest and lossless). *cf32* converts to complex float32 for tools that only read float.
+- The sample rate is locked while recording (one file has one rate). **Limit** stops after a set time.
+- Storage has to keep up: 2.4 MS/s cu8 is 4.8 MB/s, but a B205 at 56 MS/s ci16 is 224 MB/s.
+  The **buffer** figure shows how far the writer lags; if it fills, samples are dropped and annotated.
+- **Open recording** stops the device and opens the last recording in file mode.
+
+`--no-gui` records without a window, e.g. on a headless machine:
+
+```sh
+wvt --device uhd:type=b200 -c 915M -r 10M --record ~/caps/ism --record-duration 30 --no-gui
+```
 
 ## Screen layout
 
@@ -124,4 +236,12 @@ Try `wvt out.sigmf-meta --chan 300k:150k --view 0.5:0.505`.
 | `src/dsp.*` | FFT, windows, FIR design, parallel-for, smoothing |
 | `src/iq_file.*` | mmap reader for all sample formats; SigMF and filename detection |
 | `src/ui_util.*` | SI-unit inputs and formatters, scrollbar widget, style |
+| `src/app_live.cpp` | Live mode UI: device and recording toolbar, live spectrum and scrolling waterfall |
+| `src/live.*` | Live engine: owns the device, sample ring, recorder and spectrum thread |
+| `src/sample_ring.h` | Ring buffer between the device thread, the spectrum thread and the recorder |
+| `src/recorder.*` | SigMF / raw recorder |
+| `src/sdr_device.*` | Device interface, driver list, sample-rate checks |
+| `src/sdr_rtlsdr.cpp` | RTL-SDR backend (librtlsdr) |
+| `src/sdr_uhd.cpp` | USRP backend (UHD C API) |
+| `src/sdr_sim.cpp` | Simulated device with synthetic signals |
 | `tools/iqgen.cpp` | Synthetic test-signal generator |

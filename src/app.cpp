@@ -39,16 +39,22 @@ App::App(X11Window& win) : win_(win) {
     cmap_ = ImPlotColormap_Viridis;
     demod_.chanBw = 50e3;
     status_ = "No file loaded - type a path in the File box and press Enter (or run: wvt <file>)";
+    snprintf(recPrefix_, sizeof recPrefix_, "%s", recCfg_.prefix.c_str());
 }
 
 App::~App() {
+    live_.reset();
+    win_.destroyTexture(liveTex_);
     wfWorker_.reset();
     dmWorker_.reset();
     ovWorker_.reset();
     win_.destroyTexture(wfTex_);
 }
 
-bool App::busy() const { return wfWorker_->busy() || dmWorker_->busy() || ovWorker_->busy(); }
+bool App::workersBusy() const { return wfWorker_->busy() || dmWorker_->busy() || ovWorker_->busy(); }
+
+// While a device streams, the main loop keeps running at frame rate.
+bool App::busy() const { return workersBusy() || (live_ && live_->running()); }
 
 // ---------------------------------------------------------------------------
 // Source / view management
@@ -147,7 +153,7 @@ void App::zoom(double factor) {
 }
 
 void App::submitRequests() {
-    if (!file_ || nSamples_ <= 0) return;
+    if (liveMode_ || !file_ || nSamples_ <= 0) return;
     Source src{file_, fp_, fs_, fc_};
     int64_t s0 = std::clamp<int64_t>((int64_t)std::floor(tmin_ * fs_), 0, nSamples_ - 1);
     int64_t s1 = std::clamp<int64_t>((int64_t)std::ceil(tmax_ * fs_), s0 + 1, nSamples_);
@@ -257,6 +263,7 @@ void App::label(const char* text, float fw) {
 // ---------------------------------------------------------------------------
 void App::frame() {
     pollResults();
+    if (liveMode_) pollLive();
     fFmt_.offset = relFreq_ ? fc_ : 0.0;
 
     const ImGuiViewport* vp = ImGui::GetMainViewport();
@@ -270,6 +277,7 @@ void App::frame() {
 
     nextHoverT_ = NAN;
     nextHoverF_ = NAN;
+    liveNextHoverAgo_ = NAN;
 
     drawToolbar();
     ImGui::Separator();
@@ -280,23 +288,30 @@ void App::frame() {
     const float splitW = 6.f;
     float leftW = std::floor(std::clamp(leftFrac_, 0.15f, 0.85f) * (avail.x - splitW));
 
-    ImGui::BeginChild("##left", ImVec2(leftW, bodyH), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
-    drawLeft();
-    ImGui::EndChild();
-    ImGui::SameLine(0, 0);
-    ImGui::InvisibleButton("##vsplit", ImVec2(splitW, bodyH));
-    if (ImGui::IsItemHovered() || ImGui::IsItemActive()) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
-    if (ImGui::IsItemActive()) leftFrac_ += ImGui::GetIO().MouseDelta.x / std::max(1.f, avail.x);
-    {
-        ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
-        ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(a.x + 2, a.y), ImVec2(b.x - 2, b.y),
-                                                  ImGui::GetColorU32(ImGui::IsItemActive() ? ImGuiCol_SeparatorActive
-                                                                                           : ImGuiCol_Separator));
+    if (liveMode_) {
+        // Live mode is spectrum-only: the spectrum/waterfall pane takes the full width.
+        ImGui::BeginChild("##live", ImVec2(0, bodyH), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
+        drawLiveLeft();
+        ImGui::EndChild();
+    } else {
+        ImGui::BeginChild("##left", ImVec2(leftW, bodyH), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
+        drawLeft();
+        ImGui::EndChild();
+        ImGui::SameLine(0, 0);
+        ImGui::InvisibleButton("##vsplit", ImVec2(splitW, bodyH));
+        if (ImGui::IsItemHovered() || ImGui::IsItemActive()) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+        if (ImGui::IsItemActive()) leftFrac_ += ImGui::GetIO().MouseDelta.x / std::max(1.f, avail.x);
+        {
+            ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+            ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(a.x + 2, a.y), ImVec2(b.x - 2, b.y),
+                                                      ImGui::GetColorU32(ImGui::IsItemActive() ? ImGuiCol_SeparatorActive
+                                                                                               : ImGuiCol_Separator));
+        }
+        ImGui::SameLine(0, 0);
+        ImGui::BeginChild("##right", ImVec2(0, bodyH), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
+        drawRight();
+        ImGui::EndChild();
     }
-    ImGui::SameLine(0, 0);
-    ImGui::BeginChild("##right", ImVec2(0, bodyH), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
-    drawRight();
-    ImGui::EndChild();
 
     drawStatusBar();
     handleShortcuts();
@@ -304,6 +319,7 @@ void App::frame() {
 
     hoverT_ = nextHoverT_;
     hoverF_ = nextHoverF_;
+    liveHoverAgo_ = liveNextHoverAgo_;
     submitRequests();
 }
 
@@ -314,6 +330,11 @@ void App::drawToolbar() {
     const ImGuiStyle& st = ImGui::GetStyle();
     // --- Row 1: file & format -------------------------------------------------
     flowBegin();
+    drawSourceSelector();
+    if (liveMode_) {
+        drawDeviceToolbar();
+        return;
+    }
     label("File", fieldW(46));
     if (ImGui::InputText("##path", pathBuf_, sizeof pathBuf_, ImGuiInputTextFlags_EnterReturnsTrue))
         openFile(pathBuf_);
@@ -925,6 +946,10 @@ void App::drawRight() {
 // ---------------------------------------------------------------------------
 void App::drawStatusBar() {
     ImGui::Separator();
+    if (liveMode_) {
+        drawLiveStatusBar();
+        return;
+    }
     std::string s;
     if (std::isfinite(hoverT_) || std::isfinite(hoverF_)) {
         if (std::isfinite(hoverT_)) s += "t=" + fmtSI(hoverT_, "s", 7) + " (#" + std::to_string((long long)std::llround(hoverT_ * fs_)) + ")  ";
@@ -950,7 +975,7 @@ void App::drawStatusBar() {
     ImGui::TextUnformatted(s.c_str());
     const char* mode = win_.usingGL() ? "GLX" : "software";
     char right[96];
-    snprintf(right, sizeof right, "%s%s | %.0f fps", busy() ? "computing...  " : "", mode, ImGui::GetIO().Framerate);
+    snprintf(right, sizeof right, "%s%s | %.0f fps", workersBusy() ? "computing...  " : "", mode, ImGui::GetIO().Framerate);
     float rw = ImGui::CalcTextSize(right).x;
     ImGui::SameLine(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - rw));
     ImGui::TextDisabled("%s", right);
@@ -959,6 +984,10 @@ void App::drawStatusBar() {
 void App::handleShortcuts() {
     ImGuiIO& io = ImGui::GetIO();
     if (io.WantTextInput || io.KeyCtrl) return;
+    if (liveMode_) {
+        handleLiveShortcuts();
+        return;
+    }
     if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) pan(-0.1);
     if (ImGui::IsKeyPressed(ImGuiKey_RightArrow)) pan(0.1);
     if (ImGui::IsKeyPressed(ImGuiKey_PageUp)) pan(-1.0);

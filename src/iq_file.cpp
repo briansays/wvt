@@ -91,18 +91,12 @@ inline T loadSwapped(const uint8_t* p, bool swap) {
 }
 }  // namespace
 
-void IqFile::read(const FormatParams& fp, int64_t start, int64_t count, std::complex<float>* out) const {
-    const int64_t n = numSamples(fp);
+void decodeSamples(const FormatParams& fp, const uint8_t* src, int64_t count, std::complex<float>* out) {
     const int bps = formatBytesPerSample(fp.fmt);
     const int half = bps / 2;
     const bool sw = fp.bigEndian;
     for (int64_t i = 0; i < count; ++i) {
-        int64_t s = start + i;
-        if (s < 0 || s >= n) {
-            out[i] = {0.f, 0.f};
-            continue;
-        }
-        const uint8_t* p = data_ + fp.headerBytes + s * bps;
+        const uint8_t* p = src + i * bps;
         float re, im;
         switch (fp.fmt) {
             case SampleFormat::CF32:
@@ -133,6 +127,19 @@ void IqFile::read(const FormatParams& fp, int64_t start, int64_t count, std::com
         }
         out[i] = fp.swapIQ ? std::complex<float>(im, re) : std::complex<float>(re, im);
     }
+}
+
+void IqFile::read(const FormatParams& fp, int64_t start, int64_t count, std::complex<float>* out) const {
+    // Samples outside [0, n) are zero-filled; the rest are decoded in one run.
+    const int64_t n = numSamples(fp);
+    const int64_t lo = std::max<int64_t>(start, 0), hi = std::min<int64_t>(start + count, n);
+    if (hi <= lo) {
+        std::fill(out, out + count, std::complex<float>(0.f, 0.f));
+        return;
+    }
+    std::fill(out, out + (lo - start), std::complex<float>(0.f, 0.f));
+    decodeSamples(fp, data_ + fp.headerBytes + lo * formatBytesPerSample(fp.fmt), hi - lo, out + (lo - start));
+    std::fill(out + (hi - start), out + count, std::complex<float>(0.f, 0.f));
 }
 
 // ---------------------------------------------------------------------------
