@@ -11,7 +11,7 @@
 #include "iq_file.h"
 
 struct StreamConfig {
-    std::string driver = "sim";  // "sim" | "rtlsdr" | "uhd"
+    std::string driver = "sim";  // "sim" | "siggen" | "rtlsdr" | "uhd"
     std::string args;            // rtlsdr: index or serial; uhd: device args ("type=b200,serial=...")
     double fc = 100e6;
     double rate = 2.4e6;
@@ -74,6 +74,7 @@ bool checkSampleRate(const std::string& driver, double rate, std::string& err, s
 
 // Backends (each defined in its own sdr_*.cpp)
 std::unique_ptr<SdrDevice> openSimDevice(const StreamConfig& cfg, std::string& err);
+std::unique_ptr<SdrDevice> openSigGenDevice(const StreamConfig& cfg, std::string& err);
 #ifdef WVT_HAVE_RTLSDR
 std::unique_ptr<SdrDevice> openRtlSdrDevice(const StreamConfig& cfg, std::string& err);
 void enumerateRtlSdr(std::vector<DeviceInfo>& out);

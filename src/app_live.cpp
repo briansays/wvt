@@ -33,6 +33,7 @@ GainRange defaultGain(const std::string& driver) {
 const char* driverName(const std::string& d) {
     if (d == "rtlsdr") return "RTL-SDR";
     if (d == "uhd") return "USRP";
+    if (d == "siggen") return "Signal generator";
     return "Simulator";
 }
 
@@ -301,7 +302,8 @@ void App::drawRecordBar() {
     tooltipAlways("SigMF: .sigmf-data + .sigmf-meta with rate, frequency, retunes and dropped-sample notes.\nRaw: bare samples; rate and frequency are in the file name.");
     label("Samples", fieldW(12));
     std::string native = "native";
-    if (running) native += liveStats_.fmt == SampleFormat::CU8 ? " (cu8)" : " (ci16)";
+    if (running)
+        native += liveStats_.fmt == SampleFormat::CU8 ? " (cu8)" : liveStats_.fmt == SampleFormat::CF32 ? " (cf32)" : " (ci16)";
     int smp = recCfg_.cf32 ? 1 : 0;
     const char* smps[] = {native.c_str(), "cf32"};
     if (ImGui::Combo("##recsmp", &smp, smps, 2)) recCfg_.cf32 = smp == 1;

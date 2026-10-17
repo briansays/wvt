@@ -1,0 +1,248 @@
+#include "siggen_out.h"
+
+#include <algorithm>
+#include <chrono>
+#include <vector>
+
+#include "dsp.h"
+
+// ---------------------------------------------------------------------------
+// File generation
+// ---------------------------------------------------------------------------
+bool FileGenJob::start(const WaveformParams& p, const FileGenConfig& cfg, std::string& err) {
+    cancel();
+    ParamCheck chk = checkParams(p);
+    if (!chk.ok()) {
+        err = chk.errors.front();
+        return false;
+    }
+    if (cfg.pulses > 0 ? p.mode != GenMode::Pulsed : !(cfg.seconds > 0)) {
+        err = cfg.pulses > 0 ? "a pulse count needs pulsed mode" : "length must be positive";
+        return false;
+    }
+    p_ = p;
+    cfg_ = cfg;
+    const int bps = formatBytesPerSample(cfg.fmt);
+    ring_ = std::make_shared<SampleRing>((32 << 20) / bps, bps);
+
+    RecordSource src;
+    src.fmt = cfg.fmt;
+    src.rate = p.rate;
+    src.fc = p.fc;
+    src.hw = "wvt signal generator";
+    RecordConfig rc = cfg.rec;
+    rc.cf32 = false;
+    if (rc.description.empty()) rc.description = "wvt signal generator: " + describeParams(p);
+    rc.extraGlobal = "\"wvt:siggen\": " + paramsJson(p);
+    if (!rec_.start(ring_, src, rc, err)) return false;
+
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        error_.clear();
+    }
+    progress_ = 0;
+    cancel_ = false;
+    active_ = true;
+    th_ = std::thread([this] { run(); });
+    return true;
+}
+
+void FileGenJob::cancel() {
+    cancel_ = true;
+    if (th_.joinable()) th_.join();
+}
+
+FileGenJob::Status FileGenJob::status() const {
+    Status s;
+    s.active = active_;
+    s.progress = progress_;
+    s.rec = rec_.status();
+    std::lock_guard<std::mutex> lk(m_);
+    s.error = error_;
+    return s;
+}
+
+void FileGenJob::run() {
+    SigGen gen(p_);
+    const int64_t chunk = 1 << 16;
+    std::vector<std::complex<float>> buf(chunk);
+    std::vector<uint8_t> raw((size_t)chunk * ring_->bytesPerSample());
+    const int64_t total = cfg_.pulses > 0 ? -1 : std::max<int64_t>(1, std::llround(cfg_.seconds * p_.rate));
+    int64_t done = 0, pulses = 0;
+    bool finished = false;
+
+    while (!finished && !cancel_) {
+        if (!rec_.active()) break;  // the recorder failed (disk full...)
+        if (ring_->gateRoom() < chunk) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            continue;
+        }
+        int64_t n = total > 0 ? std::min(chunk, total - done) : chunk;
+        gen.generate(buf.data(), n);
+        for (const auto& pl : gen.lastPulses()) {
+            if (cfg_.pulses > 0 && pulses == cfg_.pulses) {
+                // The pulse after the last one marks the end of the last PRI.
+                n = pl.start - done;
+                finished = true;
+                break;
+            }
+            ++pulses;
+            if (cfg_.annotatePulses)
+                rec_.annotate(pl.start, pl.len, "pulse " + std::to_string(pulses));
+        }
+        encodeSamples(cfg_.fmt, buf.data(), n, raw.data());
+        ring_->push(raw.data(), n);
+        done += n;
+        if (total > 0) {
+            progress_ = (double)done / (double)total;
+            finished = done >= total;
+        } else {
+            progress_ = (double)pulses / (double)cfg_.pulses;
+        }
+    }
+    rec_.stop();  // writes what was pushed, then the final metadata
+    auto rs = rec_.status();
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        if (rs.failed) error_ = rs.stopReason;
+        else if (cancel_ && !finished) error_ = "cancelled";
+    }
+    active_ = false;
+}
+
+// ---------------------------------------------------------------------------
+// Transmit
+// ---------------------------------------------------------------------------
+bool TxEngine::start(const TxConfig& cfg, std::string& err) {
+    stop();
+    WaveformParams p = sigGenBus().get();
+    p.rate = cfg.rate;
+    ParamCheck chk = checkParams(p);
+    if (!chk.ok()) {
+        err = chk.errors.front();
+        return false;
+    }
+    auto tx = openTx(cfg, err);
+    if (!tx) return false;
+    // The transmitter is tuned to the generator's fc, so the generator needs no extra shift.
+    auto gen = std::make_shared<BusSigGen>(tx->sampleRate(), NAN);
+    if (!tx->start([gen](std::complex<float>* out, int64_t n) { gen->generate(out, n); }, err)) return false;
+    gen_ = gen;
+    tx_ = std::move(tx);
+    return true;
+}
+
+void TxEngine::stop() {
+    if (tx_) tx_->stop();
+    tx_.reset();
+    gen_.reset();
+}
+
+bool TxEngine::setCenterFreq(double hz, std::string& err) { return tx_ && tx_->setCenterFreq(hz, err); }
+bool TxEngine::setGain(double db, std::string& err) { return tx_ && tx_->setGain(db, err); }
+
+TxEngine::Stats TxEngine::stats() const {
+    Stats s;
+    if (!tx_) return s;
+    s.running = true;
+    s.description = tx_->description();
+    s.notes = tx_->notes();
+    s.error = tx_->fatalError();
+    s.fc = tx_->centerFreq();
+    s.rate = tx_->sampleRate();
+    s.gain = tx_->gain();
+    s.range = tx_->gainRange();
+    s.tx = tx_->stats();
+    return s;
+}
+
+// ---------------------------------------------------------------------------
+// Preview
+// ---------------------------------------------------------------------------
+std::shared_ptr<SigPreviewRes> computeSigPreview(const SigPreviewReq& r, const CancelFn& cancelled) {
+    auto res = std::make_shared<SigPreviewRes>();
+    res->req = r;
+    const double rate = r.p.rate;
+    constexpr int64_t kMaxPoints = 2000;
+
+    // --- time domain ---
+    WaveformParams p = r.p;
+    int64_t n;
+    if (p.mode == GenMode::CW) {
+        n = p.offset != 0 ? std::llround(10 * rate / std::fabs(p.offset)) : 1024;  // about 10 cycles
+        n = std::clamp<int64_t>(n, 64, 4096);
+    } else if (!r.train) {
+        p.startDelay = 0.2 * p.pw;  // one pulse with a little silence around it
+        n = std::max<int64_t>(16, std::llround(1.4 * p.pw * rate));
+    } else {
+        p.startDelay = 0;
+        const double span = p.burstPulses > 0 ? 2 * (p.burstPulses * p.meanPri() + p.burstGap) : 8 * p.meanPri();
+        n = std::max<int64_t>(16, std::llround(span * rate));
+    }
+    n = std::min<int64_t>(n, 4 << 20);
+    {
+        SigGen g(p);
+        const int64_t per = std::max<int64_t>(1, (n + kMaxPoints - 1) / kMaxPoints);
+        res->iq = per == 1;
+        std::vector<cf> buf(65536);
+        double peak = 0;
+        int64_t inBucket = 0;
+        for (int64_t done = 0; done < n;) {
+            if (cancelled()) return nullptr;
+            const int64_t m = std::min<int64_t>((int64_t)buf.size(), n - done);
+            g.generate(buf.data(), m);
+            for (int64_t k = 0; k < m; ++k) {
+                const cf x = buf[(size_t)k];
+                if (res->iq) {
+                    res->t.push_back((double)(done + k) / rate);
+                    res->i.push_back(x.real());
+                    res->q.push_back(x.imag());
+                    res->mag.push_back(std::abs(x));
+                    continue;
+                }
+                // Many samples per point: keep the envelope's maximum so short pulses stay visible.
+                peak = std::max(peak, (double)std::abs(x));
+                if (++inBucket == per) {
+                    res->t.push_back((double)(done + k + 1 - per) / rate);
+                    res->mag.push_back(peak);
+                    peak = 0;
+                    inBucket = 0;
+                }
+            }
+            done += m;
+        }
+    }
+
+    // --- spectrum (Welch average) ---
+    p = r.p;
+    p.startDelay = 0;
+    const int nfft = 4096;
+    int64_t total = 32 * nfft;
+    if (p.mode == GenMode::Pulsed) total = std::max<int64_t>(total, std::llround(16 * p.meanPri() * rate));
+    total = std::min<int64_t>(total, 2 << 20);
+    const int segs = (int)std::max<int64_t>(1, total / nfft);
+    auto fft = getFFT(nfft);
+    auto win = makeWindow(WindowType::BlackmanHarris, nfft);
+    double wsum = 0;
+    for (float w : win) wsum += w;
+    std::vector<double> acc(nfft, 0.0);
+    std::vector<cf> seg(nfft);
+    SigGen g(p);
+    for (int s = 0; s < segs; ++s) {
+        if (cancelled()) return nullptr;
+        g.generate(seg.data(), nfft);
+        for (int k = 0; k < nfft; ++k) seg[k] *= win[k];
+        fft->forward(seg.data());
+        for (int k = 0; k < nfft; ++k) acc[k] += std::norm(seg[k]);
+    }
+    res->f.resize(nfft);
+    res->db.resize(nfft);
+    const double norm = 1.0 / (segs * wsum * wsum);  // a full-scale tone reads 0 dBFS
+    for (int j = 0; j < nfft; ++j) {
+        const int k = (j + nfft / 2) % nfft;
+        res->f[j] = p.fc + (j - nfft / 2) * rate / nfft;
+        res->db[j] = 10 * std::log10(acc[k] * norm + 1e-20);
+    }
+    res->rbw = rate / nfft;
+    return res;
+}

@@ -40,9 +40,16 @@ App::App(X11Window& win) : win_(win) {
     demod_.chanBw = 50e3;
     status_ = "No file loaded - type a path in the File box and press Enter (or run: wvt <file>)";
     snprintf(recPrefix_, sizeof recPrefix_, "%s", recCfg_.prefix.c_str());
+    sgPrevWorker_ = std::make_unique<Worker<SigPreviewReq, SigPreviewRes>>(computeSigPreview, wake);
+    sgFile_ = std::make_unique<FileGenJob>();
+    snprintf(sgPrefix_, sizeof sgPrefix_, "~/wvt-recordings/siggen");
+    snprintf(txArgs_, sizeof txArgs_, "%s", txCfg_.args.c_str());
 }
 
 App::~App() {
+    tx_.reset();  // stop transmitting first
+    sgFile_.reset();
+    sgPrevWorker_.reset();
     live_.reset();
     win_.destroyTexture(liveTex_);
     wfWorker_.reset();
@@ -54,7 +61,7 @@ App::~App() {
 bool App::workersBusy() const { return wfWorker_->busy() || dmWorker_->busy() || ovWorker_->busy(); }
 
 // While a device streams, the main loop keeps running at frame rate.
-bool App::busy() const { return workersBusy() || (live_ && live_->running()); }
+bool App::busy() const { return workersBusy() || (live_ && live_->running()) || sigGenBusy(); }
 
 // ---------------------------------------------------------------------------
 // Source / view management
@@ -264,6 +271,7 @@ void App::label(const char* text, float fw) {
 void App::frame() {
     pollResults();
     if (liveMode_) pollLive();
+    pollSigGen();
     fFmt_.offset = relFreq_ ? fc_ : 0.0;
 
     const ImGuiViewport* vp = ImGui::GetMainViewport();
@@ -314,8 +322,10 @@ void App::frame() {
     }
 
     drawStatusBar();
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_G)) sgOpen_ = !sgOpen_;
     handleShortcuts();
     ImGui::End();
+    drawSigGenWindow();
 
     hoverT_ = nextHoverT_;
     hoverF_ = nextHoverF_;
@@ -331,6 +341,7 @@ void App::drawToolbar() {
     // --- Row 1: file & format -------------------------------------------------
     flowBegin();
     drawSourceSelector();
+    drawSigGenButton();
     if (liveMode_) {
         drawDeviceToolbar();
         return;

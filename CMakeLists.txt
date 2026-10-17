@@ -66,10 +66,14 @@ add_executable(wvt
   src/sw_renderer.cpp
   src/ui_util.cpp
   src/app_live.cpp
+  src/app_siggen.cpp
   src/live.cpp
   src/recorder.cpp
   src/sdr_device.cpp
   src/sdr_sim.cpp
+  src/sdr_siggen.cpp
+  src/siggen.cpp
+  src/siggen_out.cpp
   ${FONT_CPP})
 target_include_directories(wvt PRIVATE src ${PLATFORM_INCLUDES})
 target_link_libraries(wvt PRIVATE imgui_implot ${PLATFORM_LIBS} Threads::Threads)
@@ -141,3 +145,9 @@ endif()
 
 # Synthetic test-signal generator
 add_executable(iqgen tools/iqgen.cpp)
+
+# Signal generator self-test (DSP and file output; no device needed)
+add_executable(siggen_check tools/siggen_check.cpp src/siggen.cpp src/siggen_out.cpp src/recorder.cpp
+  src/sdr_device.cpp src/sdr_sim.cpp src/sdr_siggen.cpp src/iq_file.cpp src/dsp.cpp src/ui_util.cpp)
+target_include_directories(siggen_check PRIVATE src)
+target_link_libraries(siggen_check PRIVATE imgui_implot Threads::Threads)

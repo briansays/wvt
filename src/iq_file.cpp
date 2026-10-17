@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cerrno>
 #include <cstring>
 #include <fstream>
@@ -126,6 +127,45 @@ void decodeSamples(const FormatParams& fp, const uint8_t* src, int64_t count, st
             default: re = im = 0; break;
         }
         out[i] = fp.swapIQ ? std::complex<float>(im, re) : std::complex<float>(re, im);
+    }
+}
+
+void encodeSamples(SampleFormat fmt, const std::complex<float>* in, int64_t count, uint8_t* dst) {
+    auto q = [](float v, float scale, float lo, float hi) { return std::clamp(std::nearbyint(v * scale), lo, hi); };
+    for (int64_t i = 0; i < count; ++i) {
+        const float re = in[i].real(), im = in[i].imag();
+        switch (fmt) {
+            case SampleFormat::CF32: {
+                float v[2] = {re, im};
+                memcpy(dst + i * 8, v, 8);
+                break;
+            }
+            case SampleFormat::CF64: {
+                double v[2] = {re, im};
+                memcpy(dst + i * 16, v, 16);
+                break;
+            }
+            case SampleFormat::CI16: {
+                int16_t v[2] = {(int16_t)q(re, 32768.f, -32768.f, 32767.f), (int16_t)q(im, 32768.f, -32768.f, 32767.f)};
+                memcpy(dst + i * 4, v, 4);
+                break;
+            }
+            case SampleFormat::CI32: {
+                int32_t v[2] = {(int32_t)std::clamp(std::nearbyint(re * 2147483648.0), -2147483648.0, 2147483647.0),
+                                (int32_t)std::clamp(std::nearbyint(im * 2147483648.0), -2147483648.0, 2147483647.0)};
+                memcpy(dst + i * 8, v, 8);
+                break;
+            }
+            case SampleFormat::CI8:
+                dst[i * 2] = (uint8_t)(int8_t)q(re, 128.f, -128.f, 127.f);
+                dst[i * 2 + 1] = (uint8_t)(int8_t)q(im, 128.f, -128.f, 127.f);
+                break;
+            case SampleFormat::CU8:
+                dst[i * 2] = (uint8_t)std::clamp(std::nearbyint(re * 127.5f + 127.5f), 0.f, 255.f);
+                dst[i * 2 + 1] = (uint8_t)std::clamp(std::nearbyint(im * 127.5f + 127.5f), 0.f, 255.f);
+                break;
+            default: break;
+        }
     }
 }
 
