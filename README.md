@@ -4,6 +4,8 @@ An X11 desktop tool for looking at raw IQ recordings from software-defined radio
 On the left is a spectrum and waterfall. On the right are I/Q, AM, FM and PM plots,
 all sharing one time axis. Pan or zoom any plot and every other plot follows.
 
+<img width="2125" height="1407" alt="image" src="https://github.com/user-attachments/assets/71d188af-cc07-4a0c-93ef-36d082b5829b" />
+
 It can also stream live from an **RTL-SDR v3** or a **USRP B200 / B205mini**, showing
 the spectrum and a scrolling waterfall in real time, and record the stream to SigMF or
 raw IQ files that open straight back up in wvt. See [Live devices](#live-devices).
