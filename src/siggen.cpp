@@ -3,10 +3,12 @@
 #include <algorithm>
 #include <cstdio>
 
+#include "dsp.h"
 #include "ui_util.h"
 
 namespace {
 constexpr double kTwoPi = 2 * M_PI;
+constexpr double kNever = 4e18;  // a sample position that never comes
 
 const char* barkerCode(int len) {
     switch (len) {
@@ -45,6 +47,25 @@ std::string num(double v) {
     snprintf(b, sizeof b, "%.12g", v);
     return b;
 }
+
+std::string jsonString(const std::string& v) {
+    std::string o = "\"";
+    for (char c : v) {
+        if (c == '"' || c == '\\') o += '\\';
+        if ((unsigned char)c < 0x20) {
+            char b[8];
+            snprintf(b, sizeof b, "\\u%04x", c);
+            o += b;
+        } else {
+            o += c;
+        }
+    }
+    return o + "\"";
+}
+
+std::string baseName(const std::string& path) { return path.substr(path.find_last_of('/') + 1); }
+
+double playFileRate(const WaveformParams& p) { return p.playRate > 0 ? p.playRate : p.rate; }
 }  // namespace
 
 const char* edgeName(EdgeShape e) {
@@ -116,6 +137,17 @@ ParamCheck checkParams(const WaveformParams& p) {
     if (p.mode == GenMode::CW) {
         if (p.driftHzPerSec != 0)
             warn("The tone drifts by " + fmtSI(std::fabs(p.driftHzPerSec), "Hz/s") + " and wraps around at the band edge");
+    } else if (p.mode == GenMode::Playback) {
+        const double fr = playFileRate(p);
+        if (p.playPath.empty()) err("Choose a recording to play");
+        if (p.playRate < 0) err("The recording's sample rate can't be negative");
+        else if (fr / p.rate > 64 || p.rate / fr > 64) err("The recording's rate and the output rate differ by more than 64x");
+        else if (fr > p.rate * (1 + 1e-9))
+            warn("The recording (" + fmtSI(fr, "S/s") + ") is resampled down to " + fmtSI(p.rate, "S/s") +
+                 ": anything outside +-" + fmtSI(nyq, "Hz") + " of its center is filtered out");
+        if (p.playStart < 0 || p.playLen < 0) err("The segment start and length can't be negative");
+        if (p.playGap < 0) err("The repeat gap can't be negative");
+        if (p.startDelay < 0) err("Start delay can't be negative");
     } else {
         const double pwS = p.pw * p.rate;
         if (!(pwS >= 1)) err("Pulse width must be at least one sample (" + fmtSI(1 / p.rate, "s") + ")");
@@ -170,6 +202,16 @@ std::string describeParams(const WaveformParams& p) {
     if (p.mode == GenMode::CW) {
         s = "CW, offset " + fmtSI(p.offset, "Hz");
         if (p.driftHzPerSec != 0) s += ", drift " + fmtSI(p.driftHzPerSec, "Hz/s");
+    } else if (p.mode == GenMode::Playback) {
+        s = "playback of " + baseName(p.playPath);
+        if (p.playStart > 0 || p.playLen > 0)
+            s += " from " + fmtSI(p.playStart, "s") + (p.playLen > 0 ? " for " + fmtSI(p.playLen, "s") : " to the end");
+        const double fr = playFileRate(p);
+        if (std::fabs(fr - p.rate) > 1e-9 * p.rate) s += ", resampled from " + fmtSI(fr, "S/s");
+        if (!p.playLoop) s += ", once";
+        else if (p.playGap > 0) s += ", repeated after " + fmtSI(p.playGap, "s") + " gaps";
+        else s += ", looped";
+        s += ", offset " + fmtSI(p.offset, "Hz");
     } else {
         s = "pulsed, PRI " + fmtSI(p.pri, "s");
         if (p.priPattern == PriPattern::Stagger) {
@@ -198,12 +240,23 @@ std::string paramsJson(const WaveformParams& p) {
     std::string j = "{";
     auto add = [&](const char* k, const std::string& v) { j += std::string(j.size() > 1 ? ", " : "") + "\"" + k + "\": " + v; };
     auto str = [](const char* s) { return std::string("\"") + s + "\""; };
-    add("mode", str(p.mode == GenMode::CW ? "cw" : "pulsed"));
+    add("mode", str(p.mode == GenMode::CW ? "cw" : p.mode == GenMode::Pulsed ? "pulsed" : "playback"));
     add("offset_hz", num(p.offset));
     add("amplitude_dbfs", num(p.ampDb));
     add("phase_deg", num(p.phaseDeg));
     if (p.mode == GenMode::CW) {
         add("drift_hz_per_s", num(p.driftHzPerSec));
+    } else if (p.mode == GenMode::Playback) {
+        add("source_file", jsonString(p.playPath));
+        std::string fmt = formatName(p.playFp.fmt);
+        fmt = fmt.substr(0, fmt.find(' ')) + (p.playFp.bigEndian ? "_be" : "");
+        add("source_datatype", str(fmt.c_str()));
+        add("source_rate_hz", num(playFileRate(p)));
+        add("segment_start_s", num(p.playStart));
+        add("segment_length_s", num(p.playLen));
+        add("loop", p.playLoop ? "true" : "false");
+        add("repeat_gap_s", num(p.playGap));
+        add("start_delay_s", num(p.startDelay));
     } else {
         add("pri_s", num(p.pri));
         add("pulse_width_s", num(p.pw));
@@ -261,12 +314,32 @@ void SigGen::apply(const WaveformParams& p) {
     amp_ = std::pow(10.0, p.ampDb / 20);
     ph_ += (p.phaseDeg - old.phaseDeg) * M_PI / 180;
     if (p.seed != old.seed) jitterRng_ = 0x9e3779b97f4a7c15ull ^ ((uint64_t)p.seed * 0xbf58476d1ce4e5b9ull);
-    if (p.mode != GenMode::Pulsed) {
-        tmpl_.clear();
+    if (p.mode == GenMode::CW) {
+        tmpl_.reset();
+        wave_.reset();
+        err_.clear();
         curStart_ = -1;
         return;
     }
-    buildTemplate();
+    const auto prev = tmpl_;
+    if (p.mode == GenMode::Pulsed) {
+        wave_.reset();
+        err_.clear();
+        buildTemplate();
+    } else {
+        auto w = loadPlayback(p, err_);
+        if (w) err_.clear();
+        if (w != wave_) {
+            wave_ = w;
+            tmpl_ = w ? std::shared_ptr<const std::vector<std::complex<float>>>(w, &w->s) : nullptr;
+        }
+        if (w) amp_ /= w->peak;  // the recording's peak plays at ampDb
+    }
+    if (tmpl_ != prev) {
+        curStart_ = -1;
+        // A new recording starts over (after the start delay, if the stream is that young).
+        if (p.mode == GenMode::Playback) lastStart_ = -1;
+    }
     if (lastStart_ < 0) {
         nextStart_ = std::max((double)n_, p.startDelay * p.rate);
     } else {
@@ -279,7 +352,7 @@ void SigGen::apply(const WaveformParams& p) {
 void SigGen::buildTemplate() {
     const double rate = p_.rate;
     const int64_t L = std::max<int64_t>(1, std::llround(p_.pw * rate));
-    tmpl_.assign((size_t)L, {});
+    auto t = std::make_shared<std::vector<std::complex<float>>>((size_t)L);
     const bool shaped = p_.edge != EdgeShape::Rect;
     const double rN = shaped ? p_.rise * rate : 0, fN = shaped ? p_.fall * rate : 0;
     const double B = p_.chirpBw;
@@ -303,8 +376,9 @@ void SigGen::buildTemplate() {
         }
         ph += kTwoPi * f / rate;
         // (std::polar needs a non-negative magnitude, so the code sign multiplies.)
-        tmpl_[(size_t)k] = (float)(env * sign) * std::polar(1.f, (float)ph);
+        (*t)[(size_t)k] = (float)(env * sign) * std::polar(1.f, (float)ph);
     }
+    tmpl_ = std::move(t);
 }
 
 double SigGen::nextPri() {
@@ -318,11 +392,15 @@ double SigGen::nextPri() {
 }
 
 void SigGen::scheduleAfter(int64_t start) {
+    if (p_.mode == GenMode::Playback) {
+        nextStart_ = p_.playLoop ? (double)(start + tmplLen()) + p_.playGap * p_.rate : kNever;
+        return;
+    }
     // burstCount_ == 0 right after a pulse means that pulse ended a burst.
     const bool burstEnd = p_.burstPulses > 0 && burstCount_ == 0;
     nextStart_ = (double)start + (nextPri() + (burstEnd ? p_.burstGap : 0)) * p_.rate;
     // Never overlap the pulse that is playing (guards rounding at 1-sample gaps).
-    nextStart_ = std::max(nextStart_, (double)(start + (int64_t)tmpl_.size() + 1));
+    nextStart_ = std::max(nextStart_, (double)(start + tmplLen() + 1));
 }
 
 double SigGen::gauss() {
@@ -398,7 +476,9 @@ void SigGen::impair(std::complex<float>* out, int64_t m) {
 
 void SigGen::generate(std::complex<float>* out, int64_t n) {
     pulses_.clear();
-    if (hasPending_ && (p_.mode == GenMode::CW || curStart_ < 0)) {
+    // Pulsed changes wait for the pulse to end; playback changes (a recording can
+    // be long) and CW changes apply now.
+    if (hasPending_ && (p_.mode != GenMode::Pulsed || curStart_ < 0)) {
         hasPending_ = false;
         apply(pending_);
     }
@@ -410,11 +490,17 @@ void SigGen::generate(std::complex<float>* out, int64_t n) {
             i = n;
             break;
         }
-        const int64_t L = (int64_t)tmpl_.size();
+        const int64_t L = tmplLen();
+        if (L == 0) {  // playback without a recording: silence
+            std::fill(out + i, out + n, std::complex<float>(0.f, 0.f));
+            advanceCarrier(n - i);
+            n_ += n - i;
+            break;
+        }
         if (curStart_ >= 0) {
             const int64_t off = n_ - curStart_;
             const int64_t m = std::min(n - i, L - off);
-            carrier(out + i, tmpl_.data() + off, m);
+            carrier(out + i, tmpl_->data() + off, m);
             i += m;
             n_ += m;
             if (off + m >= L) {
@@ -442,6 +528,158 @@ void SigGen::generate(std::complex<float>* out, int64_t n) {
         scheduleAfter(n_);
     }
     impair(out, n);
+}
+
+// ---------------------------------------------------------------------------
+// Playback recordings
+// ---------------------------------------------------------------------------
+namespace {
+struct WaveKey {
+    std::string path;
+    FormatParams fp;
+    double fileRate = 0, rate = 0, start = 0, len = 0;
+    bool operator==(const WaveKey&) const = default;
+};
+WaveKey waveKey(const WaveformParams& p) { return {p.playPath, p.playFp, playFileRate(p), p.rate, p.playStart, p.playLen}; }
+
+std::mutex gWaveM;  // guards the cache
+std::mutex gLoadM;  // one load at a time, so concurrent users wait for it instead of repeating it
+WaveKey gWaveKey;
+std::shared_ptr<const PlaybackWave> gWave;
+
+double besselI0(double x) {
+    double s = 1, t = 1;
+    for (int k = 1; k < 60; ++k) {
+        t *= (x / (2 * k)) * (x / (2 * k));
+        s += t;
+        if (t < 1e-14 * s) break;
+    }
+    return s;
+}
+
+// Arbitrary-ratio resampler: Kaiser-windowed sinc (about 80 dB stopband),
+// with a table of kernel phases interpolated linearly. ratio = in rate / out rate.
+bool resample(const std::vector<cf>& x, double ratio, std::vector<cf>& y, const std::function<bool()>& cancelled) {
+    const int64_t N = (int64_t)x.size();
+    const int64_t M = (int64_t)std::floor((double)N / ratio);
+    const double stretch = std::max(1.0, ratio);  // downsampling widens the kernel
+    const double cutoff = 0.45 / stretch;         // cycles per input sample
+    const int W = (int)std::ceil(32 * stretch);    // taps on each side
+    const int T = 2 * W, P = 256;
+    const double beta = 8, i0b = besselI0(beta);
+    std::vector<float> tab((size_t)(P + 1) * T);
+    for (int ph = 0; ph <= P; ++ph)
+        for (int j = 0; j < T; ++j) {
+            const double u = (double)ph / P + (W - 1) - j;  // distance from the output instant, input samples
+            const double r = u / W;
+            const double w = std::fabs(r) < 1 ? besselI0(beta * std::sqrt(1 - r * r)) / i0b : 0;
+            const double a = 2 * cutoff * u;
+            const double sinc = a == 0 ? 1 : std::sin(M_PI * a) / (M_PI * a);
+            tab[(size_t)ph * T + j] = (float)(2 * cutoff * sinc * w);
+        }
+    y.assign((size_t)M, {});
+    constexpr int64_t kBlock = 4096;
+    std::atomic<bool> stop{false};
+    parallelFor((int)((M + kBlock - 1) / kBlock), [&](int b, int e) {
+        for (int blk = b; blk < e && !stop; ++blk) {
+            if (cancelled && cancelled()) stop = true;
+            const int64_t m1 = std::min(M, (int64_t)(blk + 1) * kBlock);
+            for (int64_t m = (int64_t)blk * kBlock; m < m1; ++m) {
+                const double t = (double)m * ratio;
+                const int64_t i0 = (int64_t)std::floor(t);
+                const double fp = (t - (double)i0) * P;
+                const int ph = std::min(P - 1, (int)fp);
+                const float a = (float)(fp - ph);
+                const float* h0 = &tab[(size_t)ph * T];
+                const float* h1 = h0 + T;
+                const int64_t k0 = i0 - (W - 1);
+                const int j0 = (int)std::max<int64_t>(0, -k0), j1 = (int)std::min<int64_t>(T, N - k0);
+                cf acc = 0;
+                for (int j = j0; j < j1; ++j) acc += x[(size_t)(k0 + j)] * (h0[j] + a * (h1[j] - h0[j]));
+                y[(size_t)m] = acc;
+            }
+        }
+    });
+    return !stop;
+}
+}  // namespace
+
+std::shared_ptr<const PlaybackWave> cachedPlayback(const WaveformParams& p) {
+    const WaveKey k = waveKey(p);
+    std::lock_guard<std::mutex> lk(gWaveM);
+    return gWave && gWaveKey == k ? gWave : nullptr;
+}
+
+void forgetPlayback() {
+    std::lock_guard<std::mutex> lk(gWaveM);
+    gWave.reset();
+}
+
+std::shared_ptr<const PlaybackWave> loadPlayback(const WaveformParams& p, std::string& err,
+                                                 const std::function<bool()>& cancelled) {
+    if (auto w = cachedPlayback(p)) return w;
+    std::lock_guard<std::mutex> load(gLoadM);
+    if (auto w = cachedPlayback(p)) return w;
+    if (p.playPath.empty()) {
+        err = "no recording chosen";
+        return nullptr;
+    }
+    const double fr = playFileRate(p);
+    if (!(fr > 0) || !(p.rate > 0)) {
+        err = "sample rates must be positive";
+        return nullptr;
+    }
+    auto f = IqFile::open(p.playPath, err);
+    if (!f) return nullptr;
+    auto w = std::make_shared<PlaybackWave>();
+    w->fileSamples = f->numSamples(p.playFp);
+    w->fileRate = fr;
+    const int64_t s0 = std::llround(p.playStart * fr);
+    if (s0 >= w->fileSamples) {
+        err = "the segment starts after the end of the recording (" + fmtSI((double)w->fileSamples / fr, "s") + " long)";
+        return nullptr;
+    }
+    const int64_t n = p.playLen > 0 ? std::min<int64_t>(w->fileSamples - s0, std::llround(p.playLen * fr)) : w->fileSamples - s0;
+    const double ratio = fr / p.rate;
+    if (n < 1) {
+        err = "the segment is empty";
+        return nullptr;
+    }
+    if (n > kMaxPlaySamples || (double)n / ratio > (double)kMaxPlaySamples) {
+        err = "the segment is too long to play (" + fmtSI((double)n / fr, "s") + "; up to " +
+              fmtSI((double)kMaxPlaySamples, "S") + " at either rate): choose a shorter segment";
+        return nullptr;
+    }
+    std::vector<cf> x((size_t)n);
+    for (int64_t done = 0; done < n;) {
+        if (cancelled && cancelled()) {
+            err = "cancelled";
+            return nullptr;
+        }
+        const int64_t m = std::min<int64_t>(1 << 20, n - done);
+        f->read(p.playFp, s0 + done, m, x.data() + done);
+        done += m;
+    }
+    // The level reference is the recording itself, so resampling doesn't change the gain.
+    for (auto& v : x) {
+        if (!std::isfinite(v.real()) || !std::isfinite(v.imag())) v = 0;  // garbage in a float file
+        w->peak = std::max(w->peak, (double)std::abs(v));
+    }
+    if (std::fabs(ratio - 1) < 1e-9) {
+        w->s = std::move(x);
+    } else if (!resample(x, ratio, w->s, cancelled)) {
+        err = "cancelled";
+        return nullptr;
+    }
+    for (const auto& v : w->s) w->outPeak = std::max(w->outPeak, (double)std::abs(v));
+    if (w->s.empty() || !(w->peak > 0)) {
+        err = "the segment is silent (all zeros)";
+        return nullptr;
+    }
+    std::lock_guard<std::mutex> lk(gWaveM);
+    gWaveKey = waveKey(p);
+    gWave = w;
+    return w;
 }
 
 // ---------------------------------------------------------------------------

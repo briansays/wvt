@@ -108,6 +108,8 @@ private:
     void drawSigGenFile();
     void drawSigGenLoopback();
     void drawSigGenTx();
+    void drawSigGenPlayback();
+    void setPlaybackFile(const std::string& path, bool fromViewer = false);
     void pollSigGen();
     bool sigGenBusy() const;
     bool sigGenLoopback() const;
@@ -227,6 +229,9 @@ private:
     bool sgOpen_ = false;
     WaveformParams sg_;
     ParamCheck sgCheck_;
+    bool sgReady_ = false;  // valid, and a playback recording is loaded
+    char sgPlayPath_[1024] = {};
+    std::string sgPlayNote_;
     char sgStagger_[256] = {};
     int sgOutput_ = 0;  // 0 file, 1 loopback, 2 transmit
     FileGenConfig sgFileCfg_;

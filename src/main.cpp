@@ -159,7 +159,7 @@ static void usage() {
         "\n"
         "signal generator (-c sets the center frequency, -r the sample rate):\n"
         "      --siggen         open the signal generator window\n"
-        "      --gen cw|pulsed  waveform mode (also opens the window)\n"
+        "      --gen cw|pulsed|playback   waveform mode (also opens the window)\n"
         "      --offset HZ      carrier offset from the center (default 100k)\n"
         "      --amp DBFS       peak amplitude (default -6)\n"
         "      --drift HZ       CW frequency drift per second\n"
@@ -171,11 +171,16 @@ static void usage() {
         "      --delay S        silence before the first pulse\n"
         "      --lfm up|down|tri:BW  chirp each pulse, e.g. --lfm up:2M\n"
         "      --barker N       Barker phase code (2 3 4 5 7 11 13)\n"
+        "      --play FILE      play back a SigMF or raw IQ recording (-f overrides its format;\n"
+        "                       its rate and frequency become -r and -c unless given)\n"
+        "      --play-rate HZ   the recording's sample rate (resampled to -r if different)\n"
+        "      --play-segment START:LEN   play part of it (LEN 0 = to the end)\n"
+        "      --play-gap S     silence between repeats    --play-once  don't repeat\n"
         "      --snr DB  --dc I:Q  --iq GAIN_DB:PHASE_DEG  --linewidth HZ   impairments\n"
         "      --gen-out PREFIX write to a file and exit (format via --record-format)\n"
         "      --gen-sample cf32|ci16|ci8|cu8   file sample format (default cf32)\n"
-        "      --gen-duration T | --gen-pulses N   file length (default 1 s)\n"
-        "      --gen-annotate   SigMF: one annotation per pulse\n"
+        "      --gen-duration T | --gen-pulses N   file length (default 1 s; N pulses or plays)\n"
+        "      --gen-annotate   SigMF: one annotation per pulse or play\n"
         "      --tx             TRANSMIT with a USRP until Ctrl+C (or --gen-duration)\n"
         "      --tx-gain DB     transmit gain (default 0)   --tx-args ARGS  (default type=b200)\n"
         "\n"
@@ -205,7 +210,9 @@ int main(int argc, char** argv) {
     WaveformParams gp;
     FileGenConfig gc;
     TxConfig txc;
-    bool haveGen = false, openGen = false, haveGenOut = false, haveTx = false;
+    bool haveGen = false, openGen = false, haveGenOut = false, haveTx = false, haveOffset = false;
+    std::string playFile;
+    double playRate = 0;
     double genSeconds = 0;
     float scale = 1.f;
     int winW = 1600, winH = 950;
@@ -286,15 +293,17 @@ int main(int argc, char** argv) {
         else if (a == "--siggen") openGen = true;
         else if (a == "--gen") {
             std::string v = next("--gen");
-            if (v != "cw" && v != "pulsed") { fprintf(stderr, "wvt: --gen wants cw or pulsed\n"); return 2; }
-            gp.mode = v == "cw" ? GenMode::CW : GenMode::Pulsed;
+            if (v != "cw" && v != "pulsed" && v != "playback") { fprintf(stderr, "wvt: --gen wants cw, pulsed or playback\n"); return 2; }
+            gp.mode = v == "cw" ? GenMode::CW : v == "pulsed" ? GenMode::Pulsed : GenMode::Playback;
             haveGen = true;
         } else if (a == "--offset" || a == "--amp" || a == "--drift" || a == "--pri" || a == "--prf" || a == "--pw" ||
                    a == "--rise" || a == "--fall" || a == "--jitter" || a == "--delay" || a == "--snr" ||
-                   a == "--linewidth" || a == "--tx-gain" || a == "--gen-duration") {
+                   a == "--linewidth" || a == "--tx-gain" || a == "--gen-duration" || a == "--play-rate" || a == "--play-gap") {
             double v;
             if (!parseSI(next(a.c_str()), v)) { fprintf(stderr, "wvt: bad value for %s\n", a.c_str()); return 2; }
-            if (a == "--offset") gp.offset = v;
+            if (a == "--offset") { gp.offset = v; haveOffset = true; }
+            else if (a == "--play-rate") playRate = v;
+            else if (a == "--play-gap") gp.playGap = v;
             else if (a == "--amp") gp.ampDb = v;
             else if (a == "--drift") gp.driftHzPerSec = v;
             else if (a == "--pri") gp.pri = v;
@@ -362,7 +371,17 @@ int main(int argc, char** argv) {
             if (a == "--dc") { gp.dcI = x; gp.dcQ = y; }
             else { gp.iqGainDb = x; gp.iqPhaseDeg = y; }
             haveGen = true;
-        } else if (a == "--gen-out") {
+        } else if (a == "--play") {
+            playFile = next("--play");
+            gp.mode = GenMode::Playback;
+            haveGen = true;
+        } else if (a == "--play-segment") {
+            if (!parsePair(next("--play-segment"), gp.playStart, gp.playLen)) {
+                fprintf(stderr, "wvt: --play-segment wants START:LEN, e.g. 0.5:0.1\n");
+                return 2;
+            }
+        } else if (a == "--play-once") gp.playLoop = false;
+        else if (a == "--gen-out") {
             gc.rec.prefix = next("--gen-out");
             haveGenOut = true;
         } else if (a == "--gen-sample") {
@@ -383,6 +402,19 @@ int main(int argc, char** argv) {
     scale = std::clamp(scale, 0.5f, 4.f);
     if (ov.haveFc) gp.fc = txc.fc = ov.fc;
     if (ov.haveRate) gp.rate = ov.rate;
+    if (!playFile.empty()) {
+        // Plays as recorded unless -r / -c / --offset say otherwise.
+        const FileMetaGuess g = guessMeta(expandHome(playFile));
+        gp.playPath = g.dataPath;
+        if (g.haveFmt) { gp.playFp.fmt = g.fmt; gp.playFp.bigEndian = g.bigEndian; }
+        if (ov.haveFmt) { gp.playFp.fmt = ov.fmt; gp.playFp.bigEndian = ov.bigEndian; }
+        if (ov.header > 0) gp.playFp.headerBytes = ov.header;
+        gp.playFp.swapIQ = ov.swapIQ;
+        gp.playRate = playRate > 0 ? playRate : g.haveRate ? g.rate : 0;
+        if (!ov.haveRate && gp.playRate > 0) gp.rate = gp.playRate;
+        if (!ov.haveFc && g.haveFc) gp.fc = txc.fc = g.fc;
+        if (!haveOffset) gp.offset = 0;
+    }
     if (haveGenOut || haveTx) {
         if (haveGenOut && haveTx) {
             fprintf(stderr, "wvt: use either --gen-out or --tx\n");
@@ -397,8 +429,8 @@ int main(int argc, char** argv) {
         if (haveGenOut) {
             gc.rec.sigmf = rc.sigmf;
             gc.seconds = genSeconds > 0 ? genSeconds : 1;
-            if (gc.pulses > 0 && gp.mode != GenMode::Pulsed) {
-                fprintf(stderr, "wvt: --gen-pulses needs --gen pulsed\n");
+            if (gc.pulses > 0 && gp.mode == GenMode::CW) {
+                fprintf(stderr, "wvt: --gen-pulses needs --gen pulsed or --play\n");
                 return 2;
             }
             return runGenFile(gp, gc);

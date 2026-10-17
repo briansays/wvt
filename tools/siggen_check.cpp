@@ -1,6 +1,7 @@
 // siggen_check - verifies the signal generator: tone frequency and level,
 // pulse timing (fixed, stagger, jitter, bursts), chirp sweep, Barker chips,
-// edges, noise level, deferred parameter changes and file output.
+// edges, noise level, deferred parameter changes, file output and playback
+// of recordings (looping, gaps, segments, resampling, SigMF round trip).
 //
 //   siggen_check [scratch_dir]     exit status 0 = all checks passed
 #include <cmath>
@@ -72,6 +73,38 @@ std::string readFile(const std::string& path) {
 int64_t fileSize(const std::string& path) {
     struct stat st{};
     return stat(path.c_str(), &st) == 0 ? (int64_t)st.st_size : -1;
+}
+
+void writeCf32(const std::string& path, const std::vector<cf>& v) {
+    std::vector<uint8_t> raw(v.size() * 8);
+    encodeSamples(SampleFormat::CF32, v.data(), (int64_t)v.size(), raw.data());
+    std::ofstream(path, std::ios::binary).write((const char*)raw.data(), (std::streamsize)raw.size());
+}
+
+double maxDiff(const cf* a, const cf* b, int64_t n, float scale = 1) {
+    double d = 0;
+    for (int64_t i = 0; i < n; ++i) d = std::max(d, (double)std::abs(a[i] - b[i] * scale));
+    return d;
+}
+
+// Mean frequency from the phase steps of v[a, b).
+double meanFreq(const std::vector<cf>& v, size_t a, size_t b, double rate) {
+    std::complex<double> acc = 0;
+    for (size_t i = a + 1; i < b; ++i) acc += std::complex<double>(v[i]) * std::conj(std::complex<double>(v[i - 1]));
+    return std::arg(acc) * rate / (2 * M_PI);
+}
+
+// Hann-windowed power of the tone at f in v[a, b), relative to a full-scale tone.
+double toneDb(const std::vector<cf>& v, size_t a, size_t b, double f, double rate) {
+    std::complex<double> acc = 0;
+    double wsum = 0;
+    const double n = (double)(b - a);
+    for (size_t i = a; i < b; ++i) {
+        const double w = 0.5 - 0.5 * std::cos(2 * M_PI * (double)(i - a) / n);
+        acc += w * std::complex<double>(v[i]) * std::polar(1.0, -2 * M_PI * f * (double)i / rate);
+        wsum += w;
+    }
+    return 20 * std::log10(std::abs(acc) / wsum + 1e-30);
 }
 
 int countOf(const std::string& s, const std::string& needle) {
@@ -371,6 +404,204 @@ int main(int argc, char** argv) {
         } else {
             check(false, "raw file starts", err);
         }
+    }
+
+    // --- Playback ---
+    {
+        // A 50 kHz tone whose amplitude ramps 0.2 -> 0.8, so every sample is distinct.
+        const int64_t L = 10000;
+        std::vector<cf> x((size_t)L);
+        for (int64_t k = 0; k < L; ++k)
+            x[(size_t)k] = (float)(0.2 + 0.6 * (double)k / L) * std::polar(1.f, (float)(2 * M_PI * 50e3 * (double)k / 1e6));
+        float peak = 0;
+        for (const cf& v : x) peak = std::max(peak, std::abs(v));
+        const std::string rampPath = dir + "/sgcheck_ramp.cf32";
+        writeCf32(rampPath, x);
+
+        WaveformParams p;
+        p.mode = GenMode::Playback;
+        p.rate = 1e6;
+        p.offset = 0;
+        p.ampDb = 0;
+        p.playPath = rampPath;
+        std::string err;
+        check(checkParams(p).ok(), "playback params valid");
+        check(loadPlayback(p, err) && cachedPlayback(p), "recording loads and is cached", err);
+
+        auto y = gen(p, 2 * L + 100);
+        check(maxDiff(y.data(), x.data(), L, 1 / peak) < 1e-5, "plays the recording sample for sample, peak scaled to amplitude");
+        check(maxDiff(y.data() + L, x.data(), L, 1 / peak) < 1e-5, "loops without a seam");
+
+        p.playGap = 1e-3;
+        {
+            SigGen g(p);
+            std::vector<cf> buf(4096);
+            std::vector<int64_t> starts;
+            double gapMax = 0;
+            for (int64_t done = 0; done < 3 * (L + 1000); done += 4096) {
+                g.generate(buf.data(), 4096);
+                for (const auto& pl : g.lastPulses()) starts.push_back(pl.start);
+                for (int64_t k = 0; k < 4096; ++k)
+                    if ((done + k) % (L + 1000) >= L) gapMax = std::max(gapMax, (double)std::abs(buf[(size_t)k]));
+            }
+            check(starts.size() >= 3 && starts[0] == 0 && starts[1] == L + 1000 && starts[2] == 2 * (L + 1000),
+                  "repeats every recording + 1 ms gap");
+            check(gapMax == 0, "silent in the gaps");
+        }
+
+        p.playGap = 0;
+        p.playLoop = false;
+        p.startDelay = 2e-3;
+        y = gen(p, 3 * L);
+        double around = 0;
+        for (int64_t k = 0; k < 2000; ++k) around = std::max(around, (double)std::abs(y[(size_t)k]));
+        for (int64_t k = 2000 + L; k < 3 * L; ++k) around = std::max(around, (double)std::abs(y[(size_t)k]));
+        check(around == 0 && maxDiff(y.data() + 2000, x.data(), L, 1 / peak) < 1e-5, "plays once after the start delay");
+
+        p.playLoop = true;
+        p.startDelay = 0;
+        p.offset = 100e3;
+        y = gen(p, L);
+        const double f = meanFreq(y, 0, (size_t)L, 1e6);
+        check(std::fabs(f - 150e3) < 1, "offset shifts the recording (50 + 100 = 150 kHz)", fmt("%.2f Hz", f));
+
+        p.offset = 0;
+        p.playStart = 2e-3;
+        p.playLen = 3e-3;
+        {
+            SigGen g(p);
+            y.assign(3000, {});
+            g.generate(y.data(), 3000);
+            const float segPeak = std::abs(x[4999]);
+            check(g.lastPulses().size() == 1 && g.lastPulses()[0].len == 3000 &&
+                      maxDiff(y.data(), x.data() + 2000, 3000, 1 / segPeak) < 1e-5,
+                  "segment plays samples 2000-4999");
+        }
+        p.playStart = 20e-3;
+        {
+            SigGen g(p);
+            y.assign(1000, {});
+            g.generate(y.data(), 1000);
+            double mx = 0;
+            for (const cf& v : y) mx = std::max(mx, (double)std::abs(v));
+            check(!g.error().empty() && mx == 0, "a segment past the end is an error, and silent", g.error());
+        }
+        p.playStart = 0;
+        p.playLen = 0;
+        p.playPath = dir + "/does_not_exist.cf32";
+        check(!loadPlayback(p, err), "a missing file is an error", err);
+        p.playPath.clear();
+        check(!checkParams(p).ok(), "playback without a file is refused");
+
+        // Resampling: 1 MS/s -> 2.5 MS/s keeps a 100 kHz tone clean.
+        std::vector<cf> t(20000);
+        for (size_t k = 0; k < t.size(); ++k) t[k] = 0.5f * std::polar(1.f, (float)(2 * M_PI * 100e3 * (double)k / 1e6));
+        const std::string tonePath = dir + "/sgcheck_tone.cf32";
+        writeCf32(tonePath, t);
+        p.playPath = tonePath;
+        p.playRate = 1e6;
+        p.rate = 2.5e6;
+        p.ampDb = -6;
+        err.clear();
+        auto w = loadPlayback(p, err);
+        check(w && w->s.size() == 50000, "resampled length 20000 x 2.5 = 50000", err);
+        y = gen(p, 50000);
+        {
+            const size_t a = 5000, b = 45000;  // away from the ends
+            const double fu = meanFreq(y, a, b, 2.5e6);
+            // Fit the ideal tone and measure what's left.
+            std::complex<double> c = 0;
+            for (size_t k = a; k < b; ++k) c += std::complex<double>(y[k]) * std::polar(1.0, -2 * M_PI * 100e3 * (double)k / 2.5e6);
+            c /= (double)(b - a);
+            double e = 0, s2 = 0;
+            for (size_t k = a; k < b; ++k) {
+                const auto ref = c * std::polar(1.0, 2 * M_PI * 100e3 * (double)k / 2.5e6);
+                e += std::norm(std::complex<double>(y[k]) - ref);
+                s2 += std::norm(ref);
+            }
+            const double evm = 10 * std::log10(e / s2);
+            check(std::fabs(fu - 100e3) < 1 && evm < -70, "upsampled tone: 100 kHz, error < -70 dB",
+                  fmt("%.2f Hz, %.1f dB", fu, evm));
+            check(std::fabs(20 * std::log10(std::abs(c)) + 6) < 0.1, "upsampled tone level -6 dBFS",
+                  fmt("%.2f dBFS", 20 * std::log10(std::abs(c))));
+        }
+        // 1 MS/s -> 400 kS/s: the 100 kHz tone stays, a 300 kHz tone (outside +-200 kHz) is filtered, not aliased.
+        for (size_t k = 0; k < t.size(); ++k)
+            t[k] = 0.4f * (std::polar(1.f, (float)(2 * M_PI * 100e3 * (double)k / 1e6)) +
+                           std::polar(1.f, (float)(2 * M_PI * 300e3 * (double)k / 1e6)));
+        writeCf32(tonePath, t);
+        forgetPlayback();
+        p.rate = 400e3;
+        p.ampDb = 0;
+        check(!checkParams(p).warnings.empty(), "downsampling warns that out-of-band content is filtered");
+        y = gen(p, 8000);
+        {
+            const double in = toneDb(y, 1000, 7000, 100e3, 400e3), alias = toneDb(y, 1000, 7000, -100e3, 400e3);
+            check(in - alias > 70, "downsampled: 300 kHz tone suppressed > 70 dB (no alias at -100 kHz)",
+                  fmt("tone %.1f dB, alias %.1f dB", in, alias));
+        }
+
+        // Round trip: a generated SigMF file plays back exactly as generated.
+        WaveformParams q;
+        q.mode = GenMode::Pulsed;
+        q.intra = IntraMod::LfmUp;
+        q.fc = 433e6;
+        FileGenConfig c;
+        c.rec.prefix = dir + "/sgcheck_rt";
+        c.pulses = 3;
+        FileGenJob job;
+        if (job.start(q, c, err)) {
+            auto st = waitJob(job);
+            auto g = guessMeta(st.rec.metaPath);
+            WaveformParams r;
+            r.mode = GenMode::Playback;
+            r.playPath = g.dataPath;
+            r.playFp.fmt = g.fmt;
+            r.playRate = g.rate;
+            r.rate = g.rate;
+            r.fc = g.fc;
+            r.offset = 0;
+            r.ampDb = q.ampDb;
+            auto orig = gen(q, 3 * 2000);
+            y = gen(r, 3 * 2000);
+            check(maxDiff(y.data(), orig.data(), 6000) < 1e-5, "a generated SigMF file plays back as generated");
+
+            // File output from playback: whole plays, annotated.
+            r.playGap = 0.5e-3;
+            FileGenConfig c2;
+            c2.rec.prefix = dir + "/sgcheck_pb";
+            c2.pulses = 2;
+            c2.annotatePulses = true;
+            if (job.start(r, c2, err)) {
+                auto st2 = waitJob(job);
+                check(fileSize(st2.rec.dataPath) == 2 * (6000 + 1000) * 8, "2 plays + gaps of cf32 = 112000 bytes",
+                      fmt("%g bytes", (double)fileSize(st2.rec.dataPath)));
+                std::string meta = readFile(st2.rec.metaPath);
+                check(countOf(meta, "\"core:label\": \"playback ") == 2 &&
+                          meta.find("\"mode\": \"playback\", ") != std::string::npos &&
+                          meta.find("\"source_file\": ") != std::string::npos,
+                      "playback file metadata: annotations and source");
+                remove(st2.rec.dataPath.c_str());
+                remove(st2.rec.metaPath.c_str());
+            } else {
+                check(false, "playback file starts", err);
+            }
+            r.playLoop = false;
+            r.startDelay = 1e-3;
+            if (job.start(r, c2, err)) {
+                auto st2 = waitJob(job);
+                check(fileSize(st2.rec.dataPath) == (2000 + 6000) * 8, "play once: delay + recording, whatever the count",
+                      fmt("%g bytes", (double)fileSize(st2.rec.dataPath)));
+                remove(st2.rec.dataPath.c_str());
+                remove(st2.rec.metaPath.c_str());
+            }
+            remove(st.rec.dataPath.c_str());
+            remove(st.rec.metaPath.c_str());
+        } else {
+            check(false, "round-trip file starts", err);
+        }
+        remove(rampPath.c_str());
+        remove(tonePath.c_str());
     }
 
     printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "all checks passed", failures, failures == 1 ? "" : "s");

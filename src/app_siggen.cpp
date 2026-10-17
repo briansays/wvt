@@ -1,6 +1,7 @@
-// Signal generator window: CW / pulsed waveform parameters, a preview, and
-// the three outputs (file, live loopback, USRP transmit).
+// Signal generator window: CW / pulsed / playback waveform parameters, a
+// preview, and the three outputs (file, live loopback, USRP transmit).
 #include <algorithm>
+#include <cctype>
 #include <cfloat>
 #include <cmath>
 #include <cstring>
@@ -91,6 +92,7 @@ bool haveTx() {
 // ---------------------------------------------------------------------------
 void App::openSigGen(const WaveformParams* p) {
     if (p) sg_ = *p;
+    snprintf(sgPlayPath_, sizeof sgPlayPath_, "%s", sg_.playPath.c_str());
     sgOpen_ = true;
     if (checkParams(sg_).ok()) sigGenBus().publish(sg_);
 }
@@ -127,7 +129,7 @@ bool App::startLoopback() {
     c.rate = sg_.rate;
     c.agc = false;
     c.gain = 30;  // unity
-    if (checkParams(sg_).ok()) sigGenBus().publish(sg_);
+    if (checkParams(sg_).ok()) sigGenBus().publish(sg_);  // a recording not loaded yet loads in the stream's thread
     return startDevice(c);
 }
 
@@ -220,17 +222,23 @@ void App::drawSigGenWindow() {
         drawSigGenWaveform();
 
         sgCheck_ = checkParams(sg_);
+        // A recording is published only once it's loaded (the preview worker loads it), so the
+        // streaming outputs pick it up from the cache instead of stalling on the disk.
+        sgReady_ = sgCheck_.ok() && (sg_.mode != GenMode::Playback || cachedPlayback(sg_));
+        const bool playErr = sgCheck_.ok() && !sgReady_ && sgPrev_ && sgPrev_->req.p == sg_ && !sgPrev_->error.empty();
+        ImGui::PushTextWrapPos(0);
         for (const auto& e : sgCheck_.errors) ImGui::TextColored(kColErr, "%s", e.c_str());
+        if (playErr) ImGui::TextColored(kColErr, "Recording: %s", sgPrev_->error.c_str());
         for (const auto& w : sgCheck_.warnings) ImGui::TextColored(kColWarn, "%s", w.c_str());
-        if (!sgCheck_.ok() && (txOn || sigGenLoopback()))
+        if (!sgReady_ && (txOn || sigGenLoopback()) && (!sgCheck_.ok() || playErr))
             ImGui::TextColored(kColErr, "Not applied: the output keeps the last valid settings.");
         if (sgCheck_.ok()) {
-            ImGui::PushTextWrapPos(0);
             ImGui::TextDisabled("%s", describeParams(sg_).c_str());
-            ImGui::PopTextWrapPos();
-            sigGenBus().publish(sg_);
+            if (!sgReady_ && !playErr) ImGui::TextDisabled("Loading the recording...");
+            if (sgReady_) sigGenBus().publish(sg_);
             sgPrevWorker_->submit({sg_, sgPrevTrain_ && sg_.mode == GenMode::Pulsed});
         }
+        ImGui::PopTextWrapPos();
 
         if (ImGui::CollapsingHeader("Preview", ImGuiTreeNodeFlags_DefaultOpen)) drawSigGenPreview();
         const char* outHdr[] = {"File output", "Loopback", "USRP transmit"};
@@ -292,6 +300,9 @@ void App::drawSigGenWaveform() {
         ImGui::RadioButton("CW", &mode, (int)GenMode::CW);
         ImGui::SameLine();
         ImGui::RadioButton("Pulsed", &mode, (int)GenMode::Pulsed);
+        ImGui::SameLine();
+        ImGui::RadioButton("Playback", &mode, (int)GenMode::Playback);
+        tooltipAlways("Playback: a canned waveform from a SigMF or raw IQ recording, e.g. one this generator wrote");
         p.mode = (GenMode)mode;
         ImGui::EndTable();
     }
@@ -303,6 +314,8 @@ void App::drawSigGenWaveform() {
             tooltipAlways("Linear frequency drift, e.g. to test a tracking loop. 0 = steady tone.");
             ImGui::EndTable();
         }
+    } else if (p.mode == GenMode::Playback) {
+        drawSigGenPlayback();
     } else {
         if (ImGui::CollapsingHeader("Pulse", ImGuiTreeNodeFlags_DefaultOpen) && beginForm("##sgpulse")) {
             row("PRI / PRF", "Pulse repetition interval, or its inverse, the repetition frequency");
@@ -434,6 +447,140 @@ void App::drawSigGenWaveform() {
 }
 
 // ---------------------------------------------------------------------------
+// Playback
+// ---------------------------------------------------------------------------
+void App::setPlaybackFile(const std::string& path, bool fromViewer) {
+    std::string pth = path;
+    while (!pth.empty() && std::isspace((unsigned char)pth.back())) pth.pop_back();
+    while (!pth.empty() && std::isspace((unsigned char)pth.front())) pth.erase(0, 1);
+    if (pth.empty()) return;
+    FileMetaGuess g = guessMeta(expandHome(pth));
+    WaveformParams& p = sg_;
+    p.playPath = g.dataPath;
+    snprintf(sgPlayPath_, sizeof sgPlayPath_, "%s", p.playPath.c_str());
+    p.playFp = {};
+    if (g.haveFmt) {
+        p.playFp.fmt = g.fmt;
+        p.playFp.bigEndian = g.bigEndian;
+    }
+    if (fromViewer) {  // read it the way the viewer does, overrides included
+        p.playFp = fp_;
+        g.haveRate = g.haveFc = true;
+        g.rate = fs_;
+        g.fc = fc_;
+        g.source = "the viewer";
+    }
+    p.playRate = g.haveRate ? g.rate : p.rate;
+    p.playStart = p.playLen = 0;
+    // Play it back as recorded: same rate, and at its own frequency. A running
+    // output keeps its rate and tuning (the recording is resampled instead).
+    const bool txOn = tx_ && tx_->running();
+    const bool lockRate = txOn || sgFileSt_.active || (sigGenLoopback() && liveRecording());
+    if (g.haveRate && !lockRate && p.rate != g.rate) {
+        p.rate = g.rate;
+        if (sigGenLoopback()) startLoopback();
+    }
+    if (g.haveFc && !txOn) {
+        p.fc = g.fc;
+        p.offset = 0;
+    }
+    forgetPlayback();  // Load always rereads the file
+    sgPlayNote_ = g.source.empty() ? "no metadata found: set the format and rate below" : "settings from " + g.source;
+}
+
+void App::drawSigGenPlayback() {
+    WaveformParams& p = sg_;
+    if (!ImGui::CollapsingHeader("Playback", ImGuiTreeNodeFlags_DefaultOpen) || !beginForm("##sgplay")) return;
+    const ImGuiStyle& st = ImGui::GetStyle();
+    const float half = (ImGui::GetContentRegionAvail().x - st.ItemInnerSpacing.x) / 2;
+
+    row("Recording", "A SigMF (.sigmf-meta / .sigmf-data) or raw IQ file. Enter or Load reads it and its metadata.");
+    const float loadW = ImGui::CalcTextSize("Load").x + st.FramePadding.x * 2;
+    ImGui::SetNextItemWidth(-(loadW + st.ItemInnerSpacing.x));
+    bool load = ImGui::InputText("##sgplaypath", sgPlayPath_, sizeof sgPlayPath_, ImGuiInputTextFlags_EnterReturnsTrue);
+    ImGui::SameLine(0, st.ItemInnerSpacing.x);
+    load |= ImGui::Button("Load##sgplay");
+    if (load) setPlaybackFile(sgPlayPath_);
+
+    // Shortcuts: the generator's last file, and the viewer's file and time markers.
+    const bool viewerFile = file_ && !liveMode_;
+    if (!sgLastFile_.empty() || viewerFile) {
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(1);
+        if (!sgLastFile_.empty()) {
+            if (ImGui::SmallButton("Last generated")) setPlaybackFile(sgLastFile_);
+            tooltipAlways(sgLastFile_.c_str());
+            ImGui::SameLine();
+        }
+        if (viewerFile) {
+            if (ImGui::SmallButton("Viewer's file")) setPlaybackFile(file_->path(), true);
+            tooltipAlways("Play the file open in the main window, read with the viewer's format and rate");
+            if (p.playPath == file_->path()) {
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Viewer's markers")) {
+                    p.playStart = std::max(0.0, std::min(tm1_, tm2_));
+                    p.playLen = std::fabs(tm2_ - tm1_);
+                }
+                tooltipAlways("Play only the part between the viewer's time markers (T)");
+            }
+        }
+    }
+    if (!sgPlayNote_.empty()) {
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(1);
+        ImGui::TextDisabled("%s", sgPlayNote_.c_str());
+    }
+
+    row("Format", "Sample format of the recording");
+    if (ImGui::BeginCombo("##sgplayfmt", (std::string(formatName(p.playFp.fmt)) + (p.playFp.bigEndian ? " BE" : "")).c_str())) {
+        for (int i = 0; i < (int)SampleFormat::Count; ++i)
+            if (ImGui::Selectable(formatName((SampleFormat)i), (int)p.playFp.fmt == i)) p.playFp.fmt = (SampleFormat)i;
+        ImGui::Separator();
+        ImGui::Checkbox("Big-endian", &p.playFp.bigEndian);
+        ImGui::Checkbox("Swap I/Q", &p.playFp.swapIQ);
+        ImGui::EndCombo();
+    }
+
+    row("File rate", "The recording's sample rate. If it differs from the output rate, the recording is resampled.");
+    double fr = p.playRate > 0 ? p.playRate : p.rate;
+    if (InputSI("##sgplayrate", &fr, "Sps", -FLT_MIN) && fr > 0) p.playRate = fr;
+
+    row("Segment", "Start and length of the part to play, in the recording's time. Length 0 = to the end.");
+    InputSI("##sgplay0", &p.playStart, "s", half);
+    ImGui::SameLine(0, st.ItemInnerSpacing.x);
+    InputSI("##sgplaylen", &p.playLen, "s", -FLT_MIN);
+
+    row("Repeat", "Loop the recording, with this much silence between plays. Unticked: play it once.");
+    ImGui::Checkbox("Loop##sgplayloop", &p.playLoop);
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!p.playLoop);
+    InputSI("##sgplaygap", &p.playGap, "s", -FLT_MIN);
+    ImGui::EndDisabled();
+
+    row("Start delay", "Silence before the first play");
+    InputSI("##sgplaydelay", &p.startDelay, "s", -FLT_MIN);
+
+    // What was loaded, from the preview worker.
+    const auto r = sgPrev_;
+    if (r && r->req.p == p && r->error.empty()) {
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(1);
+        ImGui::TextDisabled("%s of %s, peak %.1f dBFS", fmtSI(r->playSeconds, "s", 4).c_str(),
+                            fmtSI(r->fileSeconds, "s", 4).c_str(), r->playPeakDb);
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Keep its level")) p.ampDb = std::min(0.0, std::round(r->playPeakDb * 10) / 10);
+        tooltipAlways("Amplitude scales the recording's peak. This sets it to the recorded peak, so it plays at its own level.");
+        if (r->playOutPeakDb > 0) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextColored(kColWarn, "Resampling overshoot peaks at %+.1f dBFS: lower the amplitude to avoid clipping",
+                               r->playOutPeakDb);
+        }
+    }
+    ImGui::EndTable();
+}
+
+// ---------------------------------------------------------------------------
 // Preview
 // ---------------------------------------------------------------------------
 void App::drawSigGenPreview() {
@@ -451,6 +598,10 @@ void App::drawSigGenPreview() {
         return;
     }
     const bool stale = !(r->req.p == sg_);
+    if (!r->error.empty()) {
+        ImGui::TextDisabled(stale ? "loading..." : "no preview: the recording could not be loaded");
+        return;
+    }
     static const char* kUnitS = "s";
     static const char* kUnitHz = "Hz";
 
@@ -513,15 +664,22 @@ void App::drawSigGenFile() {
                       "Raw is bare samples; rate and frequency go in the file name.");
 
         row("Length");
-        if (sg_.mode == GenMode::Pulsed) {
+        const bool playOnce = sg_.mode == GenMode::Playback && !sg_.playLoop;
+        if (sg_.mode != GenMode::CW) {
             int by = sgByPulses_ ? 1 : 0;
             ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6);
-            const char* bys[] = {"Duration", "Pulses"};
+            const char* bys[] = {"Duration", sg_.mode == GenMode::Pulsed ? "Pulses" : playOnce ? "One play" : "Repeats"};
             if (ImGui::Combo("##sgby", &by, bys, 2)) sgByPulses_ = by == 1;
+            if (sg_.mode == GenMode::Playback)
+                tooltipAlways("Repeats / One play: the file holds whole plays of the recording, gaps included");
             ImGui::SameLine();
         }
-        const bool byPulses = sgByPulses_ && sg_.mode == GenMode::Pulsed;
-        if (byPulses) {
+        const bool byPulses = sgByPulses_ && sg_.mode != GenMode::CW;
+        if (byPulses && playOnce) {
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextDisabled("start delay + the recording");
+            if (c.pulses < 1) c.pulses = 1;
+        } else if (byPulses) {
             long long n = std::max<long long>(1, c.pulses);
             ImGui::SetNextItemWidth(-FLT_MIN);
             if (ImGui::InputScalar("##sgnp", ImGuiDataType_S64, &n)) c.pulses = std::max<long long>(1, n);
@@ -529,22 +687,28 @@ void App::drawSigGenFile() {
         } else {
             InputSI("##sglen", &c.seconds, "s", -FLT_MIN);
         }
-        if (sg_.mode == GenMode::Pulsed && c.rec.sigmf) {
+        if (sg_.mode != GenMode::CW && c.rec.sigmf) {
             row("Annotations");
-            ImGui::Checkbox("Mark each pulse##sgann", &c.annotatePulses);
-            tooltipAlways("Adds a SigMF annotation (start and length) for every pulse, up to 10000.");
+            ImGui::Checkbox(sg_.mode == GenMode::Pulsed ? "Mark each pulse##sgann" : "Mark each play##sgann", &c.annotatePulses);
+            tooltipAlways("Adds a SigMF annotation (start and length) for every pulse or play of the recording, up to 10000.");
         }
         ImGui::EndTable();
     }
     ImGui::EndDisabled();
 
-    const bool byPulses = sgByPulses_ && sg_.mode == GenMode::Pulsed;
-    const double secs = byPulses ? (double)std::max<int64_t>(1, c.pulses) * sg_.meanPri() + sg_.startDelay : c.seconds;
+    const bool byPulses = sgByPulses_ && sg_.mode != GenMode::CW;
+    double secs = c.seconds;
+    if (byPulses && sg_.mode == GenMode::Pulsed) {
+        secs = (double)std::max<int64_t>(1, c.pulses) * sg_.meanPri() + sg_.startDelay;
+    } else if (byPulses) {
+        const double play = sgPrev_ && sgPrev_->req.p == sg_ ? sgPrev_->playSeconds : 0;
+        secs = sg_.startDelay + (sg_.playLoop ? (double)std::max<int64_t>(1, c.pulses) * (play + sg_.playGap) : play);
+    }
     const double bytes = secs * sg_.rate * formatBytesPerSample(c.fmt);
     ImGui::TextDisabled("about %s, %s", fmtSI(secs, "s", 4).c_str(), fmtSI(bytes, "B", 3).c_str());
 
     if (!active) {
-        ImGui::BeginDisabled(!sgCheck_.ok());
+        ImGui::BeginDisabled(!sgReady_);
         if (ImGui::Button("Generate file")) {
             FileGenConfig run = c;
             run.rec.prefix = sgPrefix_;
@@ -594,7 +758,7 @@ void App::drawSigGenLoopback() {
         ImGui::EndDisabled();
         tooltipAlways(liveRecording() ? "Stop the recording first" : "Stop streaming into the live view");
     } else {
-        ImGui::BeginDisabled(!sgCheck_.ok() || liveRecording());
+        ImGui::BeginDisabled(!sgReady_ || liveRecording());
         if (ImGui::Button("Start loopback")) startLoopback();
         ImGui::EndDisabled();
         tooltipAlways(liveRecording() ? "A recording is running from another device" : "Switch the main window to the live view of the generator");
@@ -651,7 +815,7 @@ void App::drawSigGenTx() {
         if (ImGui::Checkbox("Arm transmitter", &txArmed_) && txArmed_) txErr_.clear();
         tooltipAlways("Safety catch: the transmit button works only while armed. Disarms after every transmission.");
         ImGui::SameLine();
-        ImGui::BeginDisabled(!txArmed_ || !sgCheck_.ok());
+        ImGui::BeginDisabled(!txArmed_ || !sgReady_);
         if (redButton("Transmit...")) ImGui::OpenPopup("Start transmitting?");
         ImGui::EndDisabled();
         if (!txErr_.empty()) {
@@ -668,7 +832,7 @@ void App::drawSigGenTx() {
         ImGui::Text("sent %s   underflows %lld   lost packets %lld", fmtSI((double)s.tx.sent, "S", 4).c_str(),
                     (long long)s.tx.underflows, (long long)s.tx.seqErrors);
         if (!s.notes.empty()) ImGui::TextColored(kColWarn, "%s", s.notes.c_str());
-        if (!sgCheck_.ok()) ImGui::TextColored(kColWarn, "Still transmitting the last valid settings.");
+        if (!sgReady_) ImGui::TextColored(kColWarn, "Still transmitting the last valid settings.");
     }
 
     if (ImGui::BeginPopupModal("Start transmitting?", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {

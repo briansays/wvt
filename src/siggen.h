@@ -1,20 +1,25 @@
 #pragma once
-// Signal generator: CW and pulsed waveforms, generated as a phase-continuous
-// stream of complex float samples (full scale = 1.0).
+// Signal generator: CW, pulsed and played-back waveforms, generated as a
+// phase-continuous stream of complex float samples (full scale = 1.0).
 //
 // The carrier is a continuously running oscillator, so pulses are coherent
 // (they are gated slices of one carrier). A pulsed waveform is a pulse
 // template (edge shaping x intrapulse modulation) built once per parameter
-// change and replayed on the PRI schedule.
+// change and replayed on the PRI schedule. Playback works the same way with
+// a recording (SigMF or raw IQ) as the template, shifted by the offset.
 #include <atomic>
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
 
-enum class GenMode : int { CW = 0, Pulsed };
+#include "iq_file.h"
+
+enum class GenMode : int { CW = 0, Pulsed, Playback };
 enum class EdgeShape : int { Rect = 0, Linear, RaisedCos, Gaussian, Count };
 enum class PriPattern : int { Fixed = 0, Stagger, Jitter, Count };
 enum class IntraMod : int { None = 0, LfmUp, LfmDown, LfmTriangle, Barker, Count };
@@ -50,6 +55,16 @@ struct WaveformParams {
     double chirpBw = 1e6;  // LFM sweep, Hz
     int barkerLen = 13;
 
+    // Playback of a recording. Its baseband (0 Hz) lands at fc + offset, and
+    // its peak is scaled to ampDb.
+    std::string playPath;      // data file (a .sigmf-data, or raw samples)
+    FormatParams playFp;       // how to read it
+    double playRate = 0;       // the file's sample rate; resampled to `rate` if different (0 = same)
+    double playStart = 0;      // segment of the file to play, s
+    double playLen = 0;        // 0 = to the end
+    bool playLoop = true;      // repeat; otherwise play once (after startDelay)
+    double playGap = 0;        // silence between repeats, s
+
     // Impairments
     bool noise = false;
     double snrDb = 30;  // peak signal power / total noise power over the full band
@@ -69,6 +84,25 @@ struct ParamCheck {
 };
 ParamCheck checkParams(const WaveformParams& p);
 
+// A recording segment loaded for playback, resampled to the output rate.
+struct PlaybackWave {
+    std::vector<std::complex<float>> s;
+    double peak = 0;          // largest |sample| in the segment as recorded: it plays at ampDb
+    double outPeak = 0;       // largest |sample| after resampling (filter ringing can add a little)
+    int64_t fileSamples = 0;  // whole file, at its own rate
+    double fileRate = 0;
+};
+// Loads the segment `p` selects. The last waveform loaded stays cached, so
+// the preview, loopback, transmitter and file output share one copy. `cancelled`
+// (optional) aborts a long load.
+std::shared_ptr<const PlaybackWave> loadPlayback(const WaveformParams& p, std::string& err,
+                                                 const std::function<bool()>& cancelled = {});
+// The cached waveform for `p` if it's already loaded, else null. Never blocks on a load.
+std::shared_ptr<const PlaybackWave> cachedPlayback(const WaveformParams& p);
+// Drops the cache, so the next load rereads the file.
+void forgetPlayback();
+constexpr int64_t kMaxPlaySamples = int64_t(1) << 25;  // 32 Mi samples (256 MB as floats)
+
 // One line summary, e.g. "pulsed, PRI 1 ms, PW 10 us, LFM up 1 MHz, -6 dBFS".
 std::string describeParams(const WaveformParams& p);
 // The parameters as a JSON object (for SigMF metadata).
@@ -86,6 +120,8 @@ public:
     void setParams(const WaveformParams& p);
     void setTuning(double fc);
     const WaveformParams& params() const { return p_; }
+    // Playback: why the recording could not be loaded (the output is silent).
+    const std::string& error() const { return err_; }
 
     void generate(std::complex<float>* out, int64_t n);
     int64_t position() const { return n_; }
@@ -93,12 +129,13 @@ public:
     struct Pulse {
         int64_t start, len;
     };
-    // Pulses that started during the last generate() call.
+    // Pulses (or playback repeats) that started during the last generate() call.
     const std::vector<Pulse>& lastPulses() const { return pulses_; }
 
 private:
     void apply(const WaveformParams& p);
     void buildTemplate();
+    int64_t tmplLen() const { return tmpl_ ? (int64_t)tmpl_->size() : 0; }
     double nextPri();
     void scheduleAfter(int64_t start);
     void carrier(std::complex<float>* out, const std::complex<float>* mod, int64_t m);
@@ -112,7 +149,9 @@ private:
     int64_t n_ = 0;
     double ph_ = 0;  // carrier phase, radians
     double amp_ = 1;
-    std::vector<std::complex<float>> tmpl_;
+    std::shared_ptr<const std::vector<std::complex<float>>> tmpl_;  // pulse, or the playback recording
+    std::shared_ptr<const PlaybackWave> wave_;
+    std::string err_;
 
     // pulse schedule
     double nextStart_ = 0;     // fractional sample position of the next pulse

@@ -16,12 +16,20 @@ bool FileGenJob::start(const WaveformParams& p, const FileGenConfig& cfg, std::s
         err = chk.errors.front();
         return false;
     }
-    if (cfg.pulses > 0 ? p.mode != GenMode::Pulsed : !(cfg.seconds > 0)) {
-        err = cfg.pulses > 0 ? "a pulse count needs pulsed mode" : "length must be positive";
+    if (cfg.pulses > 0 ? p.mode == GenMode::CW : !(cfg.seconds > 0)) {
+        err = cfg.pulses > 0 ? "a pulse count needs pulsed mode or playback" : "length must be positive";
         return false;
     }
     p_ = p;
     cfg_ = cfg;
+    if (p.mode == GenMode::Playback) {
+        auto w = loadPlayback(p, err);
+        if (!w) return false;
+        if (cfg.pulses > 0 && !p.playLoop) {  // played once: the file ends with the recording
+            cfg_.pulses = 0;
+            cfg_.seconds = ((double)std::llround(p.startDelay * p.rate) + (double)w->s.size()) / p.rate;
+        }
+    }
     const int bps = formatBytesPerSample(cfg.fmt);
     ring_ = std::make_shared<SampleRing>((32 << 20) / bps, bps);
 
@@ -88,7 +96,7 @@ void FileGenJob::run() {
             }
             ++pulses;
             if (cfg_.annotatePulses)
-                rec_.annotate(pl.start, pl.len, "pulse " + std::to_string(pulses));
+                rec_.annotate(pl.start, pl.len, (p_.mode == GenMode::Playback ? "playback " : "pulse ") + std::to_string(pulses));
         }
         encodeSamples(cfg_.fmt, buf.data(), n, raw.data());
         ring_->push(raw.data(), n);
@@ -122,6 +130,8 @@ bool TxEngine::start(const TxConfig& cfg, std::string& err) {
         err = chk.errors.front();
         return false;
     }
+    // Load the recording now, not in the transmit thread where it would underflow.
+    if (p.mode == GenMode::Playback && !loadPlayback(p, err)) return false;
     auto tx = openTx(cfg, err);
     if (!tx) return false;
     // The transmitter is tuned to the generator's fc, so the generator needs no extra shift.
@@ -165,12 +175,27 @@ std::shared_ptr<SigPreviewRes> computeSigPreview(const SigPreviewReq& r, const C
     const double rate = r.p.rate;
     constexpr int64_t kMaxPoints = 2000;
 
-    // --- time domain ---
     WaveformParams p = r.p;
+    int64_t playLen = 0;
+    if (p.mode == GenMode::Playback) {
+        auto w = loadPlayback(p, res->error, cancelled);
+        if (!w) return cancelled() ? nullptr : res;
+        playLen = (int64_t)w->s.size();
+        res->playSeconds = (double)playLen / rate;
+        res->fileSeconds = (double)w->fileSamples / w->fileRate;
+        res->playPeakDb = 20 * std::log10(w->peak);
+        res->playOutPeakDb = p.ampDb + 20 * std::log10(w->outPeak / w->peak);
+    }
+
+    // --- time domain ---
     int64_t n;
     if (p.mode == GenMode::CW) {
         n = p.offset != 0 ? std::llround(10 * rate / std::fabs(p.offset)) : 1024;  // about 10 cycles
         n = std::clamp<int64_t>(n, 64, 4096);
+    } else if (p.mode == GenMode::Playback) {
+        // The whole recording, and the gap before it repeats.
+        p.startDelay = 0;
+        n = playLen + (p.playLoop ? std::llround(p.playGap * rate) : playLen / 20);
     } else if (!r.train) {
         p.startDelay = 0.2 * p.pw;  // one pulse with a little silence around it
         n = std::max<int64_t>(16, std::llround(1.4 * p.pw * rate));
@@ -179,7 +204,7 @@ std::shared_ptr<SigPreviewRes> computeSigPreview(const SigPreviewReq& r, const C
         const double span = p.burstPulses > 0 ? 2 * (p.burstPulses * p.meanPri() + p.burstGap) : 8 * p.meanPri();
         n = std::max<int64_t>(16, std::llround(span * rate));
     }
-    n = std::min<int64_t>(n, 4 << 20);
+    n = std::min<int64_t>(n, p.mode == GenMode::Playback ? kMaxPlaySamples + (8 << 20) : 4 << 20);
     {
         SigGen g(p);
         const int64_t per = std::max<int64_t>(1, (n + kMaxPoints - 1) / kMaxPoints);
@@ -219,6 +244,7 @@ std::shared_ptr<SigPreviewRes> computeSigPreview(const SigPreviewReq& r, const C
     const int nfft = 4096;
     int64_t total = 32 * nfft;
     if (p.mode == GenMode::Pulsed) total = std::max<int64_t>(total, std::llround(16 * p.meanPri() * rate));
+    if (p.mode == GenMode::Playback) total = std::max(total, playLen);
     total = std::min<int64_t>(total, 2 << 20);
     const int segs = (int)std::max<int64_t>(1, total / nfft);
     auto fft = getFFT(nfft);

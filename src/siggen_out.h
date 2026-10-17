@@ -19,7 +19,7 @@ struct FileGenConfig {
     RecordConfig rec;  // prefix, SigMF or raw (cf32 is ignored: `fmt` is the output format)
     SampleFormat fmt = SampleFormat::CF32;
     double seconds = 1;   // length, unless pulses > 0
-    int64_t pulses = 0;   // pulsed mode: write exactly this many PRIs
+    int64_t pulses = 0;   // pulsed: write exactly this many PRIs; playback: this many repeats
     bool annotatePulses = false;
 };
 
@@ -89,5 +89,9 @@ struct SigPreviewRes {
     bool iq = false;
     std::vector<double> f, db;  // absolute frequency, power per bin in dBFS
     double rbw = 0;             // spectrum bin width, Hz
+    // playback
+    std::string error;  // the recording could not be loaded (nothing else is set)
+    double playSeconds = 0, fileSeconds = 0, playPeakDb = 0;
+    double playOutPeakDb = 0;  // the output's peak, dBFS (above ampDb only through resampling overshoot)
 };
 std::shared_ptr<SigPreviewRes> computeSigPreview(const SigPreviewReq& r, const CancelFn& cancelled);

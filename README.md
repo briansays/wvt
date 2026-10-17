@@ -11,8 +11,8 @@ the spectrum and a scrolling waterfall in real time, and record the stream to Si
 raw IQ files that open straight back up in wvt. See [Live devices](#live-devices).
 
 A **signal generator** window makes CW and pulsed waveforms (chirps, Barker codes, staggered or
-jittered PRIs, bursts, impairments) and writes them to files, loops them into the live view, or
-transmits them with a USRP B200 / B205mini. See [Signal generator](#signal-generator).
+jittered PRIs, bursts, impairments) or plays back recordings as canned waveforms, and writes them
+to files, loops them into the live view, or transmits them with a USRP B200 / B205mini. See [Signal generator](#signal-generator).
 
 ## Roadmap 
 
@@ -110,11 +110,12 @@ recording (needs --device):
 
 signal generator (-c sets the center frequency, -r the sample rate):
       --siggen         open the signal generator window
-      --gen cw|pulsed  waveform mode (also opens the window)
+      --gen cw|pulsed|playback   waveform mode (also opens the window)
       --offset HZ  --amp DBFS  --drift HZ_PER_S
       --pri S | --prf HZ   --pw S   --edge rect|linear|cos|gauss  --rise S  --fall S
       --stagger S,S,..  --jitter PCT  --seed N  --burst N[:GAP]  --delay S
       --lfm up|down|tri:BW  --barker N
+      --play FILE  --play-rate HZ  --play-segment START:LEN  --play-gap S  --play-once
       --snr DB  --dc I:Q  --iq GAIN_DB:PHASE_DEG  --linewidth HZ
       --gen-out PREFIX write a file and exit (container via --record-format)
       --gen-sample cf32|ci16|ci8|cu8   --gen-duration T | --gen-pulses N   --gen-annotate
@@ -207,12 +208,27 @@ It floats over the main window and works in both File and Device mode.
 | PRI pattern | fixed; stagger (a list of PRIs used in turn); jitter (+-%, repeatable with a seed) |
 | Bursts | N pulses, then extra dead time; a start delay before the first pulse |
 | In-pulse modulation | LFM up / down / triangle chirp with a set bandwidth, or Barker 2-13 phase codes |
+| Playback | a SigMF or raw IQ recording as a canned waveform: a segment of it, looped with a gap or played once |
 | Impairments | white noise (SNR), DC offset, IQ gain/phase imbalance, carrier phase noise (linewidth) |
 
 The pulses are slices of one continuous carrier, so they are phase-coherent. Settings are checked
 as you type; problems (a pulse wider than the PRI, a Barker chip shorter than a sample, an offset
 outside the band...) show in red and are not applied. The **preview** shows one pulse (or the pulse
 train) in time and the averaged spectrum.
+
+**Playback** plays a recording, such as a file the generator wrote, a wvt recording, or any SigMF
+or raw IQ capture. **Load** reads the format, rate and frequency from SigMF metadata or the file
+name, then sets the generator to match, so the recording plays as it was captured. Shortcuts load
+the generator's last file, or the file open in the viewer, read with the viewer's format settings.
+**Viewer's markers** plays just the part between the viewer's time markers.
+
+- The recording's 0 Hz lands at center + offset. Its peak plays at the set amplitude, and
+  **Keep its level** sets the amplitude to the recorded peak, so the recording plays unscaled.
+- A recording at another rate is resampled (windowed sinc, about 80 dB stopband, up to 64x either
+  way). When the rate is lowered, anything outside the new band is filtered out, not aliased.
+- Up to 32 Mi samples (2^25) can play at a time, at either rate. Impairments apply on top.
+- File output length can be a number of plays. With **Loop** off, the file is the start delay
+  plus one play. Changes apply at once; a different recording starts over.
 
 **Outputs** (the *Output* selector at the top):
 
@@ -242,6 +258,8 @@ wvt --gen pulsed --pri 1m --pw 20u --lfm up:2M -r 10M -c 915M                   
 wvt --gen pulsed --pri 1m --pw 20u --barker 13 -r 2M --gen-out ~/caps/b13 --gen-pulses 100 --gen-annotate
 wvt --device siggen --gen cw --offset 250k -c 915M -r 2M                          # loopback view
 wvt --gen cw --offset 100k -c 915M -r 1M --tx --tx-gain 10 --gen-duration 5         # transmit 5 s
+wvt --play ~/caps/b13_*.sigmf-meta --play-gap 5m --gen-out ~/caps/b13x10 --gen-pulses 10  # 10 plays
+wvt --play capture.cs16 --play-rate 2.4M -r 10M -c 915M --play-segment 1.5:0.2 --tx    # replay a burst
 ```
 
 ## Screen layout
@@ -325,7 +343,7 @@ Try `wvt out.sigmf-meta --chan 300k:150k --view 0.5:0.505`.
 | `src/sdr_rtlsdr.cpp` | RTL-SDR backend (librtlsdr) |
 | `src/sdr_uhd.cpp` | USRP backend (UHD C API) |
 | `src/sdr_sim.cpp` | Simulated device with synthetic signals |
-| `src/siggen.*` | Signal generator DSP: CW / pulsed waveforms, validation, parameter bus |
+| `src/siggen.*` | Signal generator DSP: CW / pulsed / playback waveforms, resampler, validation, parameter bus |
 | `src/siggen_out.*` | Generator outputs: file job, transmit engine, preview |
 | `src/sdr_siggen.cpp` | Loopback device that streams the generator into the live view |
 | `src/sdr_tx.h` | Transmitter interface (implemented for UHD in `sdr_uhd.cpp`) |
