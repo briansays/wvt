@@ -8,6 +8,10 @@ It can also stream live from an **RTL-SDR v3** or a **USRP B200 / B205mini**, sh
 the spectrum and a scrolling waterfall in real time, and record the stream to SigMF or
 raw IQ files that open straight back up in wvt. See [Live devices](#live-devices).
 
+A **signal generator** window makes CW and pulsed waveforms (chirps, Barker codes, staggered or
+jittered PRIs, bursts, impairments) and writes them to files, loops them into the live view, or
+transmits them with a USRP B200 / B205mini. See [Signal generator](#signal-generator).
+
 ## Roadmap 
 
 | Version | Features | | 
@@ -101,6 +105,19 @@ recording (needs --device):
       --record-sample native|cf32   (default native: cu8 for RTL-SDR, ci16 for USRP)
       --record-duration T           stop after T seconds
       --no-gui         record without opening a window (Ctrl+C stops)
+
+signal generator (-c sets the center frequency, -r the sample rate):
+      --siggen         open the signal generator window
+      --gen cw|pulsed  waveform mode (also opens the window)
+      --offset HZ  --amp DBFS  --drift HZ_PER_S
+      --pri S | --prf HZ   --pw S   --edge rect|linear|cos|gauss  --rise S  --fall S
+      --stagger S,S,..  --jitter PCT  --seed N  --burst N[:GAP]  --delay S
+      --lfm up|down|tri:BW  --barker N
+      --snr DB  --dc I:Q  --iq GAIN_DB:PHASE_DEG  --linewidth HZ
+      --gen-out PREFIX write a file and exit (container via --record-format)
+      --gen-sample cf32|ci16|ci8|cu8   --gen-duration T | --gen-pulses N   --gen-annotate
+      --tx             TRANSMIT with a USRP until Ctrl+C (or --gen-duration)
+      --tx-gain DB  --tx-args ARGS
 ```
 
 wvt fills in format, sample rate and center frequency from, in order:
@@ -170,6 +187,59 @@ and creates missing folders.
 
 ```sh
 wvt --device uhd:type=b200 -c 915M -r 10M --record ~/caps/ism --record-duration 30 --no-gui
+```
+
+## Signal generator
+
+Open it with the **Signal gen** toolbar button or **Ctrl+G** (or start with `--siggen` / `--gen`).
+It floats over the main window and works in both File and Device mode.
+
+**Waveform**
+
+| | |
+|---|---|
+| Carrier | sample rate, center frequency, offset from center, peak amplitude (dBFS), start phase |
+| CW | a steady tone, optionally drifting (Hz/s); retuning keeps the phase continuous |
+| Pulsed | PRI or PRF, pulse width or duty cycle (the width includes the edges) |
+| Edges | rectangular, linear, raised cosine or Gaussian, with separate rise and fall times |
+| PRI pattern | fixed; stagger (a list of PRIs used in turn); jitter (+-%, repeatable with a seed) |
+| Bursts | N pulses, then extra dead time; a start delay before the first pulse |
+| In-pulse modulation | LFM up / down / triangle chirp with a set bandwidth, or Barker 2-13 phase codes |
+| Impairments | white noise (SNR), DC offset, IQ gain/phase imbalance, carrier phase noise (linewidth) |
+
+The pulses are slices of one continuous carrier, so they are phase-coherent. Settings are checked
+as you type; problems (a pulse wider than the PRI, a Barker chip shorter than a sample, an offset
+outside the band...) show in red and are not applied. The **preview** shows one pulse (or the pulse
+train) in time and the averaged spectrum.
+
+**Outputs** (the *Output* selector at the top):
+
+- **File** writes SigMF or raw files in cf32, ci16, ci8 or cu8, named like recordings. Length is a
+  duration, or for pulsed mode an exact number of PRIs. SigMF metadata includes every generator
+  setting (`wvt:siggen`) and, if asked, an annotation per pulse. **Open in viewer** opens the result.
+- **Loopback** streams the waveform into the live spectrum and waterfall (Device mode, device
+  *Signal generator loopback*), as a receiver tuned to the center frequency would see it. Changes
+  apply as you make them, and the main toolbar can record it.
+- **USRP transmit** sends it from a B200 / B205mini's TX/RX port, tuned to the center frequency.
+  Frequency, gain and every waveform setting can change while transmitting.
+
+Transmit safety:
+- Nothing transmits until you tick **Arm transmitter**, press **Transmit...**, and confirm a
+  dialog showing the frequency, rate and gain. Arming resets after every transmission.
+- TX gain starts at 0 dB. The window title, the toolbar (**TX ON**) and a large **STOP TRANSMITTING**
+  button show while it's on. Closing the generator window or quitting wvt stops transmitting.
+- Transmit only into a dummy load or attenuated cable, or where you're licensed. To watch your own
+  signal on a receiver, put at least 30 dB of attenuation between the ports.
+- On the same B2xx, wvt can receive and transmit at once (full duplex). Both directions then use the
+  same sample rate, since the B2xx derives them from one clock.
+- Between pulses the USRP sends zeros, so a little LO leakage remains at the center frequency; a
+  non-zero offset keeps the signal clear of it.
+
+```sh
+wvt --gen pulsed --pri 1m --pw 20u --lfm up:2M -r 10M -c 915M                     # open the window
+wvt --gen pulsed --pri 1m --pw 20u --barker 13 -r 2M --gen-out ~/caps/b13 --gen-pulses 100 --gen-annotate
+wvt --device siggen --gen cw --offset 250k -c 915M -r 2M                          # loopback view
+wvt --gen cw --offset 100k -c 915M -r 1M --tx --tx-gain 10 --gen-duration 5         # transmit 5 s
 ```
 
 ## Screen layout
@@ -253,4 +323,10 @@ Try `wvt out.sigmf-meta --chan 300k:150k --view 0.5:0.505`.
 | `src/sdr_rtlsdr.cpp` | RTL-SDR backend (librtlsdr) |
 | `src/sdr_uhd.cpp` | USRP backend (UHD C API) |
 | `src/sdr_sim.cpp` | Simulated device with synthetic signals |
+| `src/siggen.*` | Signal generator DSP: CW / pulsed waveforms, validation, parameter bus |
+| `src/siggen_out.*` | Generator outputs: file job, transmit engine, preview |
+| `src/sdr_siggen.cpp` | Loopback device that streams the generator into the live view |
+| `src/sdr_tx.h` | Transmitter interface (implemented for UHD in `sdr_uhd.cpp`) |
+| `src/app_siggen.cpp` | Signal generator window |
 | `tools/iqgen.cpp` | Synthetic test-signal generator |
+| `tools/siggen_check.cpp` | Self-test for the generator (`build/siggen_check`, no hardware needed) |

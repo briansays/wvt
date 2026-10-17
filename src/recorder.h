@@ -23,6 +23,9 @@ struct RecordConfig {
     double maxSeconds = 0;  // 0 = no limit
     double maxBytes = 0;    // 0 = no limit
     std::string description;
+    // Extra "global" members for the SigMF metadata, as JSON text:
+    // "\"ns:key\": value" pairs separated by commas (no trailing comma).
+    std::string extraGlobal;
 };
 
 struct RecordSource {
@@ -59,6 +62,10 @@ public:
     bool sigmf() const { return cfg_.sigmf; }
     // Starts a new SigMF capture segment at the current stream position.
     void noteRetune(double fc);
+    // Adds a SigMF annotation at ring position `at` (ignored for raw files and
+    // outside the recording). Annotations beyond `kMaxAnnotations` are dropped.
+    void annotate(int64_t at, int64_t count, const std::string& label);
+    static constexpr int kMaxAnnotations = 10000;
     Status status() const;
 
 private:
@@ -74,6 +81,8 @@ private:
     struct Annotation {
         int64_t start;
         std::string comment;
+        int64_t count = 0;  // 0 = point annotation
+        std::string label;
     };
 
     std::shared_ptr<SampleRing> ring_;
@@ -93,6 +102,7 @@ private:
     bool failed_ = false;
     std::vector<Capture> captures_;
     std::vector<Annotation> annotations_;
+    int extraAnnotations_ = 0;  // annotate() calls, for the cap
     bool metaDirty_ = false;
     int64_t samples_ = 0, dropped_ = 0;
     uint64_t bytes_ = 0;

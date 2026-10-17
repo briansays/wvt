@@ -22,6 +22,8 @@ struct FormatParams {
 // Decodes `count` packed complex samples in format `fp` (header ignored) into
 // floats normalized to roughly [-1, 1].
 void decodeSamples(const FormatParams& fp, const uint8_t* src, int64_t count, std::complex<float>* out);
+// The inverse: little-endian packed samples, integer formats clip at full scale.
+void encodeSamples(SampleFormat fmt, const std::complex<float>* in, int64_t count, uint8_t* dst);
 
 // Read-only memory-mapped IQ recording. Immutable after open(), so it can be
 // shared between threads; the mapping lives until the last reference drops.

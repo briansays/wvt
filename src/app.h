@@ -7,6 +7,7 @@
 #include "imgui.h"
 #include "implot.h"
 #include "live.h"
+#include "siggen_out.h"
 #include "ui_util.h"
 
 class X11Window;
@@ -38,6 +39,10 @@ public:
     bool startRecording(const RecordConfig& cfg);
     bool isLive() const { return liveMode_; }
     int liveRowsReceived() const { return liveFilled_; }
+
+    // Signal generator window (app_siggen.cpp)
+    void openSigGen(const WaveformParams* p = nullptr);
+    bool sigGenPreviewReady() const { return sgPrev_ != nullptr; }
 
 private:
     // UI sections
@@ -94,6 +99,21 @@ private:
     void recolorLiveAll();
     float liveValueAt(double ago, double f) const;
     bool liveRecording() const;
+
+    // signal generator (app_siggen.cpp)
+    void drawSigGenButton();
+    void drawSigGenWindow();
+    void drawSigGenWaveform();
+    void drawSigGenPreview();
+    void drawSigGenFile();
+    void drawSigGenLoopback();
+    void drawSigGenTx();
+    void pollSigGen();
+    bool sigGenBusy() const;
+    bool sigGenLoopback() const;
+    bool startLoopback();
+    bool startTx();
+    void stopTx(const std::string& why);
 
     X11Window& win_;
     std::unique_ptr<Worker<WaterfallReq, WaterfallRes>> wfWorker_;
@@ -202,4 +222,27 @@ private:
     std::vector<double> liveSpecF_, liveAvgLin_, livePeakLin_, liveAvgDb_, livePeakDb_;
     bool liveFitY_ = true, liveFitSpecY_ = true;
     double liveHoverAgo_ = NAN, liveNextHoverAgo_ = NAN;
+
+    // --- signal generator ---
+    bool sgOpen_ = false;
+    WaveformParams sg_;
+    ParamCheck sgCheck_;
+    char sgStagger_[256] = {};
+    int sgOutput_ = 0;  // 0 file, 1 loopback, 2 transmit
+    FileGenConfig sgFileCfg_;
+    char sgPrefix_[1024] = {};
+    bool sgByPulses_ = false;
+    std::unique_ptr<FileGenJob> sgFile_;
+    FileGenJob::Status sgFileSt_;
+    std::string sgFileMsg_, sgLastFile_;
+    bool sgFileFailed_ = false;
+    std::unique_ptr<Worker<SigPreviewReq, SigPreviewRes>> sgPrevWorker_;
+    std::shared_ptr<SigPreviewRes> sgPrev_;
+    bool sgPrevTrain_ = false;
+    std::unique_ptr<TxEngine> tx_;
+    TxEngine::Stats txStats_;
+    TxConfig txCfg_;
+    char txArgs_[256] = {};
+    bool txArmed_ = false;
+    std::string txErr_;
 };

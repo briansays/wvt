@@ -46,6 +46,12 @@ public:
             n -= m;
         }
     }
+    // Samples that can be pushed now without dropping any, for producers that
+    // can wait (a file generator) instead of losing data.
+    int64_t gateRoom() const {
+        if (!gateOpen_.load(std::memory_order_acquire)) return cap_;
+        return cap_ - (written() - gatePos_.load(std::memory_order_acquire));
+    }
     // Samples lost before reaching the ring (e.g. a USB overflow).
     void noteGap(int64_t lost, const std::string& why) {
         if (lost > 0) droppedDevice_ += lost;

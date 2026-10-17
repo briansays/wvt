@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cmath>
@@ -168,6 +169,7 @@ bool Recorder::start(std::shared_ptr<SampleRing> ring, const RecordSource& src, 
         failed_ = false;
         captures_ = {{0, src.fc, isoTime(startWall_)}};
         annotations_.clear();
+        extraAnnotations_ = 0;
         metaDirty_ = false;
         samples_ = dropped_ = 0;
         bytes_ = 0;
@@ -214,6 +216,14 @@ void Recorder::noteRetune(double fc) {
     metaDirty_ = true;
 }
 
+void Recorder::annotate(int64_t at, int64_t count, const std::string& label) {
+    if (!active_ || !cfg_.sigmf) return;
+    std::lock_guard<std::mutex> lk(m_);
+    if (at < start_ || ++extraAnnotations_ > kMaxAnnotations) return;
+    annotations_.push_back({at - start_, "", count, label});
+    metaDirty_ = true;
+}
+
 Recorder::Status Recorder::status() const {
     std::lock_guard<std::mutex> lk(m_);
     Status s;
@@ -226,7 +236,7 @@ Recorder::Status Recorder::status() const {
     s.bytes = bytes_;
     s.seconds = src_.rate > 0 ? samples_ / src_.rate : 0;
     s.dropped = dropped_;
-    s.gaps = (int)annotations_.size();
+    s.gaps = (int)annotations_.size() - std::min(extraAnnotations_, kMaxAnnotations);
     if (active_ && ring_) s.ringFill = (float)(ring_->written() - (start_ + samples_)) / (float)ring_->capacity();
     return s;
 }
@@ -241,7 +251,7 @@ void Recorder::handleGaps(bool all) {
         if (maxSamples_ > 0 && at >= maxSamples_) continue;
         std::string c = g.lost >= 0 ? std::to_string(g.lost) + " samples dropped: " + g.why
                                     : "samples dropped (count unknown): " + g.why;
-        annotations_.push_back({at, c});
+        annotations_.push_back({at, c, 0, {}});
         if (g.lost > 0) dropped_ += g.lost;
         metaDirty_ = true;
     }
@@ -345,6 +355,7 @@ bool Recorder::writeMeta(std::string& err) {
         j += "    \"core:recorder\": \"wvt\",\n";
         if (!src_.hw.empty()) j += "    \"core:hw\": \"" + jsonEscape(src_.hw) + "\",\n";
         if (!cfg_.description.empty()) j += "    \"core:description\": \"" + jsonEscape(cfg_.description) + "\",\n";
+        if (!cfg_.extraGlobal.empty()) j += "    " + cfg_.extraGlobal + ",\n";
         j += "    \"core:num_channels\": 1\n  },\n  \"captures\": [";
         for (size_t i = 0; i < captures_.size(); ++i) {
             const auto& c = captures_[i];
@@ -352,10 +363,16 @@ bool Recorder::writeMeta(std::string& err) {
                  ", \"core:frequency\": " + num(c.fc) + ", \"core:datetime\": \"" + c.datetime + "\"}";
         }
         j += "\n  ],\n  \"annotations\": [";
+        // SigMF wants annotations ordered by sample_start.
+        std::stable_sort(annotations_.begin(), annotations_.end(),
+                         [](const Annotation& a, const Annotation& b) { return a.start < b.start; });
         for (size_t i = 0; i < annotations_.size(); ++i) {
             const auto& a = annotations_[i];
-            j += std::string(i ? "," : "") + "\n    {\"core:sample_start\": " + std::to_string(a.start) +
-                 ", \"core:comment\": \"" + jsonEscape(a.comment) + "\"}";
+            j += std::string(i ? "," : "") + "\n    {\"core:sample_start\": " + std::to_string(a.start);
+            if (a.count > 0) j += ", \"core:sample_count\": " + std::to_string(a.count);
+            if (!a.label.empty()) j += ", \"core:label\": \"" + jsonEscape(a.label) + "\"";
+            if (!a.comment.empty()) j += ", \"core:comment\": \"" + jsonEscape(a.comment) + "\"";
+            j += "}";
         }
         j += annotations_.empty() ? "]\n}\n" : "\n  ]\n}\n";
         metaDirty_ = false;
