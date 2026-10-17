@@ -137,7 +137,7 @@ private:
     void buildTemplate();
     int64_t tmplLen() const { return tmpl_ ? (int64_t)tmpl_->size() : 0; }
     double nextPri();
-    void scheduleAfter(int64_t start);
+    void scheduleAfter(double start);
     void carrier(std::complex<float>* out, const std::complex<float>* mod, int64_t m);
     void advanceCarrier(int64_t m);
     void impair(std::complex<float>* out, int64_t m);
@@ -157,6 +157,7 @@ private:
     double nextStart_ = 0;     // fractional sample position of the next pulse
     int64_t curStart_ = -1;    // pulse playing: [curStart_, curStart_ + tmpl_.size())
     int64_t lastStart_ = -1;
+    double lastStartF_ = 0;    // where the last pulse was due, unrounded (keeps fractional PRIs exact)
     int burstCount_ = 0;
     size_t staggerIdx_ = 0;
     uint64_t jitterRng_ = 1;

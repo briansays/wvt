@@ -66,6 +66,13 @@ std::string jsonString(const std::string& v) {
 std::string baseName(const std::string& path) { return path.substr(path.find_last_of('/') + 1); }
 
 double playFileRate(const WaveformParams& p) { return p.playRate > 0 ? p.playRate : p.rate; }
+
+// True if a and b schedule pulses (or playback repeats) the same way.
+bool sameSchedule(const WaveformParams& a, const WaveformParams& b) {
+    return a.mode == b.mode && a.rate == b.rate && a.pri == b.pri && a.priPattern == b.priPattern &&
+           a.stagger == b.stagger && a.jitterPct == b.jitterPct && a.seed == b.seed && a.burstPulses == b.burstPulses &&
+           a.burstGap == b.burstGap && a.playLoop == b.playLoop && a.playGap == b.playGap;
+}
 }  // namespace
 
 const char* edgeName(EdgeShape e) {
@@ -343,8 +350,12 @@ void SigGen::apply(const WaveformParams& p) {
     if (lastStart_ < 0) {
         nextStart_ = std::max((double)n_, p.startDelay * p.rate);
     } else {
-        if (p.burstPulses > 0 && burstCount_ >= p.burstPulses) burstCount_ = 0;
-        scheduleAfter(lastStart_);
+        // Reschedule only if the timing changed: scheduling draws the next stagger
+        // or jitter PRI, so redoing it for an unrelated change would skip one.
+        if (!sameSchedule(old, p)) {
+            if (p.burstPulses > 0 && burstCount_ >= p.burstPulses) burstCount_ = 0;
+            scheduleAfter(lastStartF_);
+        }
         nextStart_ = std::max(nextStart_, (double)n_);
     }
 }
@@ -391,16 +402,17 @@ double SigGen::nextPri() {
     }
 }
 
-void SigGen::scheduleAfter(int64_t start) {
+// start: where the last pulse was due, unrounded, so fractional PRIs don't accumulate rounding.
+void SigGen::scheduleAfter(double start) {
     if (p_.mode == GenMode::Playback) {
-        nextStart_ = p_.playLoop ? (double)(start + tmplLen()) + p_.playGap * p_.rate : kNever;
+        nextStart_ = p_.playLoop ? start + (double)tmplLen() + p_.playGap * p_.rate : kNever;
         return;
     }
     // burstCount_ == 0 right after a pulse means that pulse ended a burst.
     const bool burstEnd = p_.burstPulses > 0 && burstCount_ == 0;
-    nextStart_ = (double)start + (nextPri() + (burstEnd ? p_.burstGap : 0)) * p_.rate;
+    nextStart_ = start + (nextPri() + (burstEnd ? p_.burstGap : 0)) * p_.rate;
     // Never overlap the pulse that is playing (guards rounding at 1-sample gaps).
-    nextStart_ = std::max(nextStart_, (double)(start + tmplLen() + 1));
+    nextStart_ = std::max(nextStart_, start + (double)(tmplLen() + 1));
 }
 
 double SigGen::gauss() {
@@ -521,11 +533,13 @@ void SigGen::generate(std::complex<float>* out, int64_t n) {
             n_ += m;
             continue;
         }
+        // On time, keep the exact due position. Late (after a change), restart the grid here.
+        lastStartF_ = std::llround(nextStart_) == n_ ? nextStart_ : (double)n_;
         curStart_ = lastStart_ = n_;
         pulses_.push_back({n_, L});
         ++burstCount_;
         if (p_.burstPulses > 0 && burstCount_ >= p_.burstPulses) burstCount_ = 0;
-        scheduleAfter(n_);
+        scheduleAfter(lastStartF_);
     }
     impair(out, n);
 }

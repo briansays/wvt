@@ -358,6 +358,39 @@ int main(int argc, char** argv) {
         check(ok, "encode/decode round trip (cf32, ci16, ci8, cu8)");
     }
 
+    // --- Schedule stays on its grid ---
+    {
+        // A fractional PRI (666.67 samples) must not round every interval the same way.
+        WaveformParams p;
+        p.mode = GenMode::Pulsed;
+        p.pri = 1.0 / 3000;
+        auto st = pulseStarts(gen(p, 2000 * 667), 0.5 * std::pow(10.0, p.ampDb / 20));
+        bool exact = st.size() >= 1999;
+        for (size_t k = 0; exact && k < st.size(); ++k) exact = st[k] == std::llround((double)k * 2e6 / 3000);
+        check(exact, "PRF 3 kHz at 2 MS/s: pulse k starts at round(k * 666.67), no drift",
+              st.size() > 1 ? fmt("last start %g, want %g", (double)st.back(), std::round((double)(st.size() - 1) * 2e6 / 3000)) : "");
+
+        // Unrelated changes mid-stream must not disturb a stagger or jitter sequence.
+        for (PriPattern pat : {PriPattern::Stagger, PriPattern::Jitter}) {
+            p = WaveformParams();
+            p.mode = GenMode::Pulsed;
+            p.priPattern = pat;
+            const double thr = 0.5 * std::pow(10.0, p.ampDb / 20) * 0.9;
+            const auto ref = pulseStarts(gen(p, 200000), thr);
+            SigGen g(p);
+            std::vector<cf> v(200000);
+            for (int64_t done = 0, f = 0; done < 200000; done += 3000, ++f) {
+                WaveformParams q = p;
+                q.ampDb = p.ampDb + 0.01 * (double)(f % 2);  // as when dragging the amplitude
+                q.offset = p.offset + (double)f;
+                g.setParams(q);
+                g.generate(v.data() + done, std::min<int64_t>(3000, 200000 - done));
+            }
+            check(pulseStarts(v, thr) == ref, pat == PriPattern::Stagger ? "stagger sequence unchanged by edits mid-stream"
+                                                                         : "jitter sequence unchanged by edits mid-stream");
+        }
+    }
+
     // --- File output ---
     {
         WaveformParams p;
