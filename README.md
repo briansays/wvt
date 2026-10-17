@@ -1,7 +1,7 @@
 # wvt — IQ waveform visualization tool
 
 An X11 desktop tool for looking at raw IQ recordings from software-defined radios.
-On the left is a spectrum and waterfall. On the right are I/Q, AM, FM and PM plots,
+On the left is a  and waterfall. On the right are I/Q, AM, FM and PM plots,
 all sharing one time axis. Pan or zoom any plot and every other plot follows.
 
 <img width="2125" height="1407" alt="image" src="https://github.com/user-attachments/assets/71d188af-cc07-4a0c-93ef-36d082b5829b" />
@@ -19,9 +19,9 @@ transmits them with a USRP B200 / B205mini. See [Signal generator](#signal-gener
 | Version | Features | | 
 |---|---|---| 
 | 1.0 | Receive via UHD and RTL-SDR v3 | ✅ | 
-| 1.1 | Signal Generator Support via UHD | | 
-| 1.2 | Support for Signal Hound SDRs | | 
-| 1.3 | Support for EPIQ SDRs | | 
+| 1.1 | Signal Generator Support via UHD | ☑️ | 
+| 1.2 | Support for Signal Hound SDRs | ⭕️ | 
+| 1.3 | Support for EPIQ SDRs | ⭕️ | 
 
 ## Build
 
