@@ -62,6 +62,7 @@ void App::drawSourceSelector() {
 }
 
 void App::enterLive() {
+    stopAudio();
     fileFs_ = fs_;
     fileFc_ = fc_;
     liveMode_ = true;
@@ -72,6 +73,7 @@ void App::enterLive() {
 }
 
 void App::leaveLive() {
+    stopAudio();
     if (live_) live_->stop();
     liveMode_ = false;
     fs_ = fileFs_;
@@ -589,12 +591,18 @@ void App::drawLiveLeft() {
             ImPlot::SetNextLineStyle(ImVec4(0.6f, 0.85f, 1.f, 1.f));
             ImPlot::PlotLine("avg", liveSpecF_.data(), liveAvgDb_.data(), (int)liveSpecF_.size());
         }
+        drawChannelOverlay(false);
+        drawAudioOverlay();
         drawFreqMarkers();
         if (std::isfinite(hoverF_)) {
             ImPlot::SetNextLineStyle(kColHover);
             ImPlot::PlotInfLines("##hf", &hoverF_, 1, ImPlotItemFlags_NoFit);
         }
         if (ImPlot::IsPlotHovered()) nextHoverF_ = ImPlot::GetPlotMousePos().x;
+        if (ImPlot::IsPlotHovered() && ImGui::GetIO().KeyCtrl && ImGui::IsMouseClicked(0)) {
+            demod_.chanEnable = true;
+            demod_.chanOffset = ImPlot::GetPlotMousePos().x - fc_;
+        }
         ImPlot::EndPlot();
     }
     ImGui::SameLine();
@@ -633,6 +641,8 @@ void App::drawLiveLeft() {
                 ImPlot::PlotImage("##lwf1", liveTex_, ImPlotPoint(liveF0_, head * dt),
                                   ImPlotPoint(liveF1_, liveRows_ * dt), ImVec2(0, vh), ImVec2(1, 1));
         }
+        drawChannelOverlay(true);
+        drawAudioOverlay();
         drawFreqMarkers();
         ImPlot::SetNextLineStyle(kColHover);
         if (std::isfinite(liveHoverAgo_))
@@ -643,6 +653,10 @@ void App::drawLiveLeft() {
             ImPlotPoint m = ImPlot::GetPlotMousePos();
             nextHoverF_ = m.x;
             liveNextHoverAgo_ = m.y;
+            if (ImGui::GetIO().KeyCtrl && ImGui::IsMouseClicked(0)) {
+                demod_.chanEnable = true;
+                demod_.chanOffset = m.x - fc_;
+            }
         }
         ImPlot::EndPlot();
     }

@@ -125,6 +125,8 @@ const char* rawExt(SampleFormat f) {
 
 }  // namespace
 
+bool makeDirs(const std::string& dir, std::string& err) { return mkdirs(dir, err); }
+
 std::string expandHome(const std::string& path) {
     if (path == "~" || path.rfind("~/", 0) == 0) {
         const char* home = getenv("HOME");

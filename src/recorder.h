@@ -110,3 +110,5 @@ private:
 
 // "~/x" -> "$HOME/x"
 std::string expandHome(const std::string& path);
+// mkdir -p
+bool makeDirs(const std::string& dir, std::string& err);

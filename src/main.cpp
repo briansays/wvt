@@ -1,4 +1,7 @@
 // wvt - IQ waveform visualization tool (X11)
+#include <algorithm>
+#include <cctype>
+#include <cmath>
 #include <csignal>
 #include <chrono>
 #include <cstdio>
@@ -119,6 +122,105 @@ static int runTx(const WaveformParams& p, const TxConfig& cfg, double seconds) {
     return st.error.empty() ? 0 : 1;
 }
 
+static bool parseAudioMode(const std::string& v, int& mode) {
+    for (int i = 0; i < (int)AudioMode::Count; ++i) {
+        std::string n = audioModeName((AudioMode)i);
+        for (auto& c : n) c = (char)tolower(c);
+        if (v == n) {
+            mode = i;
+            return true;
+        }
+    }
+    return false;
+}
+
+// Demodulates a file (or the --view range) to a WAV file and exits.
+static int runAudioExport(const std::string& path, const CliOverrides& ov, bool haveView, double t0, double t1,
+                          const AudioParams& ap, const std::string& out) {
+    FileMetaGuess g = guessMeta(path);
+    std::string err;
+    auto f = IqFile::open(g.dataPath, err);
+    if (!f) {
+        fprintf(stderr, "wvt: %s\n", err.c_str());
+        return 1;
+    }
+    Source src;
+    src.file = f;
+    if (g.haveFmt) { src.fp.fmt = g.fmt; src.fp.bigEndian = g.bigEndian; }
+    if (g.haveRate) src.fs = g.rate;
+    if (g.haveFc) src.fc = g.fc;
+    if (ov.haveFmt) { src.fp.fmt = ov.fmt; src.fp.bigEndian = ov.bigEndian; }
+    if (ov.haveRate) src.fs = ov.rate;
+    if (ov.haveFc) src.fc = ov.fc;
+    src.fp.headerBytes = ov.header >= 0 ? ov.header : 0;
+    src.fp.swapIQ = ov.swapIQ;
+    if (!g.haveRate && !ov.haveRate) fprintf(stderr, "wvt: note: sample rate unknown, assuming %s (use -r)\n", fmtSI(src.fs, "S/s", 4).c_str());
+    const int64_t n = f->numSamples(src.fp);
+    WavExportConfig c;
+    c.src = src;
+    c.s0 = haveView ? std::clamp<int64_t>((int64_t)std::llround(t0 * src.fs), 0, n) : 0;
+    c.s1 = haveView ? std::clamp<int64_t>((int64_t)std::llround(t1 * src.fs), 0, n) : n;
+    c.params = ap;
+    c.path = expandHome(out);
+    WavExportJob job;
+    if (!job.start(c, err)) {
+        fprintf(stderr, "wvt: %s\n", err.c_str());
+        return 1;
+    }
+    signal(SIGINT, [](int) { g_interrupted = 1; });
+    while (job.status().active) {
+        if (g_interrupted) job.cancel();
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    auto st = job.status();
+    if (!st.error.empty()) {
+        fprintf(stderr, "wvt: audio export %s: %s\n", st.error.c_str(), st.path.c_str());
+        return 1;
+    }
+    fprintf(stderr, "wvt: wrote %s (%s %s at %s, %s)\n", st.path.c_str(), audioModeName((AudioMode)ap.mode),
+            fmtSI(ap.bw, "Hz", 4).c_str(), fmtSI(src.fc + ap.offset, "Hz", 9).c_str(), fmtSI(st.seconds, "s", 5).c_str());
+    return 0;
+}
+
+// Records the demodulated audio of a live stream to WAV until Ctrl+C or the duration ends.
+static int runAudioLive(const StreamConfig& dev, const AudioParams& ap, const std::string& out, double seconds) {
+    LiveEngine live(nullptr);
+    std::string err;
+    if (!live.start(dev, err)) {
+        fprintf(stderr, "wvt: %s\n", err.c_str());
+        return 1;
+    }
+    auto st = live.stats();
+    AudioEngine audio;
+    if (!audio.startLive(live.ring(), live.format(), live.sampleRate(), ap, "", AudioOutput::None, err) ||
+        !audio.startWav(expandHome(out), err)) {
+        fprintf(stderr, "wvt: %s\n", err.c_str());
+        return 1;
+    }
+    signal(SIGINT, [](int) { g_interrupted = 1; });
+    signal(SIGTERM, [](int) { g_interrupted = 1; });
+    fprintf(stderr, "wvt: recording %s %s at %s from %s to %s (Ctrl+C to stop)\n", audioModeName((AudioMode)ap.mode),
+            fmtSI(ap.bw, "Hz", 4).c_str(), fmtSI(st.fc + ap.offset, "Hz", 9).c_str(), st.description.c_str(), out.c_str());
+    int tick = 0;
+    for (;;) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        auto as = audio.stats();
+        if (g_interrupted || !live.stats().error.empty() || !as.recording) break;
+        if (seconds > 0 && as.wavSeconds >= seconds) break;
+        if (++tick % 5 == 0)
+            fprintf(stderr, "\rwvt: %s  channel %.1f dBFS  resyncs %lld   ", fmtSI(as.wavSeconds, "s", 4).c_str(), as.chanDb,
+                    (long long)as.resyncs);
+    }
+    auto as = audio.stats();
+    audio.stop();
+    std::string devErr = live.stats().error;
+    live.stop();
+    fprintf(stderr, "\nwvt: wrote %s (%s)\n", as.wavPath.c_str(), fmtSI(as.wavSeconds, "s", 5).c_str());
+    if (!as.wavError.empty()) fprintf(stderr, "wvt: WAV error: %s\n", as.wavError.c_str());
+    if (!devErr.empty()) fprintf(stderr, "wvt: device error: %s\n", devErr.c_str());
+    return as.wavError.empty() && devErr.empty() ? 0 : 1;
+}
+
 static void usage() {
     printf(
         "usage: wvt [options] [file]\n"
@@ -184,13 +286,24 @@ static void usage() {
         "      --tx             TRANSMIT with a USRP until Ctrl+C (or --gen-duration)\n"
         "      --tx-gain DB     transmit gain (default 0)   --tx-args ARGS  (default type=b200)\n"
         "\n"
+        "audio (the channel comes from --chan OFFSET:BW; without it: 0 Hz, the mode's width):\n"
+        "      --audio am|nfm|wfm|usb|lsb|cw   open the audio window and play\n"
+        "      --audio-out FILE.wav  demodulate to WAV and exit: the file (or --view range),\n"
+        "                       or with --device the live stream until Ctrl+C / --record-duration\n"
+        "      --audio-device NAME   sound output (default: system default)\n"
+        "      --list-audio-devices  print sound output devices and exit\n"
+        "      --volume DB      playback volume (default -6)\n"
+        "      --squelch DBFS   mute while the channel power is below this\n"
+        "\n"
         "Format, rate and center frequency are auto-detected from SigMF metadata,\n"
         "gqrx file names and extensions (.cu8 .cs8 .cs16 .cf32 ...) when possible.\n"
         "\n"
         "mouse:  drag = pan, wheel = zoom (over an axis: zoom that axis only),\n"
         "        right-drag = box zoom, double-click = fit, Ctrl+click spectrum/waterfall = tune channel\n"
+        "        Shift+click a time plot or the waterfall = play audio from there\n"
         "keys:   Left/Right pan, PgUp/PgDn page, +/- zoom, Home/End, A all, T/F markers,\n"
-        "        Z zoom to time markers, C channel on/off, B bookmark\n");
+        "        Z zoom to time markers, C channel on/off, B bookmark,\n"
+        "        Ctrl+G signal generator, Ctrl+D audio window\n");
 }
 
 int main(int argc, char** argv) {
@@ -214,6 +327,10 @@ int main(int argc, char** argv) {
     std::string playFile;
     double playRate = 0;
     double genSeconds = 0;
+    AudioParams ap;
+    bool haveAudio = false;
+    std::string audioOut, audioDevice;
+    double audioVol = -6;
     float scale = 1.f;
     int winW = 1600, winH = 950;
     if (const char* e = getenv("WVT_SCALE")) scale = (float)atof(e);
@@ -394,6 +511,25 @@ int main(int argc, char** argv) {
             }
         } else if (a == "--gen-pulses") gc.pulses = atoll(next("--gen-pulses"));
         else if (a == "--gen-annotate") gc.annotatePulses = true;
+        else if (a == "--audio") {
+            std::string v = next("--audio");
+            for (auto& c : v) c = (char)tolower(c);
+            if (!parseAudioMode(v, ap.mode)) { fprintf(stderr, "wvt: --audio wants am, nfm, wfm, usb, lsb or cw\n"); return 2; }
+            haveAudio = true;
+        } else if (a == "--audio-out") audioOut = next("--audio-out");
+        else if (a == "--audio-device") audioDevice = next("--audio-device");
+        else if (a == "--volume") {
+            if (!parseSI(next("--volume"), audioVol)) { fprintf(stderr, "wvt: bad --volume\n"); return 2; }
+        } else if (a == "--squelch") {
+            if (!parseSI(next("--squelch"), ap.squelchDb)) { fprintf(stderr, "wvt: bad --squelch\n"); return 2; }
+            ap.squelch = true;
+        } else if (a == "--list-audio-devices") {
+            std::string err;
+            auto devs = listAudioDevices(err);
+            if (!err.empty()) { fprintf(stderr, "wvt: %s\n", err.c_str()); return 1; }
+            for (const auto& d : devs) printf("%s%s\n", d.name.c_str(), d.isDefault ? "  (default)" : "");
+            return 0;
+        }
         else if (a == "--tx") haveTx = true;
         else if (a == "--tx-args") txc.args = next("--tx-args");
         else if (!a.empty() && a[0] == '-') { fprintf(stderr, "wvt: unknown option %s (try --help)\n", a.c_str()); return 2; }
@@ -444,6 +580,18 @@ int main(int argc, char** argv) {
         if (ov.haveRate) dev.rate = ov.rate;
         else if (dev.driver == "uhd") dev.rate = 10e6;
     }
+    // The audio channel: --chan, or the mode's default width at 0 Hz.
+    ap.bw = haveChan ? chanBw : audioModeDefaultBw((AudioMode)ap.mode);
+    ap.offset = haveChan ? chanOff : 0;
+    if (ap.mode == (int)AudioMode::WFM) ap.deemph = (int)Deemphasis::Us75;
+    if (!audioOut.empty()) {
+        if (haveDevice) return runAudioLive(dev, ap, audioOut, rc.maxSeconds);
+        if (path.empty()) {
+            fprintf(stderr, "wvt: --audio-out needs a file or --device\n");
+            return 2;
+        }
+        return runAudioExport(path, ov, haveView, view0, view1, ap, audioOut);
+    }
     if ((haveRecord || noGui) && !haveDevice) {
         fprintf(stderr, "wvt: recording needs --device\n");
         return 2;
@@ -488,18 +636,24 @@ int main(int argc, char** argv) {
             if (haveView) app.setView(view0, view1);
             if (haveChan) app.setChannel(chanOff, chanBw);
         }
+        if (haveAudio) {
+            if (haveDevice && haveChan) app.setChannel(chanOff, chanBw);
+            app.setAudioOutput(audioDevice, audioVol);
+            app.openAudio(&ap, haveDevice || !path.empty());
+        }
 
         auto lastActivity = std::chrono::steady_clock::now();
         int frame = 0, idleFrames = 0;
         for (;;) {
             auto now = std::chrono::steady_clock::now();
-            bool active = app.busy() || now - lastActivity < std::chrono::milliseconds(600) || !shotPath.empty();
+            bool active = app.busy() || app.audioBusy() || now - lastActivity < std::chrono::milliseconds(600) ||
+                          !shotPath.empty();
             if (!win.pumpEvents(active ? 1.0 / 60.0 : 0.5)) break;
             // Any input (or worker wake-up) keeps the loop running at frame rate for a moment.
             if (io.MouseDelta.x != 0 || io.MouseDelta.y != 0 || io.MouseWheel != 0 || ImGui::IsAnyItemActive() ||
                 io.InputQueueCharacters.Size > 0 || ImGui::IsAnyMouseDown())
                 lastActivity = now;
-            if (app.busy()) lastActivity = now;
+            if (app.busy() || app.audioBusy()) lastActivity = now;
             win.newFrame();
             ImGui::NewFrame();
             app.frame();

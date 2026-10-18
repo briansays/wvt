@@ -66,6 +66,12 @@ public:
     void setParams(const LiveParams& p);
 
     void takeRows(LiveRows& out);
+    // For extra readers (audio): the ring, its format, and the first sample of
+    // the current tuning.
+    std::shared_ptr<SampleRing> ring() const { return ring_; }
+    SampleFormat format() const { return dev_ ? dev_->format() : SampleFormat::CI16; }
+    double sampleRate() const { return dev_ ? dev_->sampleRate() : 0; }
+    int64_t freshFrom() const { return freshFrom_.load(); }
     Stats stats() const;
 
     bool startRecording(const RecordConfig& cfg, std::string& err);

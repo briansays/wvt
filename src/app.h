@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "audio_engine.h"
 #include "engine.h"
 #include "imgui.h"
 #include "implot.h"
@@ -43,6 +44,12 @@ public:
     // Signal generator window (app_siggen.cpp)
     void openSigGen(const WaveformParams* p = nullptr);
     bool sigGenPreviewReady() const { return sgPrev_ != nullptr; }
+
+    // Audio window (app_audio.cpp)
+    void openAudio(const AudioParams* p = nullptr, bool play = false);
+    void setAudioOutput(const std::string& device, double volumeDb);
+    // Playing or exporting: the main loop keeps running (the playhead moves).
+    bool audioBusy() const;
 
 private:
     // UI sections
@@ -116,6 +123,19 @@ private:
     bool startLoopback();
     bool startTx();
     void stopTx(const std::string& why);
+
+    // audio (app_audio.cpp)
+    void drawAudioButton();
+    void drawAudioWindow();
+    void drawAudioOverlay();
+    void drawPlayhead(bool vertical);
+    void playFrom(double t);
+    void pollAudio();
+    bool playAudio(int64_t from = -1);
+    void stopAudio(const std::string& why = {});
+    void syncAudioChannel();
+    void setAudioMode(int mode);
+    void playRange(int64_t& s0, int64_t& s1) const;
 
     X11Window& win_;
     std::unique_ptr<Worker<WaterfallReq, WaterfallRes>> wfWorker_;
@@ -250,4 +270,26 @@ private:
     char txArgs_[256] = {};
     bool txArmed_ = false;
     std::string txErr_;
+
+    // --- audio ---
+    bool auOpen_ = false;
+    AudioParams au_;
+    bool auFollow_ = true;  // use the viewer's channel (demod_)
+    int auRange_ = 0;       // 0 from view start, 1 view, 2 time markers, 3 whole file
+    bool auLoop_ = false, auFollowView_ = true;
+    double auVolDb_ = -6;
+    bool auMute_ = false;
+    std::unique_ptr<AudioEngine> audio_;
+    AudioEngine::Stats auStats_;
+    std::string auErr_, auMsg_;
+    std::vector<AudioDeviceInfo> auDevices_;
+    bool auDevicesScanned_ = false;
+    std::string auDevice_;  // "" = system default
+    char auPrefix_[1024] = {};
+    std::unique_ptr<WavExportJob> auExport_;
+    WavExportJob::Status auExportSt_;
+    float auPeakHold_ = -200;
+    double auPeakAt_ = 0;
+    double auPlayhead_ = NAN;  // seconds; file playback only
+    bool auDragHead_ = false;
 };
