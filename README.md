@@ -18,15 +18,6 @@ with a USRP B200 / B205mini. See [Signal generator](#signal-generator).
 An **audio** window demodulates one channel (AM, NFM, WFM, USB, LSB or CW) and plays it through the
 speakers. It plays a recording or the live stream, and it writes WAV files. See [Audio](#audio).
 
-## Roadmap 
-
-| Version | Features | | 
-|---|---|---| 
-| 1.0 | Receive via UHD and RTL-SDR v3 | ✅ | 
-| 1.1 | Signal Generator Support via UHD | ✅ | 
-| 1.2 | Support for Signal Hound SDRs | ☑️ | 
-| 1.3 | Support for EPIQ SDRs | ☑️ | 
-
 ## Build
 
 Requirements: a C++20 compiler, CMake ≥ 3.16, X11 + GL headers/libraries.
