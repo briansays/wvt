@@ -1,7 +1,8 @@
 # Plan: Audio demodulation and playback
 
 Branch: `7-audio-demod` (from `main` at `b50b762`)
-Status: **plan only; no implementation yet.** Open questions are in section 6.
+Status: **implemented in the branch (uncommitted).** Decisions are in section 6, test results and
+remaining work in section 7.
 
 ## 1. Goal
 
@@ -43,34 +44,34 @@ Out of scope for now: FM stereo / RDS, more than one channel at a time, network 
 ## 4. Work breakdown
 
 ### Phase 1 — Build and output backend
-- [ ] Vendor `third_party/miniaudio/miniaudio.h`; one `src/audio_out.cpp` with `MINIAUDIO_IMPLEMENTATION`.
-- [ ] `src/audio_out.h`: `AudioOut` — open / close, device list, 48 kHz stereo float, pull from the
+- [x] Vendor `third_party/miniaudio/miniaudio.h`; one `src/audio_out.cpp` with `MINIAUDIO_IMPLEMENTATION`.
+- [x] `src/audio_out.h`: `AudioOut` — open / close, device list, 48 kHz stereo float, pull from the
       SPSC ring, underrun counter, latency.
-- [ ] CMake: `WVT_WITH_AUDIO`; link CoreAudio / AudioToolbox / CoreFoundation on macOS, `dl` / `m` on Linux.
-- [ ] `--list-audio-devices`.
-- [ ] Confirm early that audio plays from the XQuartz-linked binary on macOS.
+- [x] CMake: `WVT_WITH_AUDIO`; link CoreAudio / AudioToolbox / CoreFoundation on macOS, `dl` / `m` on Linux.
+- [x] `--list-audio-devices`.
+- [x] Confirm early that audio plays from the XQuartz-linked binary on macOS.
 
 ### Phase 2 — Streaming DSP (`src/audio_dsp.{h,cpp}`)
-- [ ] `Nco`, `HalfbandDecim`, `FirDecim` (with saved history), `Resampler` (variable ratio),
+- [x] `Nco`, `HalfbandDecim`, `FirDecim` (with saved history), `Resampler` (variable ratio),
       `DcBlock`, `Agc`, `Deemphasis`.
-- [ ] `AudioDemod::process(const cf* in, int64_t n, std::vector<float>& out)`, configured by
+- [x] `AudioDemod::process(const cf* in, int64_t n, std::vector<float>& out)`, configured by
       `AudioParams` (mode, offset, bw, squelch dB, AGC, de-emphasis, volume, BFO).
-- [ ] Reuse `designLowpass()` and `getFFT()` from `dsp.h`.
+- [x] Reuse `designLowpass()` and `getFFT()` from `dsp.h`.
 
 ### Phase 3 — Audio engine (`src/audio_engine.{h,cpp}`)
-- [ ] `AudioEngine` with one small source interface and two implementations:
+- [x] `AudioEngine` with one small source interface and two implementations:
   - `FileAudioSource`: `IqFile` + `FormatParams`, sample cursor, range [s0, s1], loop, seek,
     pause; reads ahead in ~20 ms blocks.
   - `LiveAudioSource`: lossy `SampleRing::read()` with its own cursor, starting ~100 ms behind
     `written()`; resyncs when lapped.
-- [ ] Drift PI loop (live mode only; files have no drift).
-- [ ] Stats for the UI: playhead, level (dBFS), underruns, resyncs, latency, squelch state.
-- [ ] `LiveEngine`: add `ring()`, `format()`, `rate()`, `gen()` accessors.
+- [x] Drift PI loop (live mode only; files have no drift).
+- [x] Stats for the UI: playhead, level (dBFS), underruns, resyncs, latency, squelch state.
+- [x] `LiveEngine`: add `ring()`, `format()`, `rate()`, `gen()` accessors.
 
 ### Phase 4 — UI (`src/app_audio.cpp`, members in `src/app.h`)
-- [ ] Toolbar button "Audio" (`*` while playing) and a shortcut (check that the key is free;
-      Ctrl+A conflicts with select-all in text fields).
-- [ ] Window contents:
+- [x] Toolbar button "Audio" (`*` while playing) and **Ctrl+D** (Ctrl+A would conflict with
+      select-all in text fields).
+- [x] Window contents:
   - **Source:** File or Live, from the app mode.
   - **Tuning:** follow channel, offset, bandwidth.
   - **Demod:** mode, AGC, de-emphasis, BFO, squelch.
@@ -78,23 +79,24 @@ Out of scope for now: FM stereo / RDS, more than one channel at a time, network 
   - **Transport (file):** play / pause / stop, range (cursor / view / markers / whole file),
     loop, position slider.
   - **Status line:** latency, underruns, resyncs.
-- [ ] File mode: playhead line on the time plots and waterfall; modifier-click on a time plot
+- [x] File mode: playhead line on the time plots and waterfall; modifier-click on a time plot
       seeks; optional "follow playhead" pans the view.
-- [ ] Live mode: channel overlay on the live spectrum and waterfall (drag line, shaded
+- [x] Live mode: channel overlay on the live spectrum and waterfall (drag line, shaded
       bandwidth) and click-to-tune, using the same `demod_.chanOffset`.
-- [ ] Stop audio when the source changes (open file, enter / leave live mode, device stop).
+- [x] Stop audio when the source changes (open file, enter / leave live mode, device stop).
 
 ### Phase 5 — WAV export and CLI
-- [ ] "Save WAV…" for the selected file range, faster than real time; "Record audio" toggle in live mode.
-- [ ] `--audio MODE`, `--audio-out FILE.wav` (demodulate the file or `--view` range and exit,
+- [x] "Save WAV…" for the selected file range, faster than real time; "Record audio" toggle in live mode.
+- [x] `--audio MODE`, `--audio-out FILE.wav` (demodulate the file or `--view` range and exit,
       like `--gen-out`), `--audio-device NAME`, `--volume DB`.
 
 ### Phase 6 — Tests and docs
-- [ ] `tools/audio_check.cpp` (like `siggen_check`): synthesize AM / FM / SSB tones at a known
+- [x] `tools/audio_check.cpp` (like `siggen_check`): synthesize AM / FM / SSB tones at a known
       offset, run `AudioDemod`, check tone frequency, SNR, and level; check resampler output
       length against the ratio; check that the drift loop converges for a ±200 ppm rate error.
-- [ ] Manual checks: `wvt --device sim` (built-in AM and FM stations) and iqgen files.
-- [ ] README: Audio section, build option, CLI flags, source-file table, roadmap row.
+- [x] Manual checks: `wvt --device sim` (built-in AM and FM stations) and iqgen files.
+- [x] README: Audio section, build option, CLI flags, source-file table.
+- [ ] Roadmap row (left for you: the table numbers versions, and 1.2 / 1.3 are not done yet).
 
 ## 5. Risks
 
@@ -103,13 +105,57 @@ Out of scope for now: FM stereo / RDS, more than one channel at a time, network 
 | macOS audio from an XQuartz-linked process | CoreAudio works from any process; verify in Phase 1 |
 | No audio device (`ssh -X`, Xvfb, headless) | Pane shows "no output device; WAV export only" and keeps working |
 | High rates (USRP at 20+ MS/s) | Measure the half-band cascade; show "DSP behind" in the status line if it cannot keep up |
-| Live latency vs. robustness | Default ~150 ms target, adjustable |
+| Live latency vs. robustness | ~150 ms target (100 ms for files); not adjustable yet |
 
-## 6. Open questions
+## 6. Decisions (formerly open questions)
 
-1. Is it OK to vendor miniaudio, or should we write native ALSA + CoreAudio backends instead
-   (more code to maintain)?
-2. Floating window (like the Signal Generator) or a docked section in the right column under
-   the AM / FM / PM plots?
-3. Is the mode list right? WFM stereo in this branch or later?
-4. WAV export and headless `--audio-out` in the first version, or afterwards?
+| Question | Decision |
+|---|---|
+| Output backend | Vendor **miniaudio** |
+| Window | **Floating** window, like the Signal Generator |
+| Modes | AM, NFM, WFM (mono), USB, LSB, CW, as listed. WFM stereo is out of scope for this branch |
+| WAV export | **In this version**: "Save WAV…", live "Record audio", and headless `--audio-out` |
+
+## 7. Results and remaining work
+
+Implemented as planned, with these details:
+
+- Files: `src/audio_dsp.*`, `src/audio_engine.*`, `src/audio_out.*`, `src/wav_writer.*`,
+  `src/miniaudio_impl.c`, `src/app_audio.cpp`, `tools/audio_check.cpp`, `third_party/miniaudio/`
+  (0.11.25, header + license). Small changes in `app.*`, `app_live.cpp`, `live.h`, `main.cpp`,
+  `recorder.*` (exports `makeDirs`), `CMakeLists.txt`, `README.md`.
+- miniaudio on macOS uses `MA_NO_RUNTIME_LINKING` and links the CoreAudio frameworks; on Linux it
+  loads the backends at run time (links only `dl`, `m`, threads). The `MA_NO_*` defines are on the
+  `miniaudio` target as PUBLIC, so all files see the same configuration.
+- For every mode, `offset` is the passband center, so the cyan / orange overlay is exactly the
+  passband. USB puts the carrier at the lower edge, LSB at the upper edge.
+- "Follow playhead" only pages views of 0.25 s or more; shorter views paged faster than the plots
+  could be computed.
+- Headless `--audio-out` with `--device` records live audio without opening a sound device
+  (`AudioOutput::None`).
+- `App::busy()` does not include audio; `App::audioBusy()` keeps the main loop running. This keeps
+  `--screenshot` working while audio plays.
+
+Verified:
+
+- `build/audio_check`: all modes at 250 kS/s, 2.4 MS/s and 10 MS/s with blocks of random size. Tone
+  within 1 Hz, SNR 37-70 dB, output length within 0.15 %, ratio trim exact (+500 ppm), squelch, and
+  the WAV header. DSP speed at 10 MS/s: 10-15x real time (x86_64 build under Rosetta).
+- Headless export from an `iqgen` file (WFM 1 kHz at 53 dB SNR; AM 400 Hz) and headless live
+  recording from `--device sim` (WFM 50 dB, AM 400 Hz, 0 resyncs).
+- 40 s live run against the MacBook speakers (muted): latency steady at 173-180 ms, drift trim
+  -90 to -290 ppm, 0 underruns, 0 resyncs, DSP load 11-13 % for WFM at 2.4 MS/s.
+- Screenshots of file playback (playhead, level meter, follow) and live playback (tuner overlay).
+- Build with `-DWVT_WITH_AUDIO=OFF`: compiles, reports "built without audio output", WAV export works.
+
+Checked by hand: playback with the simulator and with a handheld radio.
+
+Not yet verified by hand:
+
+- [ ] Listening test of each mode.
+- [ ] Shift+click to play, dragging the playhead and the position slider, Pause / Resume, Loop.
+- [ ] Live "Record audio" button, device combo, audio across a retune and a stream restart.
+- [ ] Real RTL-SDR / USRP streams (only the simulator was tested).
+- [ ] A Linux build (only macOS was built here).
+
+Possible follow-ups: adjustable live latency, FM stereo, audio spectrum / scope in the window.

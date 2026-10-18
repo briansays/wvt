@@ -44,10 +44,13 @@ App::App(X11Window& win) : win_(win) {
     sgFile_ = std::make_unique<FileGenJob>();
     snprintf(sgPrefix_, sizeof sgPrefix_, "~/wvt-recordings/siggen");
     snprintf(txArgs_, sizeof txArgs_, "%s", txCfg_.args.c_str());
+    snprintf(auPrefix_, sizeof auPrefix_, "~/wvt-recordings/audio");
 }
 
 App::~App() {
     tx_.reset();  // stop transmitting first
+    audio_.reset();
+    auExport_.reset();
     sgFile_.reset();
     sgPrevWorker_.reset();
     live_.reset();
@@ -74,6 +77,7 @@ bool App::openFile(const std::string& path, const CliOverrides& o) {
         status_ = err;
         return false;
     }
+    stopAudio("Audio stopped (new file)");
     file_ = f;
     snprintf(pathBuf_, sizeof pathBuf_, "%s", g.dataPath.c_str());
     if (g.haveFmt) { fp_.fmt = g.fmt; fp_.bigEndian = g.bigEndian; }
@@ -272,6 +276,7 @@ void App::frame() {
     pollResults();
     if (liveMode_) pollLive();
     pollSigGen();
+    pollAudio();
     fFmt_.offset = relFreq_ ? fc_ : 0.0;
 
     const ImGuiViewport* vp = ImGui::GetMainViewport();
@@ -323,9 +328,11 @@ void App::frame() {
 
     drawStatusBar();
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_G)) sgOpen_ = !sgOpen_;
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_D)) auOpen_ = !auOpen_;
     handleShortcuts();
     ImGui::End();
     drawSigGenWindow();
+    drawAudioWindow();
 
     hoverT_ = nextHoverT_;
     hoverF_ = nextHoverF_;
@@ -342,6 +349,7 @@ void App::drawToolbar() {
     flowBegin();
     drawSourceSelector();
     drawSigGenButton();
+    drawAudioButton();
     if (liveMode_) {
         drawDeviceToolbar();
         return;
@@ -681,6 +689,7 @@ void App::drawLeft() {
             ImPlot::PlotLine("avg", wf_->specF.data(), wf_->specAvg.data(), (int)wf_->specF.size());
         }
         drawChannelOverlay(false);
+        drawAudioOverlay();
         drawFreqMarkers();
         if (std::isfinite(hoverF_)) {
             ImPlot::SetNextLineStyle(kColHover);
@@ -722,8 +731,10 @@ void App::drawLeft() {
             ImPlot::PlotImage("##wf", wfTex_, ImPlotPoint(wf_->f0, wf_->t0), ImPlotPoint(wf_->f1, wf_->t1),
                               ImVec2(0, 1), ImVec2(1, 0));
         drawChannelOverlay(true);
+        drawAudioOverlay();
         drawFreqMarkers();
         drawTimeMarkersHorizontal();
+        drawPlayhead(false);
         ImPlot::SetNextLineStyle(kColHover);
         if (std::isfinite(hoverT_)) ImPlot::PlotInfLines("##ht", &hoverT_, 1, (int)ImPlotItemFlags_NoFit | (int)ImPlotInfLinesFlags_Horizontal);
         ImPlot::SetNextLineStyle(kColHover);
@@ -736,6 +747,7 @@ void App::drawLeft() {
                 demod_.chanEnable = true;
                 demod_.chanOffset = m.x - fc_;
             }
+            if (ImGui::GetIO().KeyShift && ImGui::IsMouseClicked(0)) playFrom(m.y);
         }
         ImPlot::EndPlot();
     }
@@ -765,6 +777,7 @@ bool App::beginTimePlot(const char* id, const char* ylabel, float h, bool autoY,
 
 void App::endTimePlot(const char* overlay) {
     drawTimeMarkersVertical();
+    drawPlayhead(true);
     if (overlay && *overlay) {
         // measurement readout in the plot's top-left corner
         ImDrawList* dl = ImPlot::GetPlotDrawList();
@@ -781,7 +794,10 @@ void App::endTimePlot(const char* overlay) {
         ImPlot::SetNextLineStyle(kColHover);
         ImPlot::PlotInfLines("##ht", &hoverT_, 1, ImPlotItemFlags_NoFit);
     }
-    if (ImPlot::IsPlotHovered()) nextHoverT_ = ImPlot::GetPlotMousePos().x;
+    if (ImPlot::IsPlotHovered()) {
+        nextHoverT_ = ImPlot::GetPlotMousePos().x;
+        if (ImGui::GetIO().KeyShift && ImGui::IsMouseClicked(0)) playFrom(nextHoverT_);
+    }
     ImPlot::EndPlot();
 }
 

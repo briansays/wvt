@@ -74,6 +74,11 @@ add_executable(wvt
   src/sdr_siggen.cpp
   src/siggen.cpp
   src/siggen_out.cpp
+  src/audio_dsp.cpp
+  src/audio_engine.cpp
+  src/audio_out.cpp
+  src/wav_writer.cpp
+  src/app_audio.cpp
   ${FONT_CPP})
 target_include_directories(wvt PRIVATE src ${PLATFORM_INCLUDES})
 target_link_libraries(wvt PRIVATE imgui_implot ${PLATFORM_LIBS} Threads::Threads)
@@ -143,6 +148,34 @@ if(NOT WVT_WITH_UHD STREQUAL "OFF")
   endif()
 endif()
 
+# ---------------------------------------------------------------------------
+# Audio output through the bundled miniaudio. It needs no extra packages:
+# Linux backends (PipeWire, PulseAudio, ALSA) load at run time; macOS links
+# CoreAudio. OFF builds without playback (WAV export still works).
+# ---------------------------------------------------------------------------
+set(WVT_WITH_AUDIO AUTO CACHE STRING "Build audio playback with miniaudio (AUTO, ON, OFF)")
+set_property(CACHE WVT_WITH_AUDIO PROPERTY STRINGS AUTO ON OFF)
+if(NOT WVT_WITH_AUDIO STREQUAL "OFF")
+  set(MINIAUDIO_DIR ${CMAKE_SOURCE_DIR}/third_party/miniaudio)
+  set(WVT_MA_DEFS MA_NO_DECODING MA_NO_ENCODING MA_NO_GENERATION MA_NO_RESOURCE_MANAGER MA_NO_NODE_GRAPH MA_NO_ENGINE)
+  add_library(miniaudio STATIC src/miniaudio_impl.c)
+  target_include_directories(miniaudio PUBLIC ${MINIAUDIO_DIR})
+  target_compile_options(miniaudio PRIVATE -w)
+  if(APPLE)
+    # Link the frameworks directly instead of loading them at run time.
+    list(APPEND WVT_MA_DEFS MA_NO_RUNTIME_LINKING)
+    target_link_libraries(miniaudio PUBLIC "-framework CoreFoundation" "-framework CoreAudio" "-framework AudioToolbox")
+  else()
+    target_link_libraries(miniaudio PUBLIC ${CMAKE_DL_LIBS} m Threads::Threads)
+  endif()
+  target_compile_definitions(miniaudio PUBLIC ${WVT_MA_DEFS})
+  target_link_libraries(wvt PRIVATE miniaudio)
+  target_compile_definitions(wvt PRIVATE WVT_HAVE_AUDIO)
+  message(STATUS "wvt: audio playback enabled (miniaudio)")
+else()
+  message(STATUS "wvt: audio playback disabled (WVT_WITH_AUDIO=OFF)")
+endif()
+
 # Synthetic test-signal generator
 add_executable(iqgen tools/iqgen.cpp)
 
@@ -151,3 +184,9 @@ add_executable(siggen_check tools/siggen_check.cpp src/siggen.cpp src/siggen_out
   src/sdr_device.cpp src/sdr_sim.cpp src/sdr_siggen.cpp src/iq_file.cpp src/dsp.cpp src/ui_util.cpp)
 target_include_directories(siggen_check PRIVATE src)
 target_link_libraries(siggen_check PRIVATE imgui_implot Threads::Threads)
+
+# Audio demodulator self-test (no sound device needed)
+add_executable(audio_check tools/audio_check.cpp src/audio_dsp.cpp src/wav_writer.cpp src/recorder.cpp
+  src/iq_file.cpp src/dsp.cpp)
+target_include_directories(audio_check PRIVATE src)
+target_link_libraries(audio_check PRIVATE Threads::Threads)

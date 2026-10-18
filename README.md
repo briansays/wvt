@@ -15,6 +15,9 @@ jittered PRIs, bursts and impairments. It can also play back recordings as canne
 generator writes its waveforms to files, streams them into the live view (loopback), or transmits them
 with a USRP B200 / B205mini. See [Signal generator](#signal-generator).
 
+An **audio** window demodulates one channel (AM, NFM, WFM, USB, LSB or CW) and plays it through the
+speakers. It plays a recording or the live stream, and it writes WAV files. See [Audio](#audio).
+
 ## Roadmap 
 
 | Version | Features | | 
@@ -40,8 +43,12 @@ cmake --build build -j
 ./build/wvt recording.sigmf-meta
 ```
 
-The repository includes Dear ImGui 1.91.9 and ImPlot 0.16 in `third_party/`, so the build needs no
-network access. The binary contains the UI font.
+The repository includes Dear ImGui 1.91.9, ImPlot 0.16 and miniaudio 0.11.25 in `third_party/`, so
+the build needs no network access. The binary contains the UI font.
+
+Audio playback uses miniaudio. On macOS it links CoreAudio. On Linux it needs no development
+packages: at run time it loads PipeWire, PulseAudio or ALSA, whichever is available. To build
+without playback, use `-DWVT_WITH_AUDIO=OFF`. WAV export still works without playback.
 
 ### Optional: device support
 
@@ -125,6 +132,12 @@ signal generator (-c sets the center frequency, -r the sample rate):
       --gen-sample cf32|ci16|ci8|cu8   --gen-duration T | --gen-pulses N   --gen-annotate
       --tx             TRANSMIT with a USRP until Ctrl+C (or --gen-duration)
       --tx-gain DB  --tx-args ARGS
+
+audio (--chan OFF:BW sets the channel; without it: 0 Hz and the default width of the mode):
+      --audio am|nfm|wfm|usb|lsb|cw   open the audio window and play
+      --audio-out FILE.wav   demodulate to WAV and exit (the file, or the --view range;
+                             with --device: the live stream until Ctrl+C or --record-duration)
+      --audio-device NAME  --list-audio-devices  --volume DB  --squelch DBFS
 ```
 
 wvt gets the format, sample rate and center frequency from these sources, in this order:
@@ -288,6 +301,60 @@ wvt --play ~/caps/b13_*.sigmf-meta --play-gap 5m --gen-out ~/caps/b13x10 --gen-p
 wvt --play capture.cs16 --play-rate 2.4M -r 10M -c 915M --play-segment 1.5:0.2 --tx    # replay a burst
 ```
 
+## Audio
+
+Open the audio window with the **Audio** toolbar button or **Ctrl+D**, or start wvt with `--audio MODE`.
+The window floats over the main window. It works in File mode and in Device mode.
+
+**Channel.** With **Follow viewer channel** on (the default), the audio uses the channel of the
+viewer: the cyan lines on the spectrum and waterfall. To tune, Ctrl+click the spectrum or the
+waterfall, or drag the lines. Live mode also shows these lines. With *Follow* off, the audio channel
+is the orange line, and you set its offset and bandwidth in the window. When you select a mode, wvt
+sets the bandwidth to the default of that mode.
+
+| Mode | Default width | Notes |
+|---|---|---|
+| AM | 10 kHz | envelope. *AGC* divides by the carrier level |
+| NFM | 12.5 kHz | audio up to 5 kHz |
+| WFM | 200 kHz | mono, audio up to 15 kHz, 75 µs de-emphasis (select 50 µs for Europe) |
+| USB / LSB | 2.8 kHz | the passband is the shaded channel. The carrier is at its lower edge (USB) or upper edge (LSB) |
+| CW | 500 Hz | a carrier at the channel center plays at the *BFO pitch* (200-1500 Hz) |
+
+- **Gain** adds gain after the demodulator. **Squelch** mutes the audio while the channel power is
+  below the threshold. The window shows the channel power, so you can set the threshold just above
+  the noise.
+- **Volume** and **Mute** change only the speaker level. They do not change WAV files.
+- **Device** selects the sound output. The change applies on the next Play.
+
+**File mode.** **Play** plays the **Range**: *from view start* to the end of the file, the *view*,
+the part between the *time markers*, or the *whole file*. A green playhead line moves across the
+time plots and the waterfall. Drag it, or the position slider, to seek. **Shift+click** a time plot
+or the waterfall to play from that point. *Loop* repeats the range. *Follow playhead* pages the view
+forward when the playhead leaves it (only for views of 0.25 s or more).
+
+**Device mode.** **Play** plays the live stream, with approximately 0.15 s of delay. The sound card
+and the SDR run from different clocks. wvt measures the buffer level and trims the resampling ratio
+(the window shows the correction in ppm), so the delay stays constant. If the demodulator falls
+behind, it skips to the newest samples and counts a *resync*. A retune or a stream restart
+continues the audio automatically.
+
+**WAV files** are 48 kHz, 16-bit mono. The name is the *File prefix* plus the date, time,
+frequency and mode, for example `~/wvt-recordings/audio_20261018_143000_100.3MHz_WFM.wav`.
+- File mode: **Save WAV** demodulates the range faster than real time.
+- Device mode: **Record audio** records the demodulated stream. It also works without a sound device.
+
+```sh
+wvt capture.sigmf-meta --chan 300k:200k --audio wfm                       # play a broadcast FM channel
+wvt capture.sigmf-meta --chan -250k:10k --audio am --view 0.5:1.5 --audio-out am.wav   # export 1 s
+wvt --device rtlsdr -c 100.4M -r 2.4M --audio wfm --chan -300k:200k       # listen live to 100.1 MHz
+wvt --device sim -c 100M -r 2.4M --audio wfm --chan 360k:200k --audio-out fm.wav --record-duration 10
+```
+
+The demodulator shifts the channel to 0 Hz, then decimates with half-band filters to at least
+twice the channel width, filters the channel (windowed-sinc FIR), and demodulates. A polyphase
+resampler then sets the audio bandwidth and the 48 kHz output rate. All stages keep their state
+between blocks, so the audio is continuous. `build/audio_check` tests each mode (no hardware needed).
+
 ## Screen layout
 
 | Area | Contents |
@@ -314,6 +381,8 @@ wvt --play capture.cs16 --play-rate 2.4M -r 10M -c 915M --play-segment 1.5:0.2 -
 | Zoom to a region | Right-drag a box (Alt / Shift limit it to one axis) |
 | Fit to data | Double-click |
 | Tune the channel | Ctrl+click the spectrum or waterfall, or drag the cyan lines (center line moves it, edge lines change bandwidth) |
+| Play audio from a point | Shift+click a time plot or the waterfall |
+| Signal generator / audio window | `Ctrl+G` / `Ctrl+D` |
 | Pan the view | `←` `→` (10%), `PgUp` `PgDn` (one page) |
 | Zoom the time axis | `+` / `-` |
 | Jump to start / end | `Home` / `End` |
@@ -374,5 +443,11 @@ Try `wvt out.sigmf-meta --chan 300k:150k --view 0.5:0.505`.
 | `src/sdr_siggen.cpp` | Loopback device that streams the generator into the live view |
 | `src/sdr_tx.h` | Transmitter interface (`sdr_uhd.cpp` implements it for UHD) |
 | `src/app_siggen.cpp` | Signal generator window |
+| `src/audio_dsp.*` | Streaming audio demodulator: channelizer, AM / FM / SSB / CW, resampler |
+| `src/audio_engine.*` | Audio sessions (file or live), drift control, WAV recording and export |
+| `src/audio_out.*` | Sound output (miniaudio) and the ring buffer to the audio callback |
+| `src/wav_writer.*` | WAV file writer |
+| `src/app_audio.cpp` | Audio window |
 | `tools/iqgen.cpp` | Synthetic test-signal generator |
 | `tools/siggen_check.cpp` | Self-test for the generator (`build/siggen_check`, no hardware needed) |
+| `tools/audio_check.cpp` | Self-test for the audio demodulator (`build/audio_check`, no hardware needed) |
