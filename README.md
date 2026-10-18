@@ -6,7 +6,8 @@ that share one time axis. When you pan or zoom one plot, all the other plots fol
 
 <img width="2125" height="1407" alt="image" src="https://github.com/user-attachments/assets/71d188af-cc07-4a0c-93ef-36d082b5829b" />
 
-wvt can also stream live from an **RTL-SDR v3** or a **USRP B200 / B205mini**. It shows the
+wvt can also stream live from an **RTL-SDR v3**, a **USRP B200 / B205mini** or a **Signal Hound
+BB60D** (also BB60C / BB60A). It shows the
 spectrum and a scrolling waterfall in real time. It can record the stream to SigMF or raw IQ
 files, and wvt opens these files directly. See [Live devices](#live-devices).
 
@@ -62,6 +63,20 @@ To make a backend necessary (CMake fails if the library is missing) or to leave 
 
 wvt uses the UHD C API, so you do not need Boost headers to build it.
 
+**Signal Hound BB60.** No distribution packages the Signal Hound API. Download the SDK from
+[signalhound.com](https://signalhound.com/software/signal-hound-software-development-kit-sdk).
+Then give its folder to CMake:
+
+```sh
+cmake -S . -B build -DSIGNALHOUND_SDK_DIR=~/signal_hound_sdk
+```
+
+CMake finds `bb_api.h` and the `libbb_api.so` that agrees with your CPU (x86-64 or aarch64). The
+option `WVT_WITH_BB` takes `AUTO`, `ON` or `OFF`. If you install the library as the SDK README
+tells you (`/usr/local/lib`, then `ldconfig`), CMake finds it without `SIGNALHOUND_SDK_DIR`. If you
+link from the SDK folder, the folder must also contain the `libbb_api.so.5` link. If it does not,
+run `ldconfig -n` on that folder.
+
 ### Device setup
 
 **RTL-SDR v3 on Linux**
@@ -78,6 +93,12 @@ wvt uses the UHD C API, so you do not need Boost headers to build it.
   `uhd-host` package installs this rule.
 - Use a USB 3 port for rates above approximately 8 MS/s. To check that the computer finds the
   device, run `uhd_find_devices`.
+
+**Signal Hound BB60D / BB60C**
+- Install the udev rule from the SDK, so that the API works without root. Then replug the device.
+- The BB60 needs a USB 3 port at all sample rates.
+- Close Spike before you start wvt. Only one program at a time can open the device.
+- To check that the computer finds the device, run `wvt --list-devices`.
 
 ## Running
 
@@ -96,10 +117,14 @@ wvt [options] [file]
       --screenshot F   render once, write a PPM to F, exit (for automation)
 
 live devices (-c and -r set the tuning):
-      --device DEV     rtlsdr[:INDEX|SERIAL] | uhd[:ARGS] | sim
+      --device DEV     rtlsdr[:INDEX|SERIAL] | uhd[:ARGS] | bb[:SERIAL] | sim
       --gain DB|auto   receiver gain (default 30 dB)
+      --ref-level DBM  BB60: strongest expected input (default -20 dBm)
+      --atten auto|0|10|20|30   BB60 attenuator (default auto)
+      --amp auto|0-3   BB60 amplifier setting (default auto)
+      --ext-ref        BB60: lock to a 10 MHz reference on port 1
       --antenna NAME   USRP antenna (RX2 or TX/RX)
-      --bandwidth HZ   USRP analog bandwidth (default: automatic)
+      --bandwidth HZ   USRP analog / BB60 I/Q bandwidth (default: automatic)
       --bias-tee       RTL-SDR: power an LNA / active antenna over the coax
       --direct-sampling I|Q  RTL-SDR: HF direct sampling (v3: Q)
       --ppm N          RTL-SDR frequency correction
@@ -108,7 +133,7 @@ live devices (-c and -r set the tuning):
 recording (needs --device):
       --record PREFIX  record to PREFIX_<date>_<time>_<fc>_<rate>.<ext>
       --record-format sigmf|raw     (default sigmf)
-      --record-sample native|cf32   (default native: cu8 for RTL-SDR, ci16 for USRP)
+      --record-sample native|cf32   (default native: cu8 for RTL-SDR, ci16 for USRP and BB60)
       --record-duration T           stop after T seconds
       --no-gui         record without opening a window (Ctrl+C stops)
 
@@ -149,19 +174,27 @@ device only.
 wvt --device rtlsdr -c 100.1M -r 2.4M --gain 30          # RTL-SDR v3, FM broadcast band
 wvt --device rtlsdr -c 7.1M -r 2.4M --direct-sampling Q  # RTL-SDR v3, HF
 wvt --device uhd:type=b200 -c 915M -r 20M --gain 40      # USRP B200 / B205mini
+wvt --device bb -c 2.437G -r 20M --ref-level -30         # Signal Hound BB60D, Wi-Fi channel 6
 wvt --device sim -c 100M -r 2.4M                         # built-in simulator, no hardware
 ```
 
-| | RTL-SDR v3 | USRP B200 / B205mini |
-|---|---|---|
-| Tuning | 24 MHz - 1.766 GHz. HF below 24 MHz with direct sampling (Q) | 70 MHz - 6 GHz |
-| Sample rate | 225-300 kS/s or 0.9-3.2 MS/s (2.4 MS/s or less is reliable) | up to 56 MS/s (USB 3) |
-| Gain | 0-49.6 dB in tuner steps, or AGC | 0-76 dB, or AGC |
-| Extras | bias-tee, PPM correction | antenna RX2 / TX/RX, analog bandwidth |
-| Samples | cu8 | ci16 (sc16) |
+| | RTL-SDR v3 | USRP B200 / B205mini | Signal Hound BB60D / BB60C |
+|---|---|---|---|
+| Tuning | 24 MHz - 1.766 GHz. HF below 24 MHz with direct sampling (Q) | 70 MHz - 6 GHz | 9 kHz - 6.4 GHz |
+| Sample rate | 225-300 kS/s or 0.9-3.2 MS/s (2.4 MS/s or less is reliable) | up to 56 MS/s (USB 3) | 40 MS/s divided by 1, 2, 4 ... 8192 |
+| Gain | 0-49.6 dB in tuner steps, or AGC | 0-76 dB, or AGC | reference level -130 to +20 dBm. Attenuator and amplifier: auto or manual |
+| Extras | bias-tee, PPM correction | antenna RX2 / TX/RX, analog bandwidth | I/Q bandwidth (up to 27 MHz), external 10 MHz reference |
+| Samples | cu8 | ci16 (sc16) | ci16 (sc16) |
 
 - You can change **frequency and gain** while the device streams. A change to the rate or to a
   device option restarts the stream.
+- **BB60:** the *Ref level* slider replaces *Gain*. Set it to the strongest signal that you expect.
+  If the level is too low, the status shows "ADC overload". If it is too high, the noise floor
+  goes up. The BB60 must restart its stream for each retune and for each new reference level. Thus
+  a short part of the signal (milliseconds) is not received at each change. The recording starts a
+  new SigMF capture segment at each retune. The BB60 can stream only some sample rates, so the rate
+  is a list. wvt changes a rate from the command line to the nearest rate in the list. Above
+  10 MS/s, the Signal Hound API uses much CPU time to filter the samples.
 - The **waterfall** scrolls with the newest row at the top. Its vertical axis shows seconds ago.
   *Rows/s* sets the scroll speed, and *History* sets how many rows wvt keeps. *Avg* `auto` averages
   all samples received since the previous row, up to 20 MS/s. The status bar shows the fraction of
@@ -188,8 +221,8 @@ time, frequency and rate to it, for example
 - **Raw** writes bare samples (`.cu8`, `.cs16` or `.cf32`). The file name holds the rate and
   frequency, where the metadata detection of wvt finds them. A raw file cannot record a frequency
   change, so wvt locks the tuning during a raw recording.
-- **Samples**: *native* saves exactly the samples that the device delivers: cu8 for RTL-SDR and
-  ci16 for USRP. This format is the smallest and is lossless. *cf32* converts the samples to
+- **Samples**: *native* saves exactly the samples that the device delivers: cu8 for RTL-SDR, and
+  ci16 for USRP and BB60. This format is the smallest and is lossless. *cf32* converts the samples to
   complex float32 for tools that read only float.
 - wvt locks the sample rate during a recording, because one file has one rate. **Limit** stops the
   recording after a set time.
@@ -368,6 +401,7 @@ Try `wvt out.sigmf-meta --chan 300k:150k --view 0.5:0.505`.
 | `src/sdr_device.*` | Device interface, driver list, sample-rate checks |
 | `src/sdr_rtlsdr.cpp` | RTL-SDR backend (librtlsdr) |
 | `src/sdr_uhd.cpp` | USRP backend (UHD C API) |
+| `src/sdr_bb60.cpp` | Signal Hound BB60 backend (bb_api) |
 | `src/sdr_sim.cpp` | Simulated device with synthetic signals |
 | `src/siggen.*` | Signal generator DSP: CW / pulsed / playback waveforms, resampler, validation, parameter bus |
 | `src/siggen_out.*` | Generator outputs: file job, transmit engine, preview |

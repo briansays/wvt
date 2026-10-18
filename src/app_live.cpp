@@ -27,12 +27,14 @@ double nowSec() {
 GainRange defaultGain(const std::string& driver) {
     if (driver == "rtlsdr") return {0, 49.6, 0.1, {}, true};
     if (driver == "uhd") return {0, 76, 1, {}, true};
+    if (driver == "bb") return {-130, 20, 1, {}, false, "Ref level", "dBm"};
     return {0, 60, 1, {}, true};
 }
 
 const char* driverName(const std::string& d) {
     if (d == "rtlsdr") return "RTL-SDR";
     if (d == "uhd") return "USRP";
+    if (d == "bb") return "BB60";
     if (d == "siggen") return "Signal generator";
     return "Simulator";
 }
@@ -58,7 +60,7 @@ void App::drawSourceSelector() {
         else if (mode == 0 && liveMode_) leaveLive();
     }
     ImGui::EndDisabled();
-    tooltipAlways("File: analyze a recording.\nDevice: stream live from an RTL-SDR or USRP B200/B205.");
+    tooltipAlways("File: analyze a recording.\nDevice: stream live from an RTL-SDR, USRP B200/B205 or Signal Hound BB60.");
 }
 
 void App::enterLive() {
@@ -92,12 +94,16 @@ void App::scanDevices() {
 
 void App::selectDevice(const DeviceInfo& d) {
     const bool driverChanged = d.driver != devCfg_.driver;
+    // The BB60 "gain" is a reference level in dBm, so a value carried over from another driver means nothing.
+    const bool gainMeaningChanged = driverChanged && (d.driver == "bb" || devCfg_.driver == "bb");
     devCfg_.driver = d.driver;
     devCfg_.args = d.args;
     snprintf(devArgs_, sizeof devArgs_, "%s", d.args.c_str());
     if (driverChanged) {
         std::string err, warn;
         if (!checkSampleRate(d.driver, devCfg_.rate, err, warn)) devCfg_.rate = d.driver == "uhd" ? 10e6 : 2.4e6;
+        devCfg_.rate = snapSampleRate(d.driver, devCfg_.rate);
+        if (gainMeaningChanged) devCfg_.gain = d.driver == "bb" ? -20 : 30;
         GainRange g = defaultGain(d.driver);
         devCfg_.gain = std::clamp(devCfg_.gain, g.min, g.max);
         if (d.driver == "uhd" && !antenna_[0]) snprintf(antenna_, sizeof antenna_, "RX2");
@@ -191,7 +197,21 @@ void App::drawDeviceToolbar() {
     label("Sample rate", fieldW(13));
     double rate = running ? liveStats_.rate : devCfg_.rate;
     ImGui::BeginDisabled(rec);
-    if (InputSI("##lfs", &rate, "Sps", fieldW(13))) {
+    const auto rates = supportedRates(devCfg_.driver);
+    if (!rates.empty()) {
+        // Only discrete rates exist (decimations of one clock): pick from the list.
+        ImGui::SetNextItemWidth(fieldW(13));
+        if (ImGui::BeginCombo("##lfs", fmtSI(rate, "S/s", 6).c_str())) {
+            for (double r : rates)
+                if (ImGui::Selectable(fmtSI(r, "S/s", 6).c_str(), std::fabs(r - rate) < 1)) {
+                    devCfg_.rate = r;
+                    std::string warn;
+                    if (checkSampleRate(devCfg_.driver, r, err, warn) && !warn.empty()) status_ = warn;
+                    if (running) restartDevice();
+                }
+            ImGui::EndCombo();
+        }
+    } else if (InputSI("##lfs", &rate, "Sps", fieldW(13))) {
         std::string warn;
         if (!checkSampleRate(devCfg_.driver, rate, err, warn)) {
             status_ = err;
@@ -204,14 +224,19 @@ void App::drawDeviceToolbar() {
     ImGui::EndDisabled();
     tooltipAlways(rec ? "A recording has a single sample rate. Stop recording to change it."
                       : devCfg_.driver == "rtlsdr" ? "RTL-SDR: 225-300 kS/s or 0.9-3.2 MS/s (2.4 MS/s or less is reliable)"
+                      : devCfg_.driver == "bb"     ? "BB60: 40 MS/s divided by a power of 2.\nAbove 10 MS/s the host CPU does a lot of filtering."
                                                    : "USRP B200/B205: up to 56 MS/s on USB 3");
 
     // --- gain ---
     const GainRange g = running ? live_->gainRange() : defaultGain(devCfg_.driver);
-    label("Gain", fieldW(12));
+    label(g.label, fieldW(12));
     float gain = (float)devCfg_.gain;
-    ImGui::BeginDisabled(devCfg_.agc);
-    if (ImGui::SliderFloat("##gain", &gain, (float)g.min, (float)g.max, "%.1f dB")) {
+    char gainFmt[16];
+    snprintf(gainFmt, sizeof gainFmt, "%%.1f %s", g.unit);
+    // A BB60 restarts its stream for a new reference level, so apply it when the drag ends.
+    const bool applyOnRelease = devCfg_.driver == "bb";
+    ImGui::BeginDisabled(devCfg_.agc && g.agc);
+    if (ImGui::SliderFloat("##gain", &gain, (float)g.min, (float)g.max, gainFmt)) {
         double v = gain;
         if (!g.steps.empty()) {  // snap to the tuner's discrete gains
             double best = g.steps.front();
@@ -220,9 +245,14 @@ void App::drawDeviceToolbar() {
             v = best;
         }
         devCfg_.gain = v;
-        if (running && !live_->setGain(devCfg_.agc, devCfg_.gain, err)) status_ = "Gain failed: " + err;
+        if (running && !applyOnRelease && !live_->setGain(devCfg_.agc, devCfg_.gain, err)) status_ = "Gain failed: " + err;
     }
+    if (running && applyOnRelease && ImGui::IsItemDeactivatedAfterEdit() && !live_->setGain(false, devCfg_.gain, err))
+        status_ = "Reference level failed: " + err;
     ImGui::EndDisabled();
+    if (devCfg_.driver == "bb")
+        tooltipAlways("The strongest input you expect, in dBm. The BB60 sets its attenuator and amplifier from it\n"
+                      "(unless Atten and Amp are set by hand). Too low overloads the ADC; too high raises the noise floor.");
     if (g.agc) {
         ImGui::SameLine(0, st.ItemInnerSpacing.x);
         if (ImGui::Checkbox("AGC", &devCfg_.agc) && running && !live_->setGain(devCfg_.agc, devCfg_.gain, err))
@@ -259,6 +289,29 @@ void App::drawDeviceToolbar() {
         label("Bandwidth", fieldW(12));
         if (InputSI("##bw", &devCfg_.bandwidth, "Hz", fieldW(12))) restart = true;
         tooltipAlways("Analog filter bandwidth, 200 kHz - 56 MHz. 0 = automatic (follows the sample rate).");
+    } else if (devCfg_.driver == "bb") {
+        label("Atten", fieldW(6));
+        const char* att[] = {"Auto", "0 dB", "10 dB", "20 dB", "30 dB"};
+        int a = devCfg_.atten + 1;
+        if (ImGui::Combo("##bbatt", &a, att, 5)) {
+            devCfg_.atten = a - 1;
+            restart = true;
+        }
+        tooltipAlways("Input attenuator. Auto: chosen from the reference level.");
+        label("Amp", fieldW(5));
+        const char* amp[] = {"Auto", "0", "1", "2", "3"};
+        int m = devCfg_.rfGain + 1;
+        if (ImGui::Combo("##bbamp", &m, amp, 5)) {
+            devCfg_.rfGain = m - 1;
+            restart = true;
+        }
+        tooltipAlways("Amplifier setting (0 = lowest gain). Auto: chosen from the reference level.");
+        label("Bandwidth", fieldW(12));
+        if (InputSI("##bw", &devCfg_.bandwidth, "Hz", fieldW(12))) restart = true;
+        tooltipAlways("I/Q filter bandwidth. 0 = the widest for the rate (27 MHz at 40 MS/s, 17.8 MHz at 20 MS/s, else 80% of the rate).");
+        flow(ImGui::GetFrameHeight() * 4.5f);
+        restart |= ImGui::Checkbox("Ext ref", &devCfg_.extRef);
+        tooltipAlways("Lock to a 10 MHz reference on port 1.");
     }
     ImGui::EndDisabled();
     if (restart && running) restartDevice();

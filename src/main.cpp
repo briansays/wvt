@@ -140,11 +140,15 @@ static void usage() {
         "  -h, --help           show this help\n"
         "\n"
         "live devices (-c and -r set the tuning):\n"
-        "      --device DEV     rtlsdr[:INDEX|SERIAL] | uhd[:ARGS] | sim\n"
-        "                       e.g. --device uhd:type=b200  --device rtlsdr:0\n"
+        "      --device DEV     rtlsdr[:INDEX|SERIAL] | uhd[:ARGS] | bb[:SERIAL] | sim\n"
+        "                       e.g. --device uhd:type=b200  --device rtlsdr:0  --device bb\n"
         "      --gain DB|auto   receiver gain (default 30 dB)\n"
+        "      --ref-level DBM  BB60: strongest expected input (default -20 dBm)\n"
+        "      --atten auto|0|10|20|30   BB60 attenuator (default auto)\n"
+        "      --amp auto|0-3   BB60 amplifier setting (default auto)\n"
+        "      --ext-ref        BB60: lock to a 10 MHz reference on port 1\n"
         "      --antenna NAME   USRP antenna (RX2 or TX/RX)\n"
-        "      --bandwidth HZ   USRP analog bandwidth (default: automatic)\n"
+        "      --bandwidth HZ   USRP analog / BB60 I/Q bandwidth (default: automatic)\n"
         "      --bias-tee       RTL-SDR: power an LNA / active antenna over the coax\n"
         "      --direct-sampling I|Q  RTL-SDR: HF direct sampling (v3: Q)\n"
         "      --ppm N          RTL-SDR frequency correction\n"
@@ -153,7 +157,7 @@ static void usage() {
         "recording (needs --device):\n"
         "      --record PREFIX  record to PREFIX_<date>_<time>_<fc>_<rate>.<ext>\n"
         "      --record-format sigmf|raw   (default sigmf)\n"
-        "      --record-sample native|cf32 (default native: cu8 for RTL-SDR, ci16 for USRP)\n"
+        "      --record-sample native|cf32 (default native: cu8 for RTL-SDR, ci16 for USRP and BB60)\n"
         "      --record-duration T         stop after T seconds, e.g. 30\n"
         "      --no-gui         record without opening a window (Ctrl+C stops)\n"
         "\n"
@@ -205,7 +209,7 @@ int main(int argc, char** argv) {
         return c != std::string::npos && parseSI(str.substr(0, c).c_str(), a) && parseSI(str.substr(c + 1).c_str(), b);
     };
     StreamConfig dev;
-    bool haveDevice = false, haveRecord = false, noGui = false;
+    bool haveDevice = false, haveRecord = false, noGui = false, haveGain = false;
     RecordConfig rc;
     WaveformParams gp;
     FileGenConfig gc;
@@ -262,7 +266,21 @@ int main(int argc, char** argv) {
             std::string v = next("--gain");
             if (v == "auto") dev.agc = true;
             else if (!parseSI(v.c_str(), dev.gain)) { fprintf(stderr, "wvt: bad gain\n"); return 2; }
-        } else if (a == "--antenna") dev.antenna = next("--antenna");
+            haveGain = true;
+        } else if (a == "--ref-level") {
+            if (!parseSI(next("--ref-level"), dev.gain)) { fprintf(stderr, "wvt: bad reference level\n"); return 2; }
+            haveGain = true;
+        } else if (a == "--atten") {
+            std::string v = next("--atten");
+            if (v == "auto") dev.atten = -1;
+            else if (v == "0" || v == "10" || v == "20" || v == "30") dev.atten = atoi(v.c_str()) / 10;
+            else { fprintf(stderr, "wvt: --atten wants auto, 0, 10, 20 or 30\n"); return 2; }
+        } else if (a == "--amp") {
+            std::string v = next("--amp");
+            if (v == "auto") dev.rfGain = -1;
+            else if (v.size() == 1 && v[0] >= '0' && v[0] <= '3') dev.rfGain = v[0] - '0';
+            else { fprintf(stderr, "wvt: --amp wants auto or 0-3\n"); return 2; }
+        } else if (a == "--ext-ref") dev.extRef = true; else if (a == "--antenna") dev.antenna = next("--antenna");
         else if (a == "--bandwidth") {
             if (!parseSI(next("--bandwidth"), dev.bandwidth)) { fprintf(stderr, "wvt: bad bandwidth\n"); return 2; }
         } else if (a == "--bias-tee") dev.biasTee = true;
@@ -442,7 +460,8 @@ int main(int argc, char** argv) {
     if (haveDevice) {
         if (ov.haveFc) dev.fc = ov.fc;
         if (ov.haveRate) dev.rate = ov.rate;
-        else if (dev.driver == "uhd") dev.rate = 10e6;
+        else if (dev.driver == "uhd" || dev.driver == "bb") dev.rate = 10e6;
+        if (dev.driver == "bb" && !haveGain) dev.gain = -20;
     }
     if ((haveRecord || noGui) && !haveDevice) {
         fprintf(stderr, "wvt: recording needs --device\n");

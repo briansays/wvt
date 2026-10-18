@@ -1,7 +1,7 @@
 #pragma once
 // SDR receiver abstraction. One open device delivers a continuous stream of
 // samples in its native packed format (RTL-SDR: cu8, USRP B2xx: ci16,
-// simulator: ci16) to a callback on the device's own thread.
+// BB60: ci16, simulator: ci16) to a callback on the device's own thread.
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -11,17 +11,20 @@
 #include "iq_file.h"
 
 struct StreamConfig {
-    std::string driver = "sim";  // "sim" | "siggen" | "rtlsdr" | "uhd"
-    std::string args;            // rtlsdr: index or serial; uhd: device args ("type=b200,serial=...")
+    std::string driver = "sim";  // "sim" | "siggen" | "rtlsdr" | "uhd" | "bb"
+    std::string args;            // rtlsdr: index or serial; uhd: device args ("type=b200,serial=..."); bb: serial
     double fc = 100e6;
     double rate = 2.4e6;
     bool agc = false;
-    double gain = 30;        // dB
+    double gain = 30;        // dB; bb: reference level in dBm
     std::string antenna;     // uhd: "RX2" / "TX/RX"; empty = device default
-    double bandwidth = 0;    // uhd analog bandwidth, 0 = auto
+    double bandwidth = 0;    // uhd analog bandwidth, bb IQ filter bandwidth; 0 = auto
     bool biasTee = false;    // rtlsdr
     int directSampling = 0;  // rtlsdr: 0 off, 1 I branch, 2 Q branch (HF on the RTL-SDR v3)
     int ppm = 0;             // rtlsdr frequency correction
+    int atten = -1;          // bb: -1 auto (from the reference level), 0-3 = 0/10/20/30 dB
+    int rfGain = -1;         // bb: -1 auto (from the reference level), 0-3
+    bool extRef = false;     // bb: lock to a 10 MHz reference on port 1
 };
 
 struct DeviceInfo {
@@ -34,6 +37,8 @@ struct GainRange {
     double min = 0, max = 50, step = 1;
     std::vector<double> steps;  // discrete gains if the device only supports those
     bool agc = true;            // device supports automatic gain
+    const char* label = "Gain";  // what the gain value controls (bb: "Ref level")
+    const char* unit = "dB";
 };
 
 class SdrDevice {
@@ -71,6 +76,10 @@ std::unique_ptr<SdrDevice> openDevice(const StreamConfig& cfg, std::string& err)
 // Checks a sample rate against what the driver supports. `warn` gets a
 // non-fatal note (e.g. a rate that is known to drop samples).
 bool checkSampleRate(const std::string& driver, double rate, std::string& err, std::string& warn);
+// The only rates a driver can deliver, highest first; empty if any rate in
+// range works. The backend snaps a request to the nearest of these.
+std::vector<double> supportedRates(const std::string& driver);
+double snapSampleRate(const std::string& driver, double rate);
 
 // Backends (each defined in its own sdr_*.cpp)
 std::unique_ptr<SdrDevice> openSimDevice(const StreamConfig& cfg, std::string& err);
@@ -82,4 +91,8 @@ void enumerateRtlSdr(std::vector<DeviceInfo>& out);
 #ifdef WVT_HAVE_UHD
 std::unique_ptr<SdrDevice> openUhdDevice(const StreamConfig& cfg, std::string& err);
 void enumerateUhd(std::vector<DeviceInfo>& out);
+#endif
+#ifdef WVT_HAVE_BB
+std::unique_ptr<SdrDevice> openBbDevice(const StreamConfig& cfg, std::string& err);
+void enumerateBb(std::vector<DeviceInfo>& out);
 #endif

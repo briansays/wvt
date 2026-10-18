@@ -143,6 +143,55 @@ if(NOT WVT_WITH_UHD STREQUAL "OFF")
   endif()
 endif()
 
+# Signal Hound BB60 (bb_api). The SDK has no pkg-config file and ships the
+# library versioned (libbb_api.so.5.0.x) in per-platform folders, so search
+# SIGNALHOUND_SDK_DIR for the header and for a library built for this CPU.
+set(WVT_WITH_BB AUTO CACHE STRING "Build the Signal Hound BB60 backend (AUTO, ON, OFF)")
+set_property(CACHE WVT_WITH_BB PROPERTY STRINGS AUTO ON OFF)
+set(SIGNALHOUND_SDK_DIR "" CACHE PATH "Signal Hound SDK folder (or a prefix with include/ and lib/)")
+if(NOT WVT_WITH_BB STREQUAL "OFF")
+  find_path(BB_API_INCLUDE_DIR bb_api.h
+    HINTS ${SIGNALHOUND_SDK_DIR}
+    PATH_SUFFIXES include device_apis/bb_series/include bb_series/include)
+  find_library(BB_API_LIBRARY NAMES bb_api HINTS ${SIGNALHOUND_SDK_DIR} PATH_SUFFIXES lib lib64)
+  if(NOT BB_API_LIBRARY AND SIGNALHOUND_SDK_DIR)
+    file(GLOB_RECURSE _bb_libs "${SIGNALHOUND_SDK_DIR}/libbb_api.so*")
+    foreach(_lib IN LISTS _bb_libs)
+      string(TOLOWER "${_lib}" _l)
+      if(_l MATCHES "aarch64|arm64")
+        set(_arm TRUE)
+      else()
+        set(_arm FALSE)
+      endif()
+      if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+        set(_want_arm TRUE)
+      else()
+        set(_want_arm FALSE)
+      endif()
+      if(_arm STREQUAL _want_arm AND NOT IS_SYMLINK "${_lib}")
+        set(BB_API_LIBRARY "${_lib}" CACHE FILEPATH "bb_api library" FORCE)
+        break()
+      endif()
+    endforeach()
+  endif()
+  if(BB_API_INCLUDE_DIR AND BB_API_LIBRARY)
+    # An imported target links the exact file; a bare path ending in .so.5.0.x
+    # would become -lbb_api and miss it.
+    add_library(bb_api SHARED IMPORTED)
+    set_target_properties(bb_api PROPERTIES
+      IMPORTED_LOCATION ${BB_API_LIBRARY}
+      INTERFACE_INCLUDE_DIRECTORIES ${BB_API_INCLUDE_DIR})
+    target_sources(wvt PRIVATE src/sdr_bb60.cpp)
+    target_link_libraries(wvt PRIVATE bb_api)
+    target_compile_definitions(wvt PRIVATE WVT_HAVE_BB)
+    message(STATUS "wvt: Signal Hound BB60 support enabled (${BB_API_LIBRARY})")
+  elseif(WVT_WITH_BB STREQUAL "ON")
+    message(FATAL_ERROR "WVT_WITH_BB=ON but bb_api was not found (download the Signal Hound SDK and set -DSIGNALHOUND_SDK_DIR=...)")
+  else()
+    message(STATUS "wvt: Signal Hound BB60 support disabled (bb_api not found; set SIGNALHOUND_SDK_DIR)")
+  endif()
+endif()
+
 # Synthetic test-signal generator
 add_executable(iqgen tools/iqgen.cpp)
 
