@@ -24,7 +24,17 @@ std::shared_ptr<WaterfallRes> computeWaterfall(const WaterfallReq& r, const Canc
     const double hop = (double)span / rows;
     const int cols = std::min(n, std::max(16, r.maxCols));
     const int binsPerCol = n / cols;
-    const int avg = std::clamp(r.avgPerRow, 1, 64);
+    // Each row averages enough FFTs, at most the nominal hop apart, to cover its whole
+    // time slice. Spacing them wider would skip samples, and short pulses falling
+    // between FFTs would strobe (show in some rows and not others). A budget caps
+    // the work for very wide views; past it, coverage drops below 100%.
+    constexpr double kMaxInputSamples = 256e6;
+    const int minAvg = std::clamp(r.avgPerRow, 1, 64);
+    const int needed = (int)std::min(1e9, std::ceil(hop / hopUser));
+    const int budget = (int)std::max(1.0, std::floor(kMaxInputSamples / ((double)rows * n)));
+    const int avg = std::max(minAvg, std::min(needed, budget));
+    res->fftsPerRow = avg;
+    res->coverage = std::min(1.0, (double)avg * n / hop);
 
     res->rows = rows;
     res->cols = cols;
@@ -48,9 +58,10 @@ std::shared_ptr<WaterfallRes> computeWaterfall(const WaterfallReq& r, const Canc
         std::vector<cf> buf(n);
         std::vector<float> pw(n);
         for (int row = rb; row < re; ++row) {
-            if ((row & 15) == 0 && cancelled()) { aborted = true; return; }
+            if (cancelled()) { aborted = true; return; }
             std::fill(pw.begin(), pw.end(), 0.f);
             for (int a = 0; a < avg; ++a) {
+                if ((a & 63) == 63 && cancelled()) { aborted = true; return; }
                 double center = r.s0 + row * hop + (a + 0.5) * hop / avg;
                 int64_t start = (int64_t)std::llround(center) - n / 2;
                 src.file->read(src.fp, start, n, buf.data());

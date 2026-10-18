@@ -131,7 +131,7 @@ struct WaterfallReq {
     int maxRows = 1024;
     int minRows = 128;
     int maxCols = 2048;
-    int avgPerRow = 1;
+    int avgPerRow = 1;  // minimum FFTs per row; zoomed out, rows use as many as cover their slice
     bool operator==(const WaterfallReq&) const = default;
 };
 
@@ -143,6 +143,8 @@ struct WaterfallRes {
     double f0 = 0, f1 = 0;  // frequency extent (Hz, absolute)
     std::vector<double> specF, specAvg, specPeak;  // per column (dB)
     float p5 = -100, p50 = -80, p999 = 0;          // percentiles for auto-range
+    int fftsPerRow = 1;
+    double coverage = 1;  // fraction of the view's samples inside an FFT (< 1 only past the work budget)
 };
 
 std::shared_ptr<WaterfallRes> computeWaterfall(const WaterfallReq& r, const CancelFn& cancelled);

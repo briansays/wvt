@@ -608,10 +608,17 @@ void App::drawLeft() {
     }
     label("Overlap %", stepW(6));
     if (ImGui::InputDouble("##ovl", &overlapPct_, 5, 25, "%.0f")) overlapPct_ = std::clamp(overlapPct_, 0.0, 95.0);
-    ImGui::SetItemTooltip("Nominal FFT overlap. When the view holds more rows than 'Rows', FFTs are spaced further apart.");
+    ImGui::SetItemTooltip("FFT overlap. When the view holds more rows than 'Rows', each row averages\n"
+                          "several FFTs at this spacing, so no sample falls between FFTs.");
     label("Avg", stepW(4));
     if (ImGui::InputInt("##avg", &avg_)) avg_ = std::clamp(avg_, 1, 64);
-    ImGui::SetItemTooltip("FFTs averaged per waterfall row (smooths noise when zoomed out)");
+    if (wf_ && wf_->fftsPerRow > avg_)
+        ImGui::SetItemTooltip("Minimum FFTs averaged per waterfall row (smooths noise).\n"
+                              "Now %d: zoomed out, each row averages enough FFTs to cover its whole time slice.",
+                              wf_->fftsPerRow);
+    else
+        ImGui::SetItemTooltip("Minimum FFTs averaged per waterfall row (smooths noise).\n"
+                              "Zoomed out, each row averages enough FFTs to cover its whole time slice.");
     label("Rows", stepW(5));
     if (ImGui::InputInt("##rows", &maxRows_, 128, 512)) maxRows_ = std::clamp(maxRows_, 16, 8192);
     ImGui::SetItemTooltip("Maximum waterfall rows (time resolution of the image)");
@@ -638,6 +645,15 @@ void App::drawLeft() {
     flow(ImGui::GetFrameHeight() * 4);
     ImGui::Checkbox("Peak", &showPeak_);
     ImGui::SetItemTooltip("Show peak-hold trace in the spectrum");
+    if (wf_ && wf_->coverage < 0.999) {
+        char cov[32];
+        snprintf(cov, sizeof cov, "FFT sees %.0f%%", 100 * wf_->coverage);
+        flow(ImGui::CalcTextSize(cov).x);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextColored(kColWarn, "%s", cov);
+        ImGui::SetItemTooltip("The view is too wide to FFT every sample, so each row samples its time slice.\n"
+                              "Short bursts can show in some rows and not others. Zoom in for full coverage.");
+    }
 
     ImVec2 avail = ImGui::GetContentRegionAvail();
     const float cbW = ImGui::GetFontSize() * 4.5f;
