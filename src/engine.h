@@ -132,6 +132,7 @@ struct WaterfallReq {
     int minRows = 128;
     int maxCols = 2048;
     int avgPerRow = 1;  // minimum FFTs per row; zoomed out, rows use as many as cover their slice
+    double maxInput = 0;  // input-sample budget per request; 0 = the backend's default (tests set it)
     bool operator==(const WaterfallReq&) const = default;
 };
 
@@ -145,6 +146,7 @@ struct WaterfallRes {
     float p5 = -100, p50 = -80, p999 = 0;          // percentiles for auto-range
     int fftsPerRow = 1;
     double coverage = 1;  // fraction of the view's samples inside an FFT (< 1 only past the work budget)
+    bool gpu = false;     // computed on the GPU
 };
 
 std::shared_ptr<WaterfallRes> computeWaterfall(const WaterfallReq& r, const CancelFn& cancelled);

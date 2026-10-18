@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstring>
 
+#include "gpu.h"
 #include "imgui_internal.h"
 #include "platform_x11.h"
 
@@ -645,6 +646,17 @@ void App::drawLeft() {
     flow(ImGui::GetFrameHeight() * 4);
     ImGui::Checkbox("Peak", &showPeak_);
     ImGui::SetItemTooltip("Show peak-hold trace in the spectrum");
+    if (gpuInfo().available) {
+        flow(ImGui::GetFrameHeight() * 3.5f);
+        bool on = gpuEnabled();
+        if (ImGui::Checkbox("GPU", &on)) {
+            gpuSetEnabled(on);
+            wfWorker_->invalidate();  // recompute the view with the other backend
+        }
+        ImGui::SetItemTooltip("Compute the waterfall (and the live spectrum) on %s.\n"
+                              "Off: use the CPU. The GPU keeps full FFT coverage at wider views.",
+                              gpuInfo().name.c_str());
+    }
     if (wf_ && wf_->coverage < 0.999) {
         char cov[32];
         snprintf(cov, sizeof cov, "FFT sees %.0f%%", 100 * wf_->coverage);
@@ -1001,11 +1013,15 @@ void App::drawStatusBar() {
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(s.c_str());
     const char* mode = win_.usingGL() ? "GLX" : "software";
-    char right[96];
-    snprintf(right, sizeof right, "%s%s | %.0f fps", workersBusy() ? "computing...  " : "", mode, ImGui::GetIO().Framerate);
+    std::string gpu = gpuStatusTag();
+    if (!gpu.empty()) gpu = " | " + gpu;
+    char right[192];
+    snprintf(right, sizeof right, "%s%s%s | %.0f fps", workersBusy() ? "computing...  " : "", mode, gpu.c_str(),
+             ImGui::GetIO().Framerate);
     float rw = ImGui::CalcTextSize(right).x;
     ImGui::SameLine(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - rw));
     ImGui::TextDisabled("%s", right);
+    if (const std::string notes = gpuNotes(); !notes.empty()) ImGui::SetItemTooltip("%s", notes.c_str());
 }
 
 void App::handleShortcuts() {

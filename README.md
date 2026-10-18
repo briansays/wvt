@@ -77,6 +77,28 @@ tells you (`/usr/local/lib`, then `ldconfig`), CMake finds it without `SIGNALHOU
 link from the SDK folder, the folder must also contain the `libbb_api.so.5` link. If it does not,
 run `ldconfig -n` on that folder.
 
+### Optional: GPU acceleration
+
+On Linux, wvt can use an NVIDIA GeForce RTX card (RTX 20 series or newer) for the waterfall and
+the live spectrum. The GPU keeps "FFT sees 100%" at wider zoom levels than the CPU. In live
+mode, it analyzes all samples at rates up to 100 MS/s. The CPU stops at 20 MS/s.
+
+Requirements: the CUDA toolkit 12 or later (12.8 or later for RTX 50 cards) and CMake 3.18 or
+later. CMake finds the toolkit automatically if `nvcc` is on the `PATH`:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc
+```
+
+The option `WVT_WITH_CUDA` takes `AUTO`, `ON` or `OFF`. The build links the CUDA runtime and
+cuFFT statically. Thus the binary is large (100–200 MB), but it needs only the NVIDIA driver to
+run. The driver must agree with the toolkit (CUDA 12.8 needs driver 570 or later). If the
+computer has no usable GPU, wvt uses the CPU. To build for other GPU types, set
+`CMAKE_CUDA_ARCHITECTURES`. macOS builds do not have GPU support.
+
+To check the GPU, run `build/gpu_check`. It compares the GPU and CPU results. Add `--bench` to
+measure the speed.
+
 ### Device setup
 
 **RTL-SDR v3 on Linux**
@@ -114,6 +136,8 @@ wvt [options] [file]
       --software       force the software renderer
       --scale S        UI scale (or env WVT_SCALE), useful on HiDPI
       --geometry WxH   initial window size
+      --gpu auto|on|off   NVIDIA GPU for the waterfall and live spectrum (or env WVT_GPU)
+      --gpu-device N   CUDA device to use (see --list-devices)
       --screenshot F   render once, write a PPM to F, exit (for automation)
 
 live devices (-c and -r set the tuning):
@@ -408,5 +432,8 @@ Try `wvt out.sigmf-meta --chan 300k:150k --view 0.5:0.505`.
 | `src/sdr_siggen.cpp` | Loopback device that streams the generator into the live view |
 | `src/sdr_tx.h` | Transmitter interface (`sdr_uhd.cpp` implements it for UHD) |
 | `src/app_siggen.cpp` | Signal generator window |
+| `src/gpu.h`, `src/gpu_cuda.cu` | Optional NVIDIA GPU (CUDA + cuFFT) waterfall and live spectrum |
+| `src/gpu_stub.cpp`, `src/gpu_common.cpp` | GPU interface for builds without CUDA, and code for both builds |
 | `tools/iqgen.cpp` | Synthetic test-signal generator |
 | `tools/siggen_check.cpp` | Self-test for the generator (`build/siggen_check`, no hardware needed) |
+| `tools/gpu_check.cpp` | Compares the GPU and CPU results and measures the speed (`build/gpu_check --bench`) |

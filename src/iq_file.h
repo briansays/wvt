@@ -41,6 +41,8 @@ public:
     // Reads `count` complex samples starting at sample `start`, normalized to
     // roughly [-1, 1]. Samples outside the file are zero-filled.
     void read(const FormatParams& fp, int64_t start, int64_t count, std::complex<float>* out) const;
+    // The packed samples after the header (numSamples(fp) of them), for GPU upload.
+    const uint8_t* samples(const FormatParams& fp) const { return data_ + fp.headerBytes; }
 
 private:
     IqFile() = default;

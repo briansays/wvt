@@ -4,6 +4,8 @@
 #include <cmath>
 #include <limits>
 
+#include "gpu.h"
+
 static constexpr float kEps = 1e-20f;
 
 // ---------------------------------------------------------------------------
@@ -27,14 +29,17 @@ std::shared_ptr<WaterfallRes> computeWaterfall(const WaterfallReq& r, const Canc
     // Each row averages enough FFTs, at most the nominal hop apart, to cover its whole
     // time slice. Spacing them wider would skip samples, and short pulses falling
     // between FFTs would strobe (show in some rows and not others). A budget caps
-    // the work for very wide views; past it, coverage drops below 100%.
-    constexpr double kMaxInputSamples = 256e6;
+    // the work for very wide views; past it, coverage drops below 100%. The GPU
+    // gets a larger budget, so it keeps full coverage further out.
+    constexpr double kMaxInputSamplesCpu = 256e6, kMaxInputSamplesGpu = 2e9;
     const int minAvg = std::clamp(r.avgPerRow, 1, 64);
     const int needed = (int)std::min(1e9, std::ceil(hop / hopUser));
-    const int budget = (int)std::max(1.0, std::floor(kMaxInputSamples / ((double)rows * n)));
-    const int avg = std::max(minAvg, std::min(needed, budget));
-    res->fftsPerRow = avg;
-    res->coverage = std::min(1.0, (double)avg * n / hop);
+    auto avgFor = [&](double maxInput) {
+        const int budget = (int)std::max(1.0, std::floor(maxInput / ((double)rows * n)));
+        return std::max(minAvg, std::min(needed, budget));
+    };
+    bool gpu = gpuEnabled();
+    int avg = avgFor(r.maxInput > 0 ? r.maxInput : gpu ? kMaxInputSamplesGpu : kMaxInputSamplesCpu);
 
     res->rows = rows;
     res->cols = cols;
@@ -52,9 +57,33 @@ std::shared_ptr<WaterfallRes> computeWaterfall(const WaterfallReq& r, const Canc
     const float norm = (float)(1.0 / (wsum * wsum));
 
     std::vector<float> linSum((size_t)rows * cols, 0.f);  // linear power per row for spectrum
+    if (gpu) {
+        GpuSpectrogramJob job;
+        job.file = src.file.get();
+        job.fp = src.fp;
+        job.n = n;
+        job.rows = rows;
+        job.cols = cols;
+        job.avg = avg;
+        job.s0 = r.s0;
+        job.hop = hop;
+        job.win = win.data();
+        job.scale = norm / avg;
+        job.lin = linSum.data();
+        job.db = res->db.data();
+        const GpuResult g = gpuSpectrogram(job, cancelled);
+        if (g == GpuResult::Cancelled) return nullptr;
+        if (g == GpuResult::Failed) {
+            gpu = false;
+            avg = avgFor(r.maxInput > 0 ? r.maxInput : kMaxInputSamplesCpu);
+        }
+    }
+    res->gpu = gpu;
+    res->fftsPerRow = avg;
+    res->coverage = std::min(1.0, (double)avg * n / hop);
     std::atomic<bool> aborted{false};
 
-    parallelFor(rows, [&](int rb, int re) {
+    if (!gpu) parallelFor(rows, [&](int rb, int re) {
         std::vector<cf> buf(n);
         std::vector<float> pw(n);
         for (int row = rb; row < re; ++row) {

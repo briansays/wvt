@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "app.h"
+#include "gpu.h"
 #include "platform_x11.h"
 
 namespace {
@@ -577,7 +578,7 @@ void App::drawLiveLeft() {
     }
     label("Avg", fieldW(8));
     ImGui::SliderInt("##lavg", &liveParams_.avg, 0, 64, liveParams_.avg == 0 ? "auto" : "%d");
-    ImGui::SetItemTooltip("FFTs averaged into each waterfall row.\nauto: all samples since the previous row (up to 20 MS/s),\nso nothing is missed at RTL-SDR rates. Lower values show short bursts more sharply.");
+    ImGui::SetItemTooltip("FFTs averaged into each waterfall row.\nauto: all samples since the previous row (up to 20 MS/s on the CPU,\n100 MS/s on the GPU), so nothing is missed at RTL-SDR rates. Lower values show short bursts more sharply.");
     label("Rows/s", stepW(4));
     if (ImGui::InputDouble("##lrps", &liveParams_.rowsPerSec, 5, 10, "%.0f"))
         liveParams_.rowsPerSec = std::clamp(liveParams_.rowsPerSec, 1.0, 100.0);
@@ -733,6 +734,7 @@ void App::drawLiveStatusBar() {
         char b[64];
         snprintf(b, sizeof b, " | FFT sees %.0f%%", std::min(1.0, t.analyzed) * 100);
         right += b;
+        if (t.gpu) right += " (GPU)";
         if (t.gapEvents > 0)
             right += " | overflows " + std::to_string(t.gapEvents) +
                      (t.dropped > 0 ? " (" + fmtSI((double)t.dropped, "S", 3) + " lost)" : "");
@@ -742,6 +744,8 @@ void App::drawLiveStatusBar() {
         right = "not streaming";
     }
     char fps[64];
+    std::string gpu = gpuStatusTag();
+    if (!gpu.empty()) right += " | " + gpu;
     snprintf(fps, sizeof fps, " | %s | %.0f fps", win_.usingGL() ? "GLX" : "software", ImGui::GetIO().Framerate);
     right += fps;
     float rw = ImGui::CalcTextSize(right.c_str()).x;

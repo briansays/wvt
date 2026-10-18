@@ -4,11 +4,13 @@
 #include <chrono>
 #include <cmath>
 
+#include "gpu.h"
+
 namespace {
 constexpr float kEps = 1e-20f;
 constexpr int kMaxPendingRows = 4096;  // if the UI stops polling, keep only the newest
-// Auto averaging analyzes at most this many samples per second (bounds CPU use).
-constexpr double kMaxAnalyzeRate = 20e6;
+// Auto averaging analyzes at most this many samples per second (bounds CPU or GPU use).
+constexpr double kMaxAnalyzeRateCpu = 20e6, kMaxAnalyzeRateGpu = 100e6;
 }  // namespace
 
 LiveEngine::LiveEngine(std::function<void()> wake) : wake_(std::move(wake)) {}
@@ -111,6 +113,7 @@ LiveEngine::Stats LiveEngine::stats() const {
     s.gapEvents = ring_->deviceGapEvents();
     std::lock_guard<std::mutex> lk(m_);
     s.analyzed = analyzed_;
+    s.gpu = gpuRows_.load();
     s.rowPeriod = rowPeriod_;
     return s;
 }
@@ -138,6 +141,8 @@ void LiveEngine::spectrumLoop() {
     std::vector<float> pw, win;
     LiveParams p;
     int winFor = -1, winType = -1;
+    std::unique_ptr<GpuLiveSpectrum> gpu;
+    int gpuFor = -1;
     int64_t lastEnd = ring_->written();  // newest sample used by the previous row
     auto lastRow = clock::now();
     auto next = clock::now();
@@ -153,11 +158,17 @@ void LiveEngine::spectrumLoop() {
         next = std::max(next + std::chrono::duration_cast<clock::duration>(period), clock::now());
 
         const int n = isPow2(p.nfft) ? p.nfft : 2048;
+        if (!gpuEnabled()) gpu.reset();
+        else if (!gpu || gpuFor != n) {
+            gpu = GpuLiveSpectrum::create(n, fp.fmt);
+            gpuFor = n;
+        }
         const int64_t w = ring_->written();
         // Wait for at least one FFT's worth of new samples.
         if (w - lastEnd < n) continue;
         // Auto: average FFTs over all samples since the previous row.
-        const int64_t maxFrames = std::max<int64_t>(1, (int64_t)(kMaxAnalyzeRate / p.rowsPerSec / n));
+        const double maxRate = gpu ? kMaxAnalyzeRateGpu : kMaxAnalyzeRateCpu;
+        const int64_t maxFrames = std::max<int64_t>(1, (int64_t)(maxRate / p.rowsPerSec / n));
         int64_t frames = p.avg > 0 ? std::min(p.avg, 64) : std::clamp<int64_t>((w - lastEnd) / n, 1, maxFrames);
         frames = std::min(frames, (w - freshFrom_.load()) / n);  // nothing from before a retune
         if (frames < 1) continue;
@@ -166,8 +177,6 @@ void LiveEngine::spectrumLoop() {
 
         raw.resize((size_t)need * bps);
         if (!ring_->read(w - need, need, raw.data())) continue;
-        buf.resize(need);
-        decodeSamples(fp, raw.data(), need, buf.data());
 
         if (winFor != n || winType != p.window) {
             win = makeWindow((WindowType)p.window, n);
@@ -177,14 +186,23 @@ void LiveEngine::spectrumLoop() {
         double wsum = 0;
         for (float v : win) wsum += v;
         const float norm = (float)(1.0 / (wsum * wsum)) / avg;
-        auto fft = getFFT(n);
         pw.assign(n, 0.f);
-        seg.resize(n);
-        for (int a = 0; a < avg; ++a) {
-            const cf* s = &buf[(size_t)a * n];
-            for (int i = 0; i < n; ++i) seg[i] = s[i] * win[i];
-            fft->forward(seg.data());
-            for (int i = 0; i < n; ++i) pw[i] += std::norm(seg[(i + n / 2) & (n - 1)]);  // fftshift
+        if (gpu && gpu->run(raw.data(), avg, win.data(), pw.data()) != GpuResult::Ok) {
+            gpu.reset();  // the GPU turned this path off; this row and the next use the CPU
+            pw.assign(n, 0.f);
+        }
+        gpuRows_ = gpu != nullptr;
+        if (!gpu) {
+            buf.resize(need);
+            decodeSamples(fp, raw.data(), need, buf.data());
+            auto fft = getFFT(n);
+            seg.resize(n);
+            for (int a = 0; a < avg; ++a) {
+                const cf* s = &buf[(size_t)a * n];
+                for (int i = 0; i < n; ++i) seg[i] = s[i] * win[i];
+                fft->forward(seg.data());
+                for (int i = 0; i < n; ++i) pw[i] += std::norm(seg[(i + n / 2) & (n - 1)]);  // fftshift
+            }
         }
 
         const int cols = std::min(n, std::max(16, p.maxCols));

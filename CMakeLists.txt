@@ -192,6 +192,70 @@ if(NOT WVT_WITH_BB STREQUAL "OFF")
   endif()
 endif()
 
+# ---------------------------------------------------------------------------
+# Optional NVIDIA GPU acceleration (CUDA + cuFFT), see docs/cuda-gpu-plan.md.
+# Targets desktop GeForce RTX cards on x86-64 Linux. The CUDA runtime and
+# cuFFT are linked statically, so the binary needs only the NVIDIA driver.
+# Without CUDA, gpu_stub.cpp reports "no GPU" and everything runs on the CPU.
+# ---------------------------------------------------------------------------
+set(WVT_WITH_CUDA AUTO CACHE STRING "Build NVIDIA GPU (CUDA) acceleration (AUTO, ON, OFF)")
+set_property(CACHE WVT_WITH_CUDA PROPERTY STRINGS AUTO ON OFF)
+set(WVT_CUDA_OK FALSE)
+set(_cuda_why "")
+if(WVT_WITH_CUDA STREQUAL "OFF")
+  set(_cuda_why "WVT_WITH_CUDA=OFF")
+elseif(APPLE)
+  set(_cuda_why "not available on macOS")
+elseif(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
+  set(_cuda_why "only x86-64 is supported (desktop RTX cards)")
+elseif(CMAKE_VERSION VERSION_LESS 3.18)
+  set(_cuda_why "needs CMake 3.18 or later")
+else()
+  include(CheckLanguage)
+  check_language(CUDA)
+  if(CMAKE_CUDA_COMPILER)
+    find_package(CUDAToolkit 12 QUIET)
+  endif()
+  if(CMAKE_CUDA_COMPILER AND CUDAToolkit_FOUND)
+    cmake_policy(SET CMP0104 NEW)
+    if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES AND NOT DEFINED ENV{CUDAARCHS})
+      # One cubin per RTX generation: 20 = sm_75, 30 = sm_86, 40 = sm_89, 50 = sm_120.
+      # Before CUDA 12.8, RTX 50 cards JIT-compile the sm_89 PTX.
+      if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL 12.8)
+        set(CMAKE_CUDA_ARCHITECTURES 75-real 86-real 89-real 120)
+      else()
+        set(CMAKE_CUDA_ARCHITECTURES 75-real 86-real 89)
+      endif()
+    endif()
+    enable_language(CUDA)
+    set(WVT_CUDA_OK TRUE)
+  else()
+    set(_cuda_why "no CUDA 12+ toolkit found (nvcc)")
+  endif()
+endif()
+
+if(WVT_CUDA_OK)
+  set(CMAKE_CUDA_STANDARD 20)
+  set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+  add_library(wvt_gpu STATIC src/gpu_cuda.cu src/gpu_common.cpp)
+  set_target_properties(wvt_gpu PROPERTIES CUDA_RUNTIME_LIBRARY Static)
+  target_compile_options(wvt_gpu PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-O3>)
+  target_link_libraries(wvt_gpu PUBLIC CUDA::cudart_static CUDA::cufft_static CUDA::culibos)
+  string(REPLACE ";" "," _archs "${CMAKE_CUDA_ARCHITECTURES}")
+  message(STATUS "wvt: CUDA support enabled (CUDA ${CUDAToolkit_VERSION}, archs ${_archs}, static cuFFT)")
+  if(CUDAToolkit_VERSION VERSION_LESS 12.8)
+    message(STATUS "wvt: note: CUDA 12.8 or later is recommended (native RTX 50 support)")
+  endif()
+else()
+  if(WVT_WITH_CUDA STREQUAL "ON")
+    message(FATAL_ERROR "WVT_WITH_CUDA=ON but CUDA cannot be used: ${_cuda_why}")
+  endif()
+  add_library(wvt_gpu STATIC src/gpu_stub.cpp src/gpu_common.cpp)
+  message(STATUS "wvt: CUDA support disabled (${_cuda_why})")
+endif()
+target_include_directories(wvt_gpu PUBLIC src)
+target_link_libraries(wvt PRIVATE wvt_gpu)
+
 # Synthetic test-signal generator
 add_executable(iqgen tools/iqgen.cpp)
 
@@ -200,3 +264,9 @@ add_executable(siggen_check tools/siggen_check.cpp src/siggen.cpp src/siggen_out
   src/sdr_device.cpp src/sdr_sim.cpp src/sdr_siggen.cpp src/iq_file.cpp src/dsp.cpp src/ui_util.cpp)
 target_include_directories(siggen_check PRIVATE src)
 target_link_libraries(siggen_check PRIVATE imgui_implot Threads::Threads)
+
+# GPU self-test and benchmark: compares GPU and CPU waterfall / live spectrum
+# results and prints timings (CPU timings only in a build without CUDA).
+add_executable(gpu_check tools/gpu_check.cpp src/engine.cpp src/dsp.cpp src/iq_file.cpp)
+target_include_directories(gpu_check PRIVATE src)
+target_link_libraries(gpu_check PRIVATE wvt_gpu Threads::Threads)

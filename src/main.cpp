@@ -8,6 +8,7 @@
 #include <thread>
 
 #include "app.h"
+#include "gpu.h"
 #include "imgui.h"
 #include "implot.h"
 #include "platform_x11.h"
@@ -137,6 +138,9 @@ static void usage() {
         "      --scale S        UI scale factor (default 1, or $WVT_SCALE)\n"
         "      --geometry WxH   initial window size (default 1600x950)\n"
         "      --screenshot F   render, write a PPM screenshot to F and exit\n"
+        "      --gpu auto|on|off   NVIDIA GPU for the waterfall and live spectrum\n"
+        "                       (default auto, or $WVT_GPU; on = fail if no usable GPU)\n"
+        "      --gpu-device N   CUDA device to use (default 0; see --list-devices)\n"
         "  -h, --help           show this help\n"
         "\n"
         "live devices (-c and -r set the tuning):\n"
@@ -152,7 +156,7 @@ static void usage() {
         "      --bias-tee       RTL-SDR: power an LNA / active antenna over the coax\n"
         "      --direct-sampling I|Q  RTL-SDR: HF direct sampling (v3: Q)\n"
         "      --ppm N          RTL-SDR frequency correction\n"
-        "      --list-devices   print attached devices and exit\n"
+        "      --list-devices   print attached devices and GPUs, then exit\n"
         "\n"
         "recording (needs --device):\n"
         "      --record PREFIX  record to PREFIX_<date>_<time>_<fc>_<rate>.<ext>\n"
@@ -221,6 +225,12 @@ int main(int argc, char** argv) {
     float scale = 1.f;
     int winW = 1600, winH = 950;
     if (const char* e = getenv("WVT_SCALE")) scale = (float)atof(e);
+    GpuMode gpuMode = GpuMode::Auto;
+    int gpuDevice = 0;
+    if (const char* e = getenv("WVT_GPU"); e && *e && !parseGpuMode(e, gpuMode)) {
+        fprintf(stderr, "wvt: WVT_GPU wants auto, on or off\n");
+        return 2;
+    }
 
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -252,6 +262,9 @@ int main(int argc, char** argv) {
             haveView = true;
         }
         else if (a == "--software") software = true;
+        else if (a == "--gpu") {
+            if (!parseGpuMode(next("--gpu"), gpuMode)) { fprintf(stderr, "wvt: --gpu wants auto, on or off\n"); return 2; }
+        } else if (a == "--gpu-device") gpuDevice = atoi(next("--gpu-device"));
         else if (a == "--scale") scale = (float)atof(next("--scale"));
         else if (a == "--geometry") {
             if (sscanf(next("--geometry"), "%dx%d", &winW, &winH) != 2) { fprintf(stderr, "wvt: bad geometry\n"); return 2; }
@@ -290,6 +303,7 @@ int main(int argc, char** argv) {
         } else if (a == "--ppm") dev.ppm = atoi(next("--ppm"));
         else if (a == "--list-devices") {
             for (const auto& d : enumerateDevices()) printf("%-8s %-28s %s\n", d.driver.c_str(), d.args.c_str(), d.label.c_str());
+            printf("%s", gpuDeviceList().c_str());
             return 0;
         } else if (a == "--record") {
             rc.prefix = next("--record");
@@ -418,6 +432,13 @@ int main(int argc, char** argv) {
         else path = a;
     }
     scale = std::clamp(scale, 0.5f, 4.f);
+    {
+        std::string gerr;
+        if (!gpuInit(gpuMode, gpuDevice, gerr)) {
+            fprintf(stderr, "wvt: %s\n", gerr.c_str());
+            return 1;
+        }
+    }
     if (ov.haveFc) gp.fc = txc.fc = ov.fc;
     if (ov.haveRate) gp.rate = ov.rate;
     if (!playFile.empty()) {
