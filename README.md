@@ -20,9 +20,9 @@ with a USRP B200 / B205mini. See [Signal generator](#signal-generator).
 | Version | Features | | 
 |---|---|---| 
 | 1.0 | Receive via UHD and RTL-SDR v3 | ✅ | 
-| 1.1 | Signal Generator Support via UHD | ☑️ | 
-| 1.2 | Support for Signal Hound SDRs | ⭕️ | 
-| 1.3 | Support for EPIQ SDRs | ⭕️ | 
+| 1.1 | Signal Generator Support via UHD | ✅ | 
+| 1.2 | Support for Signal Hound SDRs | ☑️ | 
+| 1.3 | Support for EPIQ SDRs | ☑️ | 
 
 ## Build
 
