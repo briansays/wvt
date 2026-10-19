@@ -14,6 +14,8 @@
 #include <regex>
 #include <sstream>
 
+#include "log.h"
+
 const char* formatName(SampleFormat f) {
     switch (f) {
         case SampleFormat::CF32: return "cf32 (complex float32)";
@@ -64,6 +66,7 @@ std::shared_ptr<IqFile> IqFile::open(const std::string& path, std::string& err) 
         f->data_ = (const uint8_t*)p;
     }
     ::close(fd);
+    LOG_DEBUG("file", "opened %s (%llu bytes)", path.c_str(), (unsigned long long)f->size_);
     return f;
 }
 
@@ -230,7 +233,7 @@ static bool jsonValue(const std::string& text, const std::string& key, std::stri
     return !out.empty();
 }
 
-FileMetaGuess guessMeta(const std::string& path) {
+static FileMetaGuess guessMetaImpl(const std::string& path) {
     FileMetaGuess g;
     g.dataPath = path;
     std::string lp = lower(path);
@@ -247,6 +250,7 @@ FileMetaGuess guessMeta(const std::string& path) {
     }
     if (!metaPath.empty()) {
         std::ifstream in(metaPath);
+        if (!in) LOG_DEBUG("file", "cannot read SigMF metadata %s; guessing from the name", metaPath.c_str());
         if (in) {
             std::stringstream ss;
             ss << in.rdbuf();
@@ -310,5 +314,15 @@ FileMetaGuess guessMeta(const std::string& path) {
         if (g.haveFmt) g.source = "file extension";
     }
     if (g.haveRate || g.haveFc) g.source = g.haveFmt ? "file name and extension" : "file name";
+    return g;
+}
+
+FileMetaGuess guessMeta(const std::string& path) {
+    FileMetaGuess g = guessMetaImpl(path);
+    char rate[32] = "?", fc[32] = "?";
+    if (g.haveRate) snprintf(rate, sizeof rate, "%.9g S/s", g.rate);
+    if (g.haveFc) snprintf(fc, sizeof fc, "%.12g Hz", g.fc);
+    LOG_DEBUG("file", "%s: format %s, rate %s, fc %s (from %s)", path.c_str(), g.haveFmt ? formatName(g.fmt) : "?", rate, fc,
+              g.source.empty() ? "nothing" : g.source.c_str());
     return g;
 }

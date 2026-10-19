@@ -106,6 +106,8 @@ private:
     bool metaDirty_ = false;
     int64_t samples_ = 0, dropped_ = 0;
     uint64_t bytes_ = 0;
+    int gapsLogged_ = 0;  // gaps logged one by one, up to kMaxGapLogs
+    static constexpr int kMaxGapLogs = 50;
 };
 
 // "~/x" -> "$HOME/x"

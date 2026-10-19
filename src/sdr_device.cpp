@@ -1,6 +1,9 @@
 #include "sdr_device.h"
 #include "sdr_tx.h"
 
+#include <cmath>
+
+#include "log.h"
 #include "ui_util.h"
 
 std::vector<std::string> sdrDrivers() {
@@ -32,9 +35,7 @@ std::vector<DeviceInfo> enumerateDevices() {
     return out;
 }
 
-std::unique_ptr<SdrDevice> openDevice(const StreamConfig& cfg, std::string& err) {
-    std::string warn;
-    if (!checkSampleRate(cfg.driver, cfg.rate, err, warn)) return nullptr;
+static std::unique_ptr<SdrDevice> openBackend(const StreamConfig& cfg, std::string& err) {
     if (cfg.driver == "sim") return openSimDevice(cfg, err);
     if (cfg.driver == "siggen") return openSigGenDevice(cfg, err);
 #ifdef WVT_HAVE_RTLSDR
@@ -48,6 +49,38 @@ std::unique_ptr<SdrDevice> openDevice(const StreamConfig& cfg, std::string& err)
     else
         err = "unknown device driver '" + cfg.driver + "' (use sim, siggen, rtlsdr or uhd)";
     return nullptr;
+}
+
+std::unique_ptr<SdrDevice> openDevice(const StreamConfig& cfg, std::string& err) {
+    LOG_INFO("device", "opening %s%s%s: %s at %s, gain %s, antenna %s, bandwidth %s", cfg.driver.c_str(),
+             cfg.args.empty() ? "" : ":", cfg.args.c_str(), fmtSI(cfg.rate, "S/s", 6).c_str(),
+             fmtSI(cfg.fc, "Hz", 9).c_str(), cfg.agc ? "auto" : fmtSI(cfg.gain, "dB", 4).c_str(),
+             cfg.antenna.empty() ? "default" : cfg.antenna.c_str(),
+             cfg.bandwidth > 0 ? fmtSI(cfg.bandwidth, "Hz", 4).c_str() : "auto");
+    if (cfg.driver == "rtlsdr")
+        LOG_DEBUG("device", "rtlsdr options: bias-tee %s, direct sampling %d, ppm %d", cfg.biasTee ? "on" : "off",
+                  cfg.directSampling, cfg.ppm);
+    std::string warn;
+    if (!checkSampleRate(cfg.driver, cfg.rate, err, warn)) {
+        LOG_DEBUG("device", "rejected: %s", err.c_str());
+        return nullptr;
+    }
+    if (!warn.empty()) LOG_DEBUG("device", "rate check: %s", warn.c_str());
+    auto dev = openBackend(cfg, err);
+    if (!dev) {
+        LOG_DEBUG("device", "open failed: %s", err.c_str());
+        return nullptr;
+    }
+    LOG_INFO("device", "opened %s: %s at %s, %s", dev->description().c_str(), fmtSI(dev->sampleRate(), "S/s", 6).c_str(),
+             fmtSI(dev->centerFreq(), "Hz", 9).c_str(), formatName(dev->format()));
+    if (std::fabs(dev->sampleRate() - cfg.rate) > 1e-6 * cfg.rate)
+        LOG_DEBUG("device", "sample rate %s requested, device gives %s", fmtSI(cfg.rate, "S/s", 9).c_str(),
+                 fmtSI(dev->sampleRate(), "S/s", 9).c_str());
+    if (std::fabs(dev->centerFreq() - cfg.fc) > 1.0)
+        LOG_DEBUG("device", "center frequency %s requested, device gives %s", fmtSI(cfg.fc, "Hz", 12).c_str(),
+                  fmtSI(dev->centerFreq(), "Hz", 12).c_str());
+    if (!dev->notes().empty()) LOG_DEBUG("device", "notes: %s", dev->notes().c_str());
+    return dev;
 }
 
 bool checkSampleRate(const std::string& driver, double rate, std::string& err, std::string& warn) {
@@ -79,6 +112,8 @@ bool checkSampleRate(const std::string& driver, double rate, std::string& err, s
 }
 
 std::unique_ptr<SdrTx> openTx(const TxConfig& cfg, std::string& err) {
+    LOG_INFO("tx", "opening transmitter %s:%s at %s, %s", cfg.driver.c_str(), cfg.args.c_str(),
+             fmtSI(cfg.rate, "S/s", 6).c_str(), fmtSI(cfg.fc, "Hz", 9).c_str());
     if (!(cfg.rate > 0)) {
         err = "transmit sample rate must be positive";
         return nullptr;

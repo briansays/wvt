@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "app.h"
+#include "log.h"
 #include "platform_x11.h"
 
 namespace {
@@ -128,7 +129,10 @@ bool App::playAudio(int64_t from) {
         ok = audio_->startFile(Source{file_, fp_, fs_, fc_}, s0, s1, from >= 0 ? from : s0, auLoop_, au_, auDevice_, err);
     }
     auErr_ = ok ? "" : err;
-    if (!ok) status_ = "Audio: " + err;
+    if (!ok) {
+        status_ = "Audio: " + err;
+        LOG_ERROR("app", "audio: %s", err.c_str());
+    }
     auStats_ = audio_->stats();
     return ok;
 }
@@ -149,6 +153,7 @@ void App::pollAudio() {
         auMsg_ = auExportSt_.error.empty() ? "Wrote " + baseName(auExportSt_.path) + " (" + fmtSI(auExportSt_.seconds, "s", 4) + ")"
                                            : "WAV export " + auExportSt_.error + ": " + baseName(auExportSt_.path);
         status_ = auMsg_;
+        if (!auExportSt_.error.empty() && auExportSt_.error != "cancelled") LOG_ERROR("app", "%s", auMsg_.c_str());
     }
     if (!audio_ || !audio_->running()) {
         auPlayhead_ = NAN;
@@ -397,7 +402,10 @@ void App::drawAudioWindow() {
                 std::string err;
                 auDevices_ = listAudioDevices(err);
                 auDevicesScanned_ = true;
-                if (!err.empty()) auErr_ = err;
+                if (!err.empty()) {
+                    auErr_ = err;
+                    LOG_ERROR("app", "%s", err.c_str());
+                }
             }
             if (ImGui::Selectable("System default", auDevice_.empty())) auDevice_.clear();
             for (const auto& d : auDevices_)
@@ -451,11 +459,18 @@ void App::drawAudioWindow() {
                     audio_->setVolume(auVolDb_, auMute_);
                     ok = audio_->startLive(live_->ring(), live_->format(), live_->sampleRate(), au_, auDevice_, AudioOutput::Optional, err);
                     if (ok) audio_->noteFresh(live_->freshFrom());
-                    else auErr_ = err;
+                    else {
+                        auErr_ = err;
+                        LOG_ERROR("app", "audio: %s", err.c_str());
+                    }
                 }
                 std::string err;
-                if (ok && !audio_->startWav(wavPath(auPrefix_, chanHz, audioModeName((AudioMode)au_.mode)), err)) auErr_ = err;
-                else if (ok) auErr_.clear();
+                if (ok && !audio_->startWav(wavPath(auPrefix_, chanHz, audioModeName((AudioMode)au_.mode)), err)) {
+                    auErr_ = err;
+                    LOG_ERROR("app", "WAV recording: %s", err.c_str());
+                } else if (ok) {
+                    auErr_.clear();
+                }
             }
             ImGui::EndDisabled();
             tooltipAlways("Record the demodulated audio to a WAV file (plays too, if a sound device is available)");
@@ -477,8 +492,10 @@ void App::drawAudioWindow() {
                 c.params = au_;
                 c.path = wavPath(auPrefix_, chanHz, audioModeName((AudioMode)au_.mode));
                 std::string err;
-                if (!auExport_->start(c, err)) auErr_ = err;
-                else {
+                if (!auExport_->start(c, err)) {
+                    auErr_ = err;
+                    LOG_ERROR("app", "WAV export: %s", err.c_str());
+                } else {
                     auErr_.clear();
                     auExportSt_ = auExport_->status();
                 }

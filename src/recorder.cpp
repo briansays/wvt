@@ -14,6 +14,8 @@
 #include <cstring>
 #include <ctime>
 
+#include "log.h"
+
 namespace {
 
 double wallNow() {
@@ -155,12 +157,16 @@ bool Recorder::start(std::shared_ptr<SampleRing> ring, const RecordSource& src, 
     std::string prefix = expandHome(cfg.prefix.empty() ? "wvt" : cfg.prefix);
     std::string base = prefix + "_" + stamp + "_" + trimmed(src.fc / 1e6, 3) + "MHz_" + rate;
     size_t sl = base.find_last_of('/');
-    if (sl != std::string::npos && !mkdirs(base.substr(0, sl), err)) return false;
+    if (sl != std::string::npos && !mkdirs(base.substr(0, sl), err)) {
+        LOG_DEBUG("record", "start failed: %s", err.c_str());
+        return false;
+    }
 
     std::string dataPath = cfg.sigmf ? base + ".sigmf-data" : base + rawExt(outFmt);
     fd_ = ::open(dataPath.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0644);
     if (fd_ < 0) {
         err = "cannot create '" + dataPath + "': " + strerror(errno);
+        LOG_DEBUG("record", "start failed: %s", err.c_str());
         return false;
     }
     {
@@ -177,6 +183,7 @@ bool Recorder::start(std::shared_ptr<SampleRing> ring, const RecordSource& src, 
         bytes_ = 0;
     }
     if (cfg.sigmf && !writeMeta(err)) {
+        LOG_DEBUG("record", "start failed: %s", err.c_str());
         ::close(fd_);
         fd_ = -1;
         unlink(dataPath.c_str());
@@ -190,6 +197,9 @@ bool Recorder::start(std::shared_ptr<SampleRing> ring, const RecordSource& src, 
         lim = lim > 0 ? std::min(lim, b) : b;
     }
     maxSamples_ = lim;
+    LOG_INFO("record", "record start: %s, %s%s%s, %s", cfg.sigmf ? "SigMF" : "raw", formatName(outFmt),
+             cfg.maxSeconds > 0 ? (", stop after " + trimmed(cfg.maxSeconds, 3) + " s").c_str() : "",
+             cfg.maxBytes > 0 ? (", stop after " + trimmed(cfg.maxBytes, 0) + " B").c_str() : "", dataPath.c_str());
 
     start_ = pos_ = ring_->written();
     gapCursor_ = ring_->gapCount();
@@ -216,6 +226,7 @@ void Recorder::noteRetune(double fc) {
     if (!captures_.empty() && captures_.back().start >= at) captures_.pop_back();
     captures_.push_back({at, fc, isoTime(wallNow())});
     metaDirty_ = true;
+    LOG_DEBUG("record", "retune to %.0f Hz at sample %lld: new capture segment", fc, (long long)at);
 }
 
 void Recorder::annotate(int64_t at, int64_t count, const std::string& label) {
@@ -254,6 +265,9 @@ void Recorder::handleGaps(bool all) {
         std::string c = g.lost >= 0 ? std::to_string(g.lost) + " samples dropped: " + g.why
                                     : "samples dropped (count unknown): " + g.why;
         annotations_.push_back({at, c, 0, {}});
+        if (++gapsLogged_ <= kMaxGapLogs)
+            LOG_DEBUG("record", "gap at sample %lld: %s%s", (long long)at, c.c_str(),
+                      gapsLogged_ == kMaxGapLogs ? " (further gaps are not logged one by one)" : "");
         if (g.lost > 0) dropped_ += g.lost;
         metaDirty_ = true;
     }
@@ -269,7 +283,9 @@ void Recorder::run() {
     fp.fmt = src_.fmt;
     auto lastMeta = clock::now();
     std::string reason, err;
-    bool failed = false;
+    bool failed = false, metaWarned = false;
+    float maxFill = 0;
+    gapsLogged_ = 0;
 
     for (;;) {
         const bool stopping = stopReq_;
@@ -306,6 +322,7 @@ void Recorder::run() {
                 failed = true;
                 break;
             }
+            maxFill = std::max(maxFill, (float)(ring_->written() - pos_) / (float)ring_->capacity());
             pos_ += n;
             ring_->advanceGate(pos_);
             {
@@ -321,7 +338,10 @@ void Recorder::run() {
             dirty = metaDirty_;
         }
         if (cfg_.sigmf && dirty && clock::now() - lastMeta > std::chrono::seconds(2)) {
-            writeMeta(err);
+            if (!writeMeta(err) && !metaWarned) {
+                LOG_WARN("record", "metadata update failed (retrying): %s", err.c_str());
+                metaWarned = true;
+            }
             lastMeta = clock::now();
         }
     }
@@ -341,7 +361,12 @@ void Recorder::run() {
         std::lock_guard<std::mutex> lk(m_);
         stopReason_ = reason;
         failed_ = failed;
+        const double secs = src_.rate > 0 ? samples_ / src_.rate : 0;
+        const int gaps = (int)annotations_.size() - std::min(extraAnnotations_, kMaxAnnotations);
+        LOG_INFO("record", "recording %s%s: %s, %.3f s, %llu bytes, %d gaps, %lld samples lost", failed ? "failed: " : "",
+                 reason.c_str(), dataPath_.c_str(), secs, (unsigned long long)bytes_, gaps, (long long)dropped_);
     }
+    LOG_DEBUG("record", "writer lag high-water mark: %.1f%% of the ring", maxFill * 100);
     active_ = false;
 }
 

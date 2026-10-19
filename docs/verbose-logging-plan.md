@@ -2,7 +2,8 @@
 
 Issue: #14 — *Usability: add verbose console logging with an output timestamped logfile*
 Branch: `14-verbose-logging` (from `main` at `5688d28`)
-Status: **steps 1–2 committed (`e5f6ffe`), step 3 implemented (uncommitted).** Steps 4–6 remain. The open questions are decided (section 7, 2026-10-18).
+Status: **steps 1–4 committed.** Step 5 (README) skipped at the user's request (2026-10-18). Step 6
+(GUI testing) remains. The open questions are decided (section 7, 2026-10-18).
 
 ## 1. Goal
 
@@ -50,6 +51,7 @@ temp folder), syslog / journald, and a TRACE level for per-block signal-processi
 | File name | `wvt_log_<YYYYMMDD>_<HHMMSS>.log`, local time. If the name exists (two runs in one second) append `_<pid>` | Local time matches what the user sees on the clock; `strftime` format matches the recorder |
 | Line format | File: `2026-10-18 14:08:37.123 [INFO ] [live] streaming from rtlsdr:0, 2.4 MS/s at 915 MHz`. Console with `-v`: same without the date. Console without `-v`: today's `wvt: <msg>` (WARN: `wvt: warning: <msg>`) | Sortable, greppable; the `[component]` tag shows where it came from. The plain console format keeps the output of users who don't pass `-v` unchanged |
 | Thread safety | One mutex around the write of each formatted line; format outside the lock | Simple. Log volume is low (actions, not per-sample) |
+| Who logs an error | An error that returns through `err` or a status field is logged at ERROR **once**, by the code that shows it to the user (`main.cpp`, `app*.cpp`). Library code logs the same failure at DEBUG for context. Library WARN only for problems nothing else reports (dropped samples, clamped gain, metadata rewrite failures, TX notes) | Without this rule one failure printed two or three times on the default console |
 | Real-time paths | No logging inside the audio callback or SDR sample callbacks. Count events there (underruns, gaps) with atomics and log a summary from the worker / UI thread | Keeps the audio and RX paths lock-free |
 | Header line | First lines of the file: wvt version / git hash, build options (RTL-SDR / UHD / audio on or off), full command line, OS | Makes a log file useful on its own in a bug report |
 | Failure to open the file | Print one WARN to stderr and continue with console only | Logging must never stop the app |
@@ -79,8 +81,27 @@ temp folder), syslog / journald, and a TRACE level for per-block signal-processi
      new line, so step 4 logs from worker threads don't garble it.
    - `wvt: note: ...` messages became WARN (`wvt: warning: ...`). Arg errors are ERROR.
    - New INFO lines for the GUI path: window size / renderer, device start, file open, exit.
-4. **Add action logs** to the library code (section 5).
-5. **Docs** — README: a short *Logging* section (flag, levels, file location, what to attach to
+4. **Add action logs** to the library code (section 5) — *done.*
+   - `sdr_device.cpp` logs every open centrally (requested vs actual rate / fc, notes), so each
+     backend only adds DEBUG detail (`uhd`: open, tune result, packet size, gain clamp; `rtlsdr`:
+     USB strings, tuner, gain steps, transfer size).
+   - `live`: start/stop summary, retune, gain, spectrum settings (DEBUG), dropped-sample summary
+     at most every 5 s from the spectrum thread, and the device stopping on its own.
+   - `recorder`: start, end summary (reason, bytes, gaps, lost samples), retune segments and the
+     first 50 gaps (DEBUG), writer lag high-water mark (DEBUG).
+   - `siggen_out`: file generation start/end; TX start, retune, gain, stop summary (underflows,
+     lost packets).
+   - `audio_engine`: start (mode, channel, output), stop summary (underruns, resyncs), WAV
+     start/close, WAV export. Nothing in the miniaudio callback; it only counts underruns.
+   - `engine`: `Worker` logs jobs that take 250 ms or more (DEBUG). Logging every recompute
+     would add many lines a second while panning (section 7: no DSP detail for now).
+   - `iq_file`: metadata guess result and file open (DEBUG).
+   - `app*.cpp`: ERROR at each place an error reaches the status bar, plus a recording that
+     fails on its own (edge-detected in `pollLive()`); INFO for opened files.
+   - Found while doing this: `openDevice()` discarded the warning from `checkSampleRate()`
+     (e.g. UHD above 8 MS/s needs USB 3). It is now in the log at DEBUG; the GUI still doesn't
+     show it for UHD (RTL-SDR folds it into `notes()`).
+5. **Docs** — *skipped (2026-10-18).* README: a short *Logging* section (flag, levels, file location, what to attach to
    a bug report).
 6. **Test** (section 6).
 

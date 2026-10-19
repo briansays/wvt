@@ -16,6 +16,7 @@
 
 #include "dsp.h"
 #include "iq_file.h"
+#include "log.h"
 
 using CancelFn = std::function<bool()>;
 
@@ -24,7 +25,9 @@ class Worker {
 public:
     using Fn = std::function<std::shared_ptr<Res>(const Req&, const CancelFn&)>;
 
-    Worker(Fn fn, std::function<void()> onDone) : fn_(std::move(fn)), onDone_(std::move(onDone)) {
+    // `name` tags the log lines of slow jobs.
+    Worker(Fn fn, std::function<void()> onDone, const char* name = "worker")
+        : fn_(std::move(fn)), onDone_(std::move(onDone)), name_(name) {
         th_ = std::thread([this] { loop(); });
     }
     ~Worker() {
@@ -83,6 +86,9 @@ private:
                 return gen_.load() != myGen && std::chrono::steady_clock::now() - start > std::chrono::milliseconds(150);
             };
             std::shared_ptr<Res> res = fn_(req, cancelled);
+            const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+            // Only slow jobs: logging every recompute while panning would flood the file.
+            if (secs >= 0.25) LOG_DEBUG("engine", "%s job took %.0f ms%s", name_, secs * 1e3, res ? "" : " (cancelled)");
             {
                 std::lock_guard<std::mutex> lk(m_);
                 if (res && !quit_) {
@@ -97,6 +103,7 @@ private:
 
     Fn fn_;
     std::function<void()> onDone_;
+    const char* name_;
     std::thread th_;
     std::mutex m_;
     std::condition_variable cv_;

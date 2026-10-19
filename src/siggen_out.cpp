@@ -5,6 +5,8 @@
 #include <vector>
 
 #include "dsp.h"
+#include "log.h"
+#include "ui_util.h"
 
 // ---------------------------------------------------------------------------
 // File generation
@@ -14,17 +16,22 @@ bool FileGenJob::start(const WaveformParams& p, const FileGenConfig& cfg, std::s
     ParamCheck chk = checkParams(p);
     if (!chk.ok()) {
         err = chk.errors.front();
+        LOG_DEBUG("siggen", "file generation rejected: %s", err.c_str());
         return false;
     }
     if (cfg.pulses > 0 ? p.mode == GenMode::CW : !(cfg.seconds > 0)) {
         err = cfg.pulses > 0 ? "a pulse count needs pulsed mode or playback" : "length must be positive";
+        LOG_DEBUG("siggen", "file generation rejected: %s", err.c_str());
         return false;
     }
     p_ = p;
     cfg_ = cfg;
     if (p.mode == GenMode::Playback) {
         auto w = loadPlayback(p, err);
-        if (!w) return false;
+        if (!w) {
+            LOG_DEBUG("siggen", "playback file: %s", err.c_str());
+            return false;
+        }
         if (cfg.pulses > 0 && !p.playLoop) {  // played once: the file ends with the recording
             cfg_.pulses = 0;
             cfg_.seconds = ((double)std::llround(p.startDelay * p.rate) + (double)w->s.size()) / p.rate;
@@ -43,6 +50,10 @@ bool FileGenJob::start(const WaveformParams& p, const FileGenConfig& cfg, std::s
     if (rc.description.empty()) rc.description = "wvt signal generator: " + describeParams(p);
     rc.extraGlobal = "\"wvt:siggen\": " + paramsJson(p);
     if (!rec_.start(ring_, src, rc, err)) return false;
+    LOG_INFO("siggen", "generating %s at %s, %s to a file, format %s", describeParams(p).c_str(), fmtSI(p.rate, "S/s", 6).c_str(),
+             cfg_.pulses > 0 ? (std::to_string(cfg_.pulses) + (p.mode == GenMode::Playback ? " plays" : " pulses")).c_str()
+                             : fmtSI(cfg_.seconds, "s", 5).c_str(),
+             formatName(cfg.fmt));
 
     {
         std::lock_guard<std::mutex> lk(m_);
@@ -114,6 +125,8 @@ void FileGenJob::run() {
         std::lock_guard<std::mutex> lk(m_);
         if (rs.failed) error_ = rs.stopReason;
         else if (cancel_ && !finished) error_ = "cancelled";
+        LOG_INFO("siggen", "file generation %s: %lld samples, %lld pulses", error_.empty() ? "done" : error_.c_str(),
+                 (long long)done, (long long)pulses);
     }
     active_ = false;
 }
@@ -128,28 +141,65 @@ bool TxEngine::start(const TxConfig& cfg, std::string& err) {
     ParamCheck chk = checkParams(p);
     if (!chk.ok()) {
         err = chk.errors.front();
+        LOG_DEBUG("tx", "rejected: %s", err.c_str());
         return false;
     }
     // Load the recording now, not in the transmit thread where it would underflow.
-    if (p.mode == GenMode::Playback && !loadPlayback(p, err)) return false;
+    if (p.mode == GenMode::Playback && !loadPlayback(p, err)) {
+        LOG_DEBUG("tx", "playback file: %s", err.c_str());
+        return false;
+    }
     auto tx = openTx(cfg, err);
-    if (!tx) return false;
+    if (!tx) {
+        LOG_DEBUG("tx", "open failed: %s", err.c_str());
+        return false;
+    }
     // The transmitter is tuned to the generator's fc, so the generator needs no extra shift.
     auto gen = std::make_shared<BusSigGen>(tx->sampleRate(), NAN);
-    if (!tx->start([gen](std::complex<float>* out, int64_t n) { gen->generate(out, n); }, err)) return false;
+    if (!tx->start([gen](std::complex<float>* out, int64_t n) { gen->generate(out, n); }, err)) {
+        LOG_DEBUG("tx", "start failed: %s", err.c_str());
+        return false;
+    }
+    LOG_INFO("tx", "transmitting %s on %s at %s, %s, gain %.2f dB", describeParams(p).c_str(), tx->description().c_str(),
+             fmtSI(tx->centerFreq(), "Hz", 9).c_str(), fmtSI(tx->sampleRate(), "S/s", 6).c_str(), tx->gain());
+    if (!tx->notes().empty()) LOG_WARN("tx", "%s", tx->notes().c_str());
     gen_ = gen;
     tx_ = std::move(tx);
     return true;
 }
 
 void TxEngine::stop() {
-    if (tx_) tx_->stop();
+    if (tx_) {
+        tx_->stop();
+        auto st = tx_->stats();
+        const std::string fatal = tx_->fatalError();
+        LOG_INFO("tx", "transmitter stopped: %lld samples sent, %lld underflows, %lld lost packets, %lld time errors%s%s",
+                 (long long)st.sent, (long long)st.underflows, (long long)st.seqErrors, (long long)st.timeErrors,
+                 fatal.empty() ? "" : "; error: ", fatal.c_str());
+    }
     tx_.reset();
     gen_.reset();
 }
 
-bool TxEngine::setCenterFreq(double hz, std::string& err) { return tx_ && tx_->setCenterFreq(hz, err); }
-bool TxEngine::setGain(double db, std::string& err) { return tx_ && tx_->setGain(db, err); }
+bool TxEngine::setCenterFreq(double hz, std::string& err) {
+    if (!tx_) return false;
+    if (!tx_->setCenterFreq(hz, err)) {
+        LOG_DEBUG("tx", "retune to %s failed: %s", fmtSI(hz, "Hz", 9).c_str(), err.c_str());
+        return false;
+    }
+    LOG_INFO("tx", "transmitter tuned to %s", fmtSI(tx_->centerFreq(), "Hz", 9).c_str());
+    return true;
+}
+
+bool TxEngine::setGain(double db, std::string& err) {
+    if (!tx_) return false;
+    if (!tx_->setGain(db, err)) {
+        LOG_DEBUG("tx", "gain change failed: %s", err.c_str());
+        return false;
+    }
+    LOG_INFO("tx", "transmit gain %.2f dB", tx_->gain());
+    return true;
+}
 
 TxEngine::Stats TxEngine::stats() const {
     Stats s;
@@ -179,7 +229,11 @@ std::shared_ptr<SigPreviewRes> computeSigPreview(const SigPreviewReq& r, const C
     int64_t playLen = 0;
     if (p.mode == GenMode::Playback) {
         auto w = loadPlayback(p, res->error, cancelled);
-        if (!w) return cancelled() ? nullptr : res;
+        if (!w) {
+            if (cancelled()) return nullptr;
+            LOG_DEBUG("siggen", "preview: %s", res->error.c_str());
+            return res;
+        }
         playLen = (int64_t)w->s.size();
         res->playSeconds = (double)playLen / rate;
         res->fileSeconds = (double)w->fileSamples / w->fileRate;

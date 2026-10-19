@@ -16,6 +16,7 @@
 #include <thread>
 #include <vector>
 
+#include "log.h"
 #include "sdr_device.h"
 #include "sdr_tx.h"
 #include "ui_util.h"
@@ -87,7 +88,10 @@ std::shared_ptr<Usrp> acquireUsrp(std::string args, std::string& err) {
     if (args.empty()) args = "type=b200";
     std::unique_lock<std::mutex> lk(gUsrpM);
     if (auto u = gUsrp.lock()) {
-        if (sameDevice(args, *u)) return u;
+        if (sameDevice(args, *u)) {
+            LOG_DEBUG("uhd", "sharing the open USRP %s for '%s'", u->serial.c_str(), args.c_str());
+            return u;
+        }
         err = "USRP " + u->serial + " is already open in this wvt (one USRP at a time)";
         // Drop our reference without the lock: if it is the last one, ~Usrp locks.
         lk.unlock();
@@ -96,6 +100,7 @@ std::shared_ptr<Usrp> acquireUsrp(std::string args, std::string& err) {
     // A handle that is being released still holds the USB device.
     gUsrpCv.wait(lk, [] { return gUsrpAlive == 0; });
     uhd_usrp_handle h = nullptr;
+    LOG_INFO("uhd", "opening USRP '%s' (loading the FPGA image can take a few seconds)", args.c_str());
     if (uhd_usrp_make(&h, args.c_str()) != UHD_ERROR_NONE) {
         err = lastError(("cannot open USRP '" + args + "'").c_str()) +
               " (is it plugged in? FPGA images downloaded with uhd_images_downloader?"
@@ -112,6 +117,7 @@ std::shared_ptr<Usrp> acquireUsrp(std::string args, std::string& err) {
         uhd_usrp_rx_info_free(&info);
     }
     gUsrp = u;
+    LOG_DEBUG("uhd", "USRP open, serial %s", u->serial.c_str());
     return u;
 }
 
@@ -193,6 +199,8 @@ public:
         }
         uhd_rx_streamer_max_num_samps(rx_, &spb_);
         if (spb_ == 0) spb_ = 4096;
+        LOG_DEBUG("uhd", "rx: %s, rate %.3f S/s, gain range %.2f-%.2f dB step %.2f, %zu samples per packet", desc_.c_str(),
+                  rate_, gain_.min, gain_.max, gain_.step, spb_);
         ++dev_->rxUsers;
         counted_ = true;
         return true;
@@ -245,6 +253,8 @@ public:
         double f = hz;
         uhd_usrp_get_rx_freq(usrp_, 0, &f);
         fc_ = f;
+        LOG_DEBUG("uhd", "rx tune %.0f Hz: RF %.0f Hz, DSP %.0f Hz, result %.0f Hz", hz, res.actual_rf_freq,
+                  res.actual_dsp_freq, f);
         if (std::fabs(f - hz) > 1) {
             err = "USRP cannot tune to " + fmtSI(hz, "Hz", 9) + " (B200/B205: 70 MHz - 6 GHz); tuned to " +
                   fmtSI(f, "Hz", 9);
@@ -266,6 +276,8 @@ public:
             err = lastError("cannot set gain");
             return false;
         }
+        if (db < gain_.min || db > gain_.max)
+            LOG_WARN("uhd", "gain %.2f dB is outside %.2f-%.2f dB, clamped", db, gain_.min, gain_.max);
         return true;
     }
 

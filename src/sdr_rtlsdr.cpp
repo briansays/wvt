@@ -12,6 +12,7 @@
 #include <thread>
 #include <vector>
 
+#include "log.h"
 #include "sdr_device.h"
 #include "ui_util.h"
 
@@ -89,6 +90,9 @@ public:
             rtlsdr_get_tuner_gains(dev_, g.data());
             for (int v : g) gains_.push_back(v / 10.0);
         }
+        LOG_DEBUG("rtlsdr", "#%u: %s %s serial '%s', tuner %s, %d gain steps (%.1f-%.1f dB)", index, manuf, product, serial,
+                  tunerName(tuner_), (int)gains_.size(), gains_.empty() ? 0.0 : gains_.front(),
+                  gains_.empty() ? 0.0 : gains_.back());
 
         if (cfg.ppm != 0) {
             int r = rtlsdr_set_freq_correction(dev_, cfg.ppm);
@@ -124,6 +128,7 @@ public:
             return false;
         }
         rate_ = rtlsdr_get_sample_rate(dev_);
+        LOG_DEBUG("rtlsdr", "sample rate %.0f S/s requested, %.0f S/s set", cfg.rate, rate_);
         std::string warn, e2;
         checkSampleRate("rtlsdr", rate_, e2, warn);
         if (!warn.empty()) notes_ += (notes_.empty() ? "" : "; ") + warn;
@@ -143,6 +148,7 @@ public:
         const uint32_t want = (uint32_t)(rate_ * 2 * 0.02);
         const uint32_t bufLen = std::clamp<uint32_t>((want + 16383) / 16384 * 16384, 16384, 256 * 1024);
         finished_ = false;
+        LOG_DEBUG("rtlsdr", "streaming with %u-byte USB transfers", bufLen);
         th_ = std::thread([this, bufLen] {
             int r = rtlsdr_read_async(dev_, &RtlSdrDevice::callback, this, 0, bufLen);
             if (!stopping_) {
@@ -199,6 +205,7 @@ public:
             err = "cannot set gain";
             return false;
         }
+        if (std::fabs(best - db) > 0.05) LOG_DEBUG("rtlsdr", "gain %.1f dB requested, nearest tuner step %.1f dB", db, best);
         return true;
     }
 

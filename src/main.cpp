@@ -654,11 +654,11 @@ int main(int argc, char** argv) {
         if (haveGen || openGen) app.openSigGen(haveGen ? &gp : nullptr);
         if (haveDevice) {
             LOG_INFO("main", "starting device %s%s%s", dev.driver.c_str(), dev.args.empty() ? "" : ":", dev.args.c_str());
-            if (!app.startDevice(dev)) LOG_ERROR("main", "device failed to start (see the status bar)");
-            else if (haveRecord && !app.startRecording(rc)) LOG_ERROR("main", "recording failed to start");
+            // App logs the reason when these fail.
+            if (app.startDevice(dev) && haveRecord) app.startRecording(rc);
         } else if (!path.empty()) {
             LOG_INFO("main", "opening %s", path.c_str());
-            if (!app.openFile(path, ov)) LOG_ERROR("main", "failed to open %s", path.c_str());
+            app.openFile(path, ov);  // logs the reason on failure
             if (haveView) app.setView(view0, view1);
             if (haveChan) app.setChannel(chanOff, chanBw);
         }
