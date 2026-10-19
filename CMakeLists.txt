@@ -210,3 +210,9 @@ add_executable(segment_check tools/segment_check.cpp src/engine.cpp src/dsp.cpp 
   src/log.cpp)
 target_include_directories(segment_check PRIVATE src)
 target_link_libraries(segment_check PRIVATE imgui_implot Threads::Threads)
+
+# GPU self-test and benchmark (CPU times; GPU vs CPU once a GPU backend exists)
+add_executable(gpu_check tools/gpu_check.cpp src/engine.cpp src/dsp.cpp src/iq_file.cpp src/ui_util.cpp src/log.cpp)
+target_include_directories(gpu_check PRIVATE src)
+target_link_libraries(gpu_check PRIVATE imgui_implot Threads::Threads)
+target_compile_options(gpu_check PRIVATE -Wall -Wextra -Wno-unused-parameter)
