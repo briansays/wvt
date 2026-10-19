@@ -2,7 +2,7 @@
 
 Branch: `3-cuda-gpu`, from `main` at `29dca41` (after the logging merge, PR #15).
 Status: **steps 0–2 implemented** (2026-10-19). The CPU-only build is tested on macOS.
-`src/gpu_cuda.cu` is **not compiled yet**: there is no CUDA toolkit here (see §9).
+The CUDA build is compiled and tested in CUDA 12.6 and 12.8 containers with no GPU (see §9).
 
 Earlier GPU work (`wvt-gpu-dev`, PR #5) is out of date. This plan starts again from `main`
 and does not use that branch.
@@ -295,5 +295,22 @@ is slower than the waterfall, so step 7 is worth doing.
 - `gpu_check`, `siggen_check`, `audio_check`, `log_check` and `segment_check` pass.
 - `--gpu on` exits with status 1 and "built without CUDA". `--gpu maybe` and
   `--gpu-device x` exit with status 2. A bad `WVT_GPU` gives a WARN and uses `auto`.
-- **Not done:** compiling `gpu_cuda.cu`. It needs nvcc: the CI job in step 3, a CUDA
-  container (Docker is installed here but not running), or the Linux GPU computer.
+
+### Verification (CUDA container, no GPU)
+
+Docker on the Mac (arm64), images `nvidia/cuda:12.6.3-devel-ubuntu24.04` and
+`nvidia/cuda:12.8.1-devel-ubuntu24.04`, `-DWVT_WITH_CUDA=ON`, RTL-SDR and UHD off:
+
+| | CUDA 12.6 | CUDA 12.8 |
+|---|---|---|
+| CMake line | `CUDA 12.6.85, archs 75-real;80-real;86-real;89-real;90, static cuFFT` | `CUDA 12.8.93, archs ...;90-real;120, static cuFFT` |
+| Build warnings | none | none |
+| Self-tests | all pass | all pass |
+| `gpu_check` | "build: CUDA; GPU: none, no NVIDIA driver", all pass | same |
+| `--gpu on` | "no NVIDIA driver", status 1 | same |
+| CUDA shared libraries in `ldd wvt` | none | none |
+
+The binary is 5.5 MB: no cuFFT function is called yet, so the static library adds
+nothing. It grows in step 4.
+
+**Not done:** running on a real GPU (steps 4–7 need the Linux computer, §8 item 6).
