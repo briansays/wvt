@@ -33,6 +33,9 @@ public:
     void frame();
     bool busy() const;
     void setView(double t0, double t1);
+    // Loads only [t0, t1) seconds of the file; -1 = file start / end. Kept for
+    // the next file. Returns false (and keeps the old segment) on a bad value.
+    bool setSegment(double t0, double t1);
     void setChannel(double offset, double bw);
 
     // Live device mode (app_live.cpp)
@@ -75,7 +78,12 @@ private:
     void label(const char* text, float fieldW);
 
     // state changes
-    void onSourceChanged(bool resetView);
+    std::string onSourceChanged(bool resetView);  // returns a segment note, or ""
+    std::string applySegment();
+    void resetTimeView();
+    double tBegin() const { return fs_ > 0 ? segS0_ / fs_ : 0; }
+    double tEnd() const { return fs_ > 0 ? segS1_ / fs_ : 0; }
+    bool segmentActive() const { return file_ && (segS0_ > 0 || segS1_ < nSamples_); }
     void setFs(double fs);
     void setFc(double fc);
     void pan(double frac);
@@ -136,6 +144,7 @@ private:
     void syncAudioChannel();
     void setAudioMode(int mode);
     void playRange(int64_t& s0, int64_t& s1) const;
+    const char* rangeName(int r) const;  // audio range name ("Whole segment" when one is loaded)
 
     X11Window& win_;
     std::unique_ptr<Worker<WaterfallReq, WaterfallRes>> wfWorker_;
@@ -149,6 +158,10 @@ private:
     double fs_ = 1e6, fc_ = 0;
     int64_t nSamples_ = 0;
     double dur_ = 0;
+    // Time segment (issue #16): as typed (-1 = file start / end), and the
+    // samples [segS0_, segS1_) it selects. Views stay in file time.
+    double segT0_ = -1, segT1_ = -1;
+    int64_t segS0_ = 0, segS1_ = 0;
     std::string status_;
     std::string metaNote_;
 

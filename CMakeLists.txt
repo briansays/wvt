@@ -204,3 +204,9 @@ target_link_libraries(audio_check PRIVATE Threads::Threads)
 add_executable(log_check tools/log_check.cpp src/log.cpp)
 target_include_directories(log_check PRIVATE src)
 target_link_libraries(log_check PRIVATE Threads::Threads)
+
+# Time segment self-test (segment rules, overview on a sample range)
+add_executable(segment_check tools/segment_check.cpp src/engine.cpp src/dsp.cpp src/iq_file.cpp src/ui_util.cpp
+  src/log.cpp)
+target_include_directories(segment_check PRIVATE src)
+target_link_libraries(segment_check PRIVATE imgui_implot Threads::Threads)

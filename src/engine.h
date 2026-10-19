@@ -216,6 +216,7 @@ std::shared_ptr<DemodRes> computeDemod(const DemodReq& r, const CancelFn& cancel
 // ---------------------------------------------------------------------------
 struct OverviewReq {
     Source src;
+    int64_t s0 = 0, s1 = -1;  // sample range; s1 < 0 = to the end of the file
     int points = 2000;
     bool operator==(const OverviewReq&) const = default;
 };
@@ -229,3 +230,17 @@ struct ChanDesign {
     int decim = 1, taps = 0;
 };
 ChanDesign chanDesign(const DemodReq& r);
+
+// ---------------------------------------------------------------------------
+// Time segment of a file (issue #16)
+// ---------------------------------------------------------------------------
+// Turns a segment typed in seconds into samples [s0, s1) of a file with n
+// samples at rate fs. A negative t0 means the file start, a negative t1 the
+// file end. On a bad segment, err says why and [s0, s1) is the whole file.
+// An end past the file end is clamped, and warn says so.
+struct SegmentRange {
+    int64_t s0 = 0, s1 = 0;
+    std::string err, warn;
+    bool whole(int64_t n) const { return s0 == 0 && s1 == n; }
+};
+SegmentRange segmentRange(double t0, double t1, double fs, int64_t n);

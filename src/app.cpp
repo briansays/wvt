@@ -91,28 +91,33 @@ bool App::openFile(const std::string& path, const CliOverrides& o) {
     fp_.headerBytes = o.header >= 0 ? o.header : 0;
     if (o.swapIQ) fp_.swapIQ = true;
     metaNote_ = g.source.empty() ? "no metadata found - set format / rate below" : "settings from " + g.source;
-    status_ = "Opened " + g.dataPath + " (" + metaNote_ + ")";
     LOG_INFO("app", "opened %s: %s%s, %s at %s, %s (%s)", g.dataPath.c_str(), formatName(fp_.fmt), fp_.bigEndian ? " big-endian" : "",
              fmtSI(fs_, "S/s", 6).c_str(), fmtSI(fc_, "Hz", 9).c_str(), fmtSI((double)f->sizeBytes(), "B", 4).c_str(), metaNote_.c_str());
     bookmarks_.clear();
     bookmarkSel_ = -1;
-    onSourceChanged(true);
+    segS0_ = segS1_ = -1;  // a new file: log the segment it gets
+    const std::string segNote = onSourceChanged(true);
+    status_ = "Opened " + g.dataPath + " (" + metaNote_ + ")";
+    if (!segNote.empty()) status_ += " - " + segNote;
+    else if (segmentActive()) status_ += " - segment " + fmtSI(tBegin(), "s", 6) + " to " + fmtSI(tEnd(), "s", 6);
     return true;
 }
 
-void App::onSourceChanged(bool resetView) {
+std::string App::onSourceChanged(bool resetView) {
     nSamples_ = file_ ? file_->numSamples(fp_) : 0;
     dur_ = fs_ > 0 ? nSamples_ / fs_ : 0;
+    // The rate, format or header moves the samples, so map the segment again.
+    std::string segNote = applySegment();
+    if (!segNote.empty()) status_ = segNote;
     if (resetView) {
-        tmin_ = 0;
-        tmax_ = dur_ > 0 ? dur_ : 1;
+        resetTimeView();
         fmin_ = fc_ - fs_ / 2;
         fmax_ = fc_ + fs_ / 2;
-        tm1_ = dur_ * 0.25;
-        tm2_ = dur_ * 0.75;
         fm1_ = fc_ - fs_ / 8;
         fm2_ = fc_ + fs_ / 8;
         fitSpecY_ = true;
+    } else if (nSamples_ > 0) {
+        setView(tmin_, tmax_);  // keep the view inside the segment
     }
     wf_.reset();
     dm_.reset();
@@ -121,6 +126,71 @@ void App::onSourceChanged(bool resetView) {
     size_t sl = name.find_last_of('/');
     if (sl != std::string::npos) name = name.substr(sl + 1);
     win_.setTitle(file_ ? "wvt - " + name : "wvt - IQ waveform viewer");
+    return segNote;
+}
+
+void App::resetTimeView() {
+    const double len = tEnd() - tBegin();
+    tmin_ = tBegin();
+    tmax_ = len > 0 ? tEnd() : tBegin() + 1;
+    tm1_ = tBegin() + len * 0.25;
+    tm2_ = tBegin() + len * 0.75;
+}
+
+// Maps segT0_ / segT1_ to samples. A segment that does not fit the file falls
+// back to the whole file. Returns a note for the status bar, or "".
+std::string App::applySegment() {
+    const int64_t prev0 = segS0_, prev1 = segS1_;
+    SegmentRange r = segmentRange(segT0_, segT1_, fs_, nSamples_);
+    std::string note;
+    if (!r.err.empty()) {
+        LOG_ERROR("app", "%s; using the whole file", r.err.c_str());
+        note = "Segment not used: " + r.err;
+        segT0_ = segT1_ = -1;
+    } else if (!r.warn.empty() && (r.s0 != prev0 || r.s1 != prev1)) {  // once, not on each format change
+        LOG_WARN("app", "%s", r.warn.c_str());
+        note = r.warn;
+    }
+    segS0_ = r.s0;
+    segS1_ = r.s1;
+    if (file_ && (segS0_ != prev0 || segS1_ != prev1)) {
+        if (segmentActive())
+            LOG_INFO("app", "segment %s to %s (%s of %s)", fmtSI(tBegin(), "s", 6).c_str(), fmtSI(tEnd(), "s", 6).c_str(),
+                     fmtSI((double)(segS1_ - segS0_), "S", 4).c_str(), fmtSI((double)nSamples_, "S", 4).c_str());
+        else if (prev0 >= 0)  // not on open: "opened" already covers it
+            LOG_INFO("app", "segment: whole file");
+    }
+    return note;
+}
+
+bool App::setSegment(double t0, double t1) {
+    if (t0 < 0) t0 = -1;
+    if (t1 < 0) t1 = -1;
+    SegmentRange r = segmentRange(t0, t1, fs_, nSamples_);
+    if (!r.err.empty()) {
+        LOG_ERROR("app", "%s", r.err.c_str());
+        status_ = "Segment not changed: " + r.err;
+        return false;
+    }
+    segT0_ = t0;
+    segT1_ = t1;
+    if (!file_) {
+        status_ = "Segment set for the next file";
+        return true;
+    }
+    stopAudio("Audio stopped (new segment)");
+    std::string note = applySegment();
+    resetTimeView();
+    wf_.reset();
+    dm_.reset();
+    ov_.reset();
+    wfWorker_->invalidate();
+    dmWorker_->invalidate();
+    ovWorker_->invalidate();
+    if (!note.empty()) status_ = note;
+    else if (segmentActive()) status_ = "Loaded segment " + fmtSI(tBegin(), "s", 6) + " to " + fmtSI(tEnd(), "s", 6);
+    else status_ = "Loaded the whole file";
+    return true;
 }
 
 void App::setFs(double fs) {
@@ -150,9 +220,9 @@ void App::setChannel(double offset, double bw) {
 void App::setView(double t0, double t1) {
     if (t1 < t0) std::swap(t0, t1);
     double span = std::max(t1 - t0, 4.0 / std::max(1.0, fs_));
-    double total = std::max(dur_, span);
+    double total = std::max(tEnd() - tBegin(), span);
     span = std::min(span, total);
-    t0 = std::clamp(t0, 0.0, total - span);
+    t0 = std::clamp(t0, tBegin(), tBegin() + total - span);
     tmin_ = t0;
     tmax_ = t0 + span;
 }
@@ -170,8 +240,9 @@ void App::zoom(double factor) {
 void App::submitRequests() {
     if (liveMode_ || !file_ || nSamples_ <= 0) return;
     Source src{file_, fp_, fs_, fc_};
-    int64_t s0 = std::clamp<int64_t>((int64_t)std::floor(tmin_ * fs_), 0, nSamples_ - 1);
-    int64_t s1 = std::clamp<int64_t>((int64_t)std::ceil(tmax_ * fs_), s0 + 1, nSamples_);
+    if (segS1_ <= segS0_) return;
+    int64_t s0 = std::clamp<int64_t>((int64_t)std::floor(tmin_ * fs_), segS0_, segS1_ - 1);
+    int64_t s1 = std::clamp<int64_t>((int64_t)std::ceil(tmax_ * fs_), s0 + 1, segS1_);
 
     WaterfallReq wr;
     wr.src = src;
@@ -194,6 +265,8 @@ void App::submitRequests() {
     }
     OverviewReq orq;
     orq.src = src;
+    orq.s0 = segS0_;
+    orq.s1 = segS1_;
     ovWorker_->submit(orq);
 }
 
@@ -365,6 +438,19 @@ void App::drawToolbar() {
     if (ImGui::Button("Open")) openFile(pathBuf_);
     ImGui::SetItemTooltip("Open the path typed in the File box (Enter also works).\nSigMF .sigmf-meta/.sigmf-data, gqrx names and common extensions are auto-detected.");
 
+    const float segW = fieldW(9);
+    label("Segment", segW * 2 + st.ItemInnerSpacing.x);
+    const char* segTip = "Load only this part of the file, in seconds of file time.\n"
+                         "-1 = file start / end (-1 to -1 = the whole file).\n"
+                         "Set it before Open, or change it after; press Enter to apply.";
+    double seg0 = segT0_, seg1 = segT1_;
+    bool segEdit = InputSI("##seg0", &seg0, "s", segW);
+    ImGui::SetItemTooltip("From: %s", segTip);
+    ImGui::SameLine(0, st.ItemInnerSpacing.x);
+    segEdit |= InputSI("##seg1", &seg1, "s", segW);
+    ImGui::SetItemTooltip("To: %s", segTip);
+    if (segEdit) setSegment(seg0, seg1);
+
     label("Format", fieldW(26));
     if (ImGui::BeginCombo("##fmt", formatName(fp_.fmt))) {
         for (int i = 0; i < (int)SampleFormat::Count; ++i)
@@ -395,6 +481,7 @@ void App::drawToolbar() {
     if (file_) {
         std::string info = fmtSI((double)nSamples_, "S", 4) + " | " + fmtSI(dur_, "s", 5) + " | " +
                            fmtSI((double)file_->sizeBytes(), "B", 4);
+        if (segmentActive()) info += " | segment " + fmtSI(tEnd() - tBegin(), "s", 5);
         flow(ImGui::CalcTextSize(info.c_str()).x);
         ImGui::AlignTextToFramePadding();
         ImGui::TextDisabled("%s", info.c_str());
@@ -405,7 +492,7 @@ void App::drawToolbar() {
     flowBegin();
     flow(ImGui::GetFrameHeight() * 10);
     double span = tmax_ - tmin_;
-    if (ImGui::Button("|<")) setView(0, span);
+    if (ImGui::Button("|<")) setView(tBegin(), tBegin() + span);
     ImGui::SetItemTooltip("Jump to start (Home)");
     ImGui::SameLine(0, 2);
     if (ImGui::Button("<<")) pan(-1.0);
@@ -420,7 +507,7 @@ void App::drawToolbar() {
     if (ImGui::Button(">>")) pan(1.0);
     ImGui::SetItemTooltip("Forward one view (PgDn)");
     ImGui::SameLine(0, 2);
-    if (ImGui::Button(">|")) setView(dur_ - span, dur_);
+    if (ImGui::Button(">|")) setView(tEnd() - span, tEnd());
     ImGui::SetItemTooltip("Jump to end (End)");
     ImGui::SameLine(0, st.ItemSpacing.x * 2);
     if (ImGui::Button(" + ")) zoom(0.5);
@@ -430,17 +517,17 @@ void App::drawToolbar() {
     ImGui::SetItemTooltip("Zoom out 2x (-)");
     ImGui::SameLine(0, 2);
     if (ImGui::Button("All")) {
-        setView(0, dur_);
+        setView(tBegin(), tEnd());
         fmin_ = fc_ - fs_ / 2;
         fmax_ = fc_ + fs_ / 2;
     }
-    ImGui::SetItemTooltip("Show the whole file and full bandwidth (A)");
+    ImGui::SetItemTooltip("Show the whole file (or segment) and full bandwidth (A)");
 
     label("Span", fieldW(8));
     if (ImGui::BeginCombo("##spanp", "preset")) {
         for (auto& s : kSpans)
             if (ImGui::Selectable(s.name)) {
-                if (s.span < 0) setView(0, dur_);
+                if (s.span < 0) setView(tBegin(), tEnd());
                 else {
                     double c = 0.5 * (tmin_ + tmax_);
                     setView(c - s.span / 2, c + s.span / 2);
@@ -499,10 +586,10 @@ void App::drawToolbar() {
     // --- Row 3: overview + scrollbar -----------------------------------------
     ImGui::Spacing();
     drawOverview(ImGui::GetFontSize() * 3.2f);
-    double start = tmin_;
-    if (ScrollbarH("##hscroll", dur_, start, tmax_ - tmin_, ImGui::GetContentRegionAvail().x,
+    double start = tmin_ - tBegin();
+    if (ScrollbarH("##hscroll", tEnd() - tBegin(), start, tmax_ - tmin_, ImGui::GetContentRegionAvail().x,
                    ImGui::GetStyle().ScrollbarSize + 2))
-        setView(start, start + (tmax_ - tmin_));
+        setView(tBegin() + start, tBegin() + start + (tmax_ - tmin_));
 }
 
 void App::drawOverview(float h) {
@@ -511,7 +598,7 @@ void App::drawOverview(float h) {
         return;
     ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoGridLines | ImPlotAxisFlags_NoTickLabels,
                       ImPlotAxisFlags_NoDecorations | ImPlotAxisFlags_AutoFit);
-    ImPlot::SetupAxisLimits(ImAxis_X1, 0, std::max(dur_, 1e-9), ImPlotCond_Always);
+    ImPlot::SetupAxisLimits(ImAxis_X1, tBegin(), std::max(tEnd(), tBegin() + 1e-9), ImPlotCond_Always);
     ImPlot::SetupFinish();
     ImPlotRect lim = ImPlot::GetPlotLimits();
     if (ov_ && !ov_->t.empty()) {
@@ -726,9 +813,10 @@ void App::drawLeft() {
         ImPlot::SetupAxis(ImAxis_Y1, nullptr, ImPlotAxisFlags_Invert);
         ImPlot::SetupAxisFormat(ImAxis_Y1, formatAxisSI, &tFmt_);
         ImPlot::SetupAxisLinks(ImAxis_Y1, &tmin_, &tmax_);
-        double pad = std::max(dur_ * 0.02, 1.0 / std::max(1.0, fs_));
-        ImPlot::SetupAxisLimitsConstraints(ImAxis_Y1, -pad, dur_ + pad);
-        ImPlot::SetupAxisZoomConstraints(ImAxis_Y1, 4.0 / std::max(1.0, fs_), dur_ + 2 * pad);
+        const double len = tEnd() - tBegin();
+        double pad = std::max(len * 0.02, 1.0 / std::max(1.0, fs_));
+        ImPlot::SetupAxisLimitsConstraints(ImAxis_Y1, tBegin() - pad, tEnd() + pad);
+        ImPlot::SetupAxisZoomConstraints(ImAxis_Y1, 4.0 / std::max(1.0, fs_), len + 2 * pad);
         if (wf_ && wfTex_)
             // ImPlot maps uv0 to (xmin, ymax); the time axis is inverted, so flip V
             // to keep texture row 0 (earliest time) at the top.
@@ -770,9 +858,10 @@ bool App::beginTimePlot(const char* id, const char* ylabel, float h, bool autoY,
     ImPlot::SetupAxis(ImAxis_X1, nullptr, ImPlotAxisFlags_NoLabel);
     ImPlot::SetupAxisFormat(ImAxis_X1, formatAxisSI, &tFmt_);
     ImPlot::SetupAxisLinks(ImAxis_X1, &tmin_, &tmax_);
-    double pad = std::max(dur_ * 0.02, 1.0 / std::max(1.0, fs_));
-    ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, -pad, dur_ + pad);
-    ImPlot::SetupAxisZoomConstraints(ImAxis_X1, 4.0 / std::max(1.0, fs_), dur_ + 2 * pad);
+    const double len = tEnd() - tBegin();
+    double pad = std::max(len * 0.02, 1.0 / std::max(1.0, fs_));
+    ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, tBegin() - pad, tEnd() + pad);
+    ImPlot::SetupAxisZoomConstraints(ImAxis_X1, 4.0 / std::max(1.0, fs_), len + 2 * pad);
     ImPlot::SetupAxis(ImAxis_Y1, ylabel, autoY ? (ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_RangeFit) : 0);
     if (yfmt) ImPlot::SetupAxisFormat(ImAxis_Y1, yfmt, yud);
     if (legend) ImPlot::SetupLegend(ImPlotLocation_NorthEast, ImPlotLegendFlags_Horizontal);
@@ -1039,12 +1128,12 @@ void App::handleShortcuts() {
     if (ImGui::IsKeyPressed(ImGuiKey_RightArrow)) pan(0.1);
     if (ImGui::IsKeyPressed(ImGuiKey_PageUp)) pan(-1.0);
     if (ImGui::IsKeyPressed(ImGuiKey_PageDown)) pan(1.0);
-    if (ImGui::IsKeyPressed(ImGuiKey_Home, false)) setView(0, tmax_ - tmin_);
-    if (ImGui::IsKeyPressed(ImGuiKey_End, false)) setView(dur_ - (tmax_ - tmin_), dur_);
+    if (ImGui::IsKeyPressed(ImGuiKey_Home, false)) setView(tBegin(), tBegin() + (tmax_ - tmin_));
+    if (ImGui::IsKeyPressed(ImGuiKey_End, false)) setView(tEnd() - (tmax_ - tmin_), tEnd());
     if (ImGui::IsKeyPressed(ImGuiKey_Equal) || ImGui::IsKeyPressed(ImGuiKey_KeypadAdd)) zoom(0.5);
     if (ImGui::IsKeyPressed(ImGuiKey_Minus) || ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract)) zoom(2.0);
     if (ImGui::IsKeyPressed(ImGuiKey_A, false)) {
-        setView(0, dur_);
+        setView(tBegin(), tEnd());
         fmin_ = fc_ - fs_ / 2;
         fmax_ = fc_ + fs_ / 2;
     }

@@ -87,6 +87,7 @@ wvt [options] [file]
   -H, --header BYTES   bytes to skip at the start of the file
       --swap-iq        swap I and Q
       --chan OFF:BW    start with the channel filter on, e.g. --chan 300k:150k
+      --segment T0:T1  load only this part of the file, in seconds (-1 = file start / end)
       --view T0:T1     start with this time range, e.g. --view 0.5:0.52
       --software       force the software renderer
       --scale S        UI scale (or env WVT_SCALE), useful on HiDPI
@@ -126,7 +127,7 @@ signal generator (-c sets the center frequency, -r the sample rate):
 
 audio (--chan OFF:BW sets the channel; without it: 0 Hz and the default width of the mode):
       --audio am|nfm|wfm|usb|lsb|cw   open the audio window and play
-      --audio-out FILE.wav   demodulate to WAV and exit (the file, or the --view range;
+      --audio-out FILE.wav   demodulate to WAV and exit (the file or --segment, or the --view range;
                              with --device: the live stream until Ctrl+C or --record-duration)
       --audio-device NAME  --list-audio-devices  --volume DB  --squelch DBFS
 ```
@@ -142,6 +143,31 @@ each value in the UI.
 
 The window uses GLX/OpenGL when the X server supports it. If not, wvt uses its built-in software
 rasterizer. Thus wvt also works over `ssh -X`, in Xvfb, and in VNC sessions without GL.
+
+### Large files: load a segment
+
+On a large file, the first view of the whole file can be slow. The waterfall reads samples from
+all of the file, and past its work budget it analyzes only part of them ("FFT sees" below 100 %).
+To work on part of the file only, type a start and an end time, in seconds, in the **Segment**
+boxes of toolbar row 1:
+
+- Type the times before you open the file, or change them after. Press Enter to apply a change.
+  wvt then shows the new segment and computes all the plots again.
+- `-1` means the file start (in the first box) or the file end (in the second box). `-1` to `-1`
+  loads the whole file. This is the default.
+- The plots, readouts, bookmarks and markers show file time. A segment from 40 s to 50 s shows
+  40–50 s, not 0–10 s. The view, the scrollbar, the overview strip and the audio ranges stay
+  inside the segment.
+- If the start is after the end of the file, or the end is before the start, wvt tells you why
+  and keeps the previous segment. An end after the end of the file uses the end of the file.
+- The segment stays when you open the next file. If it does not fit that file, wvt loads the
+  whole file.
+
+```sh
+wvt big.sigmf-meta --segment 40:50                 # 40 s to 50 s
+wvt big.sigmf-meta --segment 80:-1 --view 90:91    # 80 s to the end, start with a 1 s view at 90 s
+wvt big.sigmf-meta --segment 40:50 --chan 300k:200k --audio wfm --audio-out seg.wav   # export 10 s
+```
 
 ## Live devices
 
@@ -318,7 +344,8 @@ sets the bandwidth to the default of that mode.
 - **Device** selects the sound output. The change applies on the next Play.
 
 **File mode.** **Play** plays the **Range**: *from view start* to the end of the file, the *view*,
-the part between the *time markers*, or the *whole file*. A green playhead line moves across the
+the part between the *time markers*, or the *whole file*. With a segment loaded, every range stays
+inside the segment, and *whole file* becomes *whole segment*. A green playhead line moves across the
 time plots and the waterfall. Drag it, or the position slider, to seek. **Shift+click** a time plot
 or the waterfall to play from that point. *Loop* repeats the range. *Follow playhead* pages the view
 forward when the playhead leaves it (only for views of 0.25 s or more).
@@ -350,9 +377,9 @@ between blocks, so the audio is continuous. `build/audio_check` tests each mode 
 
 | Area | Contents |
 |---|---|
-| **Toolbar row 1** | File path, sample format, sample rate, center frequency, header bytes, I/Q swap, endianness |
+| **Toolbar row 1** | File path, segment (start / end time to load), sample format, sample rate, center frequency, header bytes, I/Q swap, endianness |
 | **Toolbar row 2** | Start / back a page / back 10% / forward 10% / forward a page / end, zoom in/out/all, span presets, start-time and span entry boxes, jump to sample index, bookmarks, time and frequency markers, relative-frequency axis labels |
-| **Overview strip** | Power over the whole file. The white box is the current view: drag it to move, drag its edges to resize, or click anywhere to jump there |
+| **Overview strip** | Power over the whole file (or the segment). The white box is the current view: drag it to move, drag its edges to resize, or click anywhere to jump there |
 | **Scrollbar** | Scrolls the view through the file (drag the thumb, click the track to move a page, or use the wheel) |
 | **Left** | Waterfall settings (FFT size, window, overlap, averaging, rows/cols, dB range/auto, colormap) above the spectrum of the current view, the waterfall, and its color bar |
 | **Right** | Channel settings, then scrollable I/Q, AM, FM and PM plots, each with its own settings and a readout of measurements |
@@ -442,3 +469,4 @@ Try `wvt out.sigmf-meta --chan 300k:150k --view 0.5:0.505`.
 | `tools/iqgen.cpp` | Synthetic test-signal generator |
 | `tools/siggen_check.cpp` | Self-test for the generator (`build/siggen_check`, no hardware needed) |
 | `tools/audio_check.cpp` | Self-test for the audio demodulator (`build/audio_check`, no hardware needed) |
+| `tools/segment_check.cpp` | Self-test for the time segment rules (`build/segment_check`) |
