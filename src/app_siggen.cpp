@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "app.h"
+#include "log.h"
 #include "platform_x11.h"
 
 namespace {
@@ -114,6 +115,7 @@ void App::pollSigGen() {
                                          fmtSI((double)rs.bytes, "B", 4) + ")";
         sgLastFile_ = rs.metaPath.empty() ? rs.dataPath : rs.metaPath;
         status_ = sgFileMsg_;
+        if (sgFileFailed_ && sgFileSt_.error != "cancelled") LOG_ERROR("app", "%s", sgFileMsg_.c_str());
     }
     if (tx_ && tx_->running()) {
         txStats_ = tx_->stats();
@@ -143,6 +145,7 @@ bool App::startTx() {
     if (!tx_->start(txCfg_, err)) {
         txErr_ = err;
         status_ = "Transmit failed: " + err;
+        LOG_ERROR("app", "transmit failed: %s", err.c_str());
         return false;
     }
     txErr_.clear();
@@ -156,7 +159,10 @@ void App::stopTx(const std::string& why) {
     txArmed_ = false;
     if (!why.empty()) {
         status_ = why;
-        if (why.rfind("Transmitter stopped: ", 0) == 0) txErr_ = why.substr(21);
+        if (why.rfind("Transmitter stopped: ", 0) == 0) {
+            txErr_ = why.substr(21);
+            LOG_ERROR("app", "transmitter stopped: %s", txErr_.c_str());
+        }
     }
 }
 
@@ -278,7 +284,10 @@ void App::drawSigGenWaveform() {
         row("Center freq");
         if (InputSI("##sgfc", &p.fc, "Hz", -FLT_MIN) && txOn) {
             std::string err;
-            if (!tx_->setCenterFreq(p.fc, err)) status_ = "Transmit tune failed: " + err;
+            if (!tx_->setCenterFreq(p.fc, err)) {
+                status_ = "Transmit tune failed: " + err;
+                LOG_ERROR("app", "transmit tune failed: %s", err.c_str());
+            }
         }
         tooltipAlways("RF center frequency: the transmit tuning and the file's frequency.\n"
                       "The signal itself sits at center + offset.");
@@ -798,7 +807,10 @@ void App::drawSigGenTx() {
         if (ImGui::SliderFloat("##txgain", &gain, (float)g.min, (float)g.max, "%.2f dB")) {
             txCfg_.gain = gain;
             std::string err;
-            if (txOn && !tx_->setGain(gain, err)) status_ = "Gain failed: " + err;
+            if (txOn && !tx_->setGain(gain, err)) {
+                status_ = "Gain failed: " + err;
+                LOG_ERROR("app", "transmit gain failed: %s", err.c_str());
+            }
         }
         tooltipAlways("B200/B205 transmit gain, 0-89.75 dB. Start low: about 0 dBm comes out near the top of the range.");
         ImGui::EndTable();

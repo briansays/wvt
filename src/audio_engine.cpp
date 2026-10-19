@@ -4,6 +4,9 @@
 #include <chrono>
 #include <cmath>
 
+#include "log.h"
+#include "ui_util.h"
+
 namespace {
 using clock_ = std::chrono::steady_clock;
 
@@ -31,14 +34,22 @@ bool AudioEngine::startCommon(const AudioParams& p, double fs, const std::string
         ppm_ = load_ = busy_ = produced_ = 0;
         chanDb_ = -200;
     }
+    LOG_INFO("audio", "%s audio: %s, %s wide at %+.0f Hz offset, input %s, output %s", live_ ? "live" : "file",
+             audioModeName((AudioMode)p.mode), fmtSI(p.bw, "Hz", 4).c_str(), p.offset, fmtSI(fs, "S/s", 6).c_str(),
+             output == AudioOutput::None ? "none" : device.empty() ? "default device" : device.c_str());
+    LOG_DEBUG("audio", "agc %s, gain %.1f dB, de-emphasis %s, squelch %s (%.1f dBFS), BFO %.0f Hz", p.agc ? "on" : "off",
+              p.gainDb, deemphasisName((Deemphasis)p.deemph), p.squelch ? "on" : "off", p.squelchDb, p.bfo);
     std::string oerr;
     if (output != AudioOutput::None && !out_.open(device, kAudioRate, ring_, oerr)) {
+        LOG_DEBUG("audio", "output: %s", oerr.c_str());
         if (output == AudioOutput::Require) {
             err = oerr;
             return false;
         }
         std::lock_guard<std::mutex> lk(m_);
         error_ = oerr;
+    } else if (out_.isOpen()) {
+        LOG_DEBUG("audio", "playing on '%s', %d Hz, latency %.0f ms", out_.name().c_str(), kAudioRate, out_.latency() * 1e3);
     }
     out_.setPrime(target_);
     out_.setDraining(false);
@@ -53,6 +64,7 @@ bool AudioEngine::startFile(const Source& src, int64_t s0, int64_t s1, int64_t f
     stop();
     if (!src.file || !(src.fs > 0)) {
         err = "no file loaded";
+        LOG_DEBUG("audio", "%s", err.c_str());
         return false;
     }
     if (s1 <= s0) {
@@ -92,6 +104,12 @@ void AudioEngine::stop() {
         quit_ = true;
         cv_.notify_all();
         th_.join();
+        int64_t resyncs;
+        {
+            std::lock_guard<std::mutex> lk(m_);
+            resyncs = resyncs_;
+        }
+        LOG_INFO("audio", "audio stopped: %lld underruns, %lld resyncs", (long long)out_.underruns(), (long long)resyncs);
     }
     out_.close();
     stopWav();
@@ -100,6 +118,8 @@ void AudioEngine::stop() {
 void AudioEngine::setParams(const AudioParams& p) {
     std::lock_guard<std::mutex> lk(m_);
     if (p == params_) return;
+    // Sliders change the other fields every frame; only mode changes are worth a line.
+    if (p.mode != params_.mode) LOG_DEBUG("audio", "mode %s", audioModeName((AudioMode)p.mode));
     params_ = p;
     ++paramsGen_;
 }
@@ -135,11 +155,17 @@ void AudioEngine::seek(int64_t sample) {
 bool AudioEngine::startWav(const std::string& path, std::string& err) {
     std::lock_guard<std::mutex> lk(wavM_);
     wavError_.clear();
-    return wav_.open(path, kAudioRate, err);
+    if (!wav_.open(path, kAudioRate, err)) {
+        LOG_DEBUG("audio", "WAV: %s", err.c_str());
+        return false;
+    }
+    LOG_INFO("audio", "writing WAV %s", wav_.path().c_str());
+    return true;
 }
 
 void AudioEngine::stopWav() {
     std::lock_guard<std::mutex> lk(wavM_);
+    if (wav_.isOpen()) LOG_INFO("audio", "WAV closed: %s (%.3f s)", wav_.path().c_str(), wav_.seconds());
     wav_.close();
 }
 
@@ -207,6 +233,7 @@ void AudioEngine::produce(AudioDemod& d, const cf* in, size_t n, double inputEnd
     if (wav_.isOpen() && !audio_.empty()) {
         std::string e;
         if (!wav_.write(audio_.data(), audio_.size(), e)) {
+            LOG_DEBUG("audio", "WAV write failed: %s", e.c_str());
             wavError_ = e;
             wav_.close();
         }
@@ -356,9 +383,15 @@ bool WavExportJob::start(const WavExportConfig& cfg, std::string& err) {
     cancel();
     if (!cfg.src.file || !(cfg.src.fs > 0) || cfg.s1 <= cfg.s0) {
         err = "nothing to export";
+        LOG_DEBUG("audio", "WAV export: %s", err.c_str());
         return false;
     }
-    if (!wav_.open(cfg.path, kAudioRate, err)) return false;
+    if (!wav_.open(cfg.path, kAudioRate, err)) {
+        LOG_DEBUG("audio", "WAV export: %s", err.c_str());
+        return false;
+    }
+    LOG_INFO("audio", "exporting %s audio of samples %lld-%lld to %s", audioModeName((AudioMode)cfg.params.mode),
+             (long long)cfg.s0, (long long)cfg.s1, cfg.path.c_str());
     cfg_ = cfg;
     {
         std::lock_guard<std::mutex> lk(m_);
@@ -411,6 +444,7 @@ void WavExportJob::run() {
         std::lock_guard<std::mutex> lk(m_);
         if (!err.empty()) error_ = err;
         else if (cancel_) error_ = "cancelled";
+        LOG_INFO("audio", "WAV export %s: %.3f s", error_.empty() ? "done" : error_.c_str(), seconds_.load());
     }
     active_ = false;
 }

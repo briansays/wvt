@@ -79,10 +79,19 @@ add_executable(wvt
   src/audio_out.cpp
   src/wav_writer.cpp
   src/app_audio.cpp
+  src/log.cpp
   ${FONT_CPP})
 target_include_directories(wvt PRIVATE src ${PLATFORM_INCLUDES})
 target_link_libraries(wvt PRIVATE imgui_implot ${PLATFORM_LIBS} Threads::Threads)
 target_compile_options(wvt PRIVATE -Wall -Wextra -Wno-unused-parameter)
+
+# The git revision goes into the log file header. It is read at configure time.
+execute_process(COMMAND git describe --always --dirty
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} OUTPUT_VARIABLE WVT_GIT_HASH
+  OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+if(WVT_GIT_HASH)
+  set_property(SOURCE src/log.cpp APPEND PROPERTY COMPILE_DEFINITIONS WVT_GIT_HASH="${WVT_GIT_HASH}")
+endif()
 
 # ---------------------------------------------------------------------------
 # Optional SDR backends. AUTO uses a library if it is found, ON requires it.
@@ -181,12 +190,17 @@ add_executable(iqgen tools/iqgen.cpp)
 
 # Signal generator self-test (DSP and file output; no device needed)
 add_executable(siggen_check tools/siggen_check.cpp src/siggen.cpp src/siggen_out.cpp src/recorder.cpp
-  src/sdr_device.cpp src/sdr_sim.cpp src/sdr_siggen.cpp src/iq_file.cpp src/dsp.cpp src/ui_util.cpp)
+  src/sdr_device.cpp src/sdr_sim.cpp src/sdr_siggen.cpp src/iq_file.cpp src/dsp.cpp src/ui_util.cpp src/log.cpp)
 target_include_directories(siggen_check PRIVATE src)
 target_link_libraries(siggen_check PRIVATE imgui_implot Threads::Threads)
 
 # Audio demodulator self-test (no sound device needed)
 add_executable(audio_check tools/audio_check.cpp src/audio_dsp.cpp src/wav_writer.cpp src/recorder.cpp
-  src/iq_file.cpp src/dsp.cpp)
+  src/iq_file.cpp src/dsp.cpp src/log.cpp)
 target_include_directories(audio_check PRIVATE src)
 target_link_libraries(audio_check PRIVATE Threads::Threads)
+
+# Logger self-test (levels, argument parsing, log file, threads)
+add_executable(log_check tools/log_check.cpp src/log.cpp)
+target_include_directories(log_check PRIVATE src)
+target_link_libraries(log_check PRIVATE Threads::Threads)

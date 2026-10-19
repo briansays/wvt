@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "app.h"
+#include "log.h"
 #include "platform_x11.h"
 
 namespace {
@@ -114,6 +115,7 @@ bool App::restartDevice() {
     if (!live_->start(devCfg_, err)) {
         liveErr_ = err;
         status_ = "Device error: " + err;
+        LOG_ERROR("app", "device error: %s", err.c_str());
         return false;
     }
     liveErr_.clear();
@@ -138,6 +140,7 @@ bool App::startRecording(const RecordConfig& cfg) {
     if (!live_ || !live_->startRecording(cfg, err)) {
         recErr_ = live_ ? err : "start a device before recording";
         status_ = "Recording failed: " + recErr_;
+        LOG_ERROR("app", "recording failed: %s", recErr_.c_str());
         return false;
     }
     recErr_.clear();
@@ -185,7 +188,10 @@ void App::drawDeviceToolbar() {
     ImGui::BeginDisabled(recRaw);
     if (InputSI("##lfc", &fc, "Hz", fieldW(15))) {
         devCfg_.fc = fc;
-        if (running && !live_->setCenterFreq(fc, err)) status_ = "Tune failed: " + err;
+        if (running && !live_->setCenterFreq(fc, err)) {
+            status_ = "Tune failed: " + err;
+            LOG_ERROR("app", "tune failed: %s", err.c_str());
+        }
     }
     ImGui::EndDisabled();
     tooltipAlways(recRaw ? "A raw recording can't store a frequency change.\nStop recording, or record SigMF instead."
@@ -197,9 +203,13 @@ void App::drawDeviceToolbar() {
         std::string warn;
         if (!checkSampleRate(devCfg_.driver, rate, err, warn)) {
             status_ = err;
+            LOG_WARN("app", "%s", err.c_str());
         } else {
             devCfg_.rate = rate;
-            if (!warn.empty()) status_ = warn;
+            if (!warn.empty()) {
+                status_ = warn;
+                LOG_WARN("app", "%s", warn.c_str());
+            }
             if (running) restartDevice();
         }
     }
@@ -222,13 +232,18 @@ void App::drawDeviceToolbar() {
             v = best;
         }
         devCfg_.gain = v;
-        if (running && !live_->setGain(devCfg_.agc, devCfg_.gain, err)) status_ = "Gain failed: " + err;
+        if (running && !live_->setGain(devCfg_.agc, devCfg_.gain, err)) {
+            status_ = "Gain failed: " + err;
+            LOG_ERROR("app", "gain failed: %s", err.c_str());
+        }
     }
     ImGui::EndDisabled();
     if (g.agc) {
         ImGui::SameLine(0, st.ItemInnerSpacing.x);
-        if (ImGui::Checkbox("AGC", &devCfg_.agc) && running && !live_->setGain(devCfg_.agc, devCfg_.gain, err))
+        if (ImGui::Checkbox("AGC", &devCfg_.agc) && running && !live_->setGain(devCfg_.agc, devCfg_.gain, err)) {
             status_ = "Gain failed: " + err;
+            LOG_ERROR("app", "gain failed: %s", err.c_str());
+        }
     }
 
     // --- driver-specific (these restart the stream) ---
@@ -409,9 +424,14 @@ void App::recolorLiveAll() {
 void App::pollLive() {
     if (!live_ || !live_->running()) return;
     liveStats_ = live_->stats();
+    // A recording that ends by itself (limit, disk full) has no UI event; catch its edge here.
+    const Recorder::Status rs = live_->recorder().status();
+    if (recWasActive_ && !rs.active && rs.failed) LOG_ERROR("app", "recording stopped: %s", rs.stopReason.c_str());
+    recWasActive_ = rs.active;
     if (!liveStats_.error.empty()) {
         liveErr_ = liveStats_.error;
         status_ = "Device stopped: " + liveErr_;
+        LOG_ERROR("app", "device stopped: %s", liveErr_.c_str());
         live_->stop();
         return;
     }

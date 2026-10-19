@@ -4,6 +4,9 @@
 #include <chrono>
 #include <cmath>
 
+#include "log.h"
+#include "ui_util.h"
+
 namespace {
 constexpr float kEps = 1e-20f;
 constexpr int kMaxPendingRows = 4096;  // if the UI stops polling, keep only the newest
@@ -27,9 +30,13 @@ bool LiveEngine::start(const StreamConfig& cfg, std::string& err) {
     auto ring = ring_;
     if (!dev->start([ring](const uint8_t* p, int64_t n) { ring->push(p, n); },
                     [ring](int64_t lost, const char* why) { ring->noteGap(lost, why); }, err)) {
+        LOG_DEBUG("live", "stream start failed: %s", err.c_str());
         ring_.reset();
         return false;
     }
+    LOG_DEBUG("live", "stream started");
+    LOG_DEBUG("live", "sample ring %s (%s)", fmtSI((double)bytes, "B", 4).c_str(),
+              fmtSI((double)(bytes / bps) / dev->sampleRate(), "s", 3).c_str());
     dev_ = std::move(dev);
     {
         std::lock_guard<std::mutex> lk(m_);
@@ -51,7 +58,13 @@ void LiveEngine::stop() {
         cv_.notify_all();
         th_.join();
     }
-    if (dev_) dev_->stop();
+    if (dev_) {
+        dev_->stop();
+        LOG_INFO("live", "stream stopped: %s received, %lld samples lost in %lld gaps%s%s",
+                 fmtSI((double)ring_->written(), "S", 4).c_str(), (long long)ring_->droppedDevice(),
+                 (long long)ring_->deviceGapEvents(), dev_->fatalError().empty() ? "" : ", error: ",
+                 dev_->fatalError().c_str());
+    }
     dev_.reset();
 }
 
@@ -59,7 +72,11 @@ GainRange LiveEngine::gainRange() const { return dev_ ? dev_->gainRange() : Gain
 
 bool LiveEngine::setCenterFreq(double hz, std::string& err) {
     if (!dev_) return false;
-    if (!dev_->setCenterFreq(hz, err)) return false;
+    if (!dev_->setCenterFreq(hz, err)) {
+        LOG_DEBUG("live", "retune to %s failed: %s", fmtSI(hz, "Hz", 9).c_str(), err.c_str());
+        return false;
+    }
+    LOG_INFO("live", "tuned to %s", fmtSI(dev_->centerFreq(), "Hz", 9).c_str());
     cfg_.fc = hz;
     freshFrom_ = ring_->written();
     rec_.noteRetune(dev_->centerFreq());
@@ -70,7 +87,11 @@ bool LiveEngine::setCenterFreq(double hz, std::string& err) {
 
 bool LiveEngine::setGain(bool agc, double db, std::string& err) {
     if (!dev_) return false;
-    if (!dev_->setGain(agc, db, err)) return false;
+    if (!dev_->setGain(agc, db, err)) {
+        LOG_DEBUG("live", "gain change failed: %s", err.c_str());
+        return false;
+    }
+    LOG_INFO("live", "gain %s", agc ? "auto" : fmtSI(db, "dB", 4).c_str());
     cfg_.agc = agc;
     cfg_.gain = db;
     return true;
@@ -79,6 +100,8 @@ bool LiveEngine::setGain(bool agc, double db, std::string& err) {
 void LiveEngine::setParams(const LiveParams& p) {
     std::lock_guard<std::mutex> lk(m_);
     if (p == params_) return;
+    LOG_DEBUG("live", "spectrum: FFT %d, avg %d, %.0f rows/s, window %d, %d columns", p.nfft, p.avg, p.rowsPerSec, p.window,
+              p.maxCols);
     if (p.nfft != params_.nfft || p.maxCols != params_.maxCols) ++gen_;
     params_ = p;
     cv_.notify_all();
@@ -141,6 +164,11 @@ void LiveEngine::spectrumLoop() {
     int64_t lastEnd = ring_->written();  // newest sample used by the previous row
     auto lastRow = clock::now();
     auto next = clock::now();
+    // Device gaps are counted in the ring (the RX callback must not log);
+    // report new ones from here, at most every 5 s.
+    int64_t gapsLogged = ring_->deviceGapEvents(), lostLogged = ring_->droppedDevice();
+    auto lastGapLog = clock::now() - std::chrono::seconds(5);
+    bool fatalLogged = false;
 
     while (!quit_) {
         {
@@ -149,6 +177,18 @@ void LiveEngine::spectrumLoop() {
             p = params_;
         }
         if (quit_) break;
+        if (const int64_t g = ring_->deviceGapEvents(); g != gapsLogged && clock::now() - lastGapLog >= std::chrono::seconds(5)) {
+            const int64_t lost = ring_->droppedDevice();
+            LOG_WARN("live", "device dropped samples: %lld gaps, %lld samples since the last report", (long long)(g - gapsLogged),
+                     (long long)(lost - lostLogged));
+            gapsLogged = g;
+            lostLogged = lost;
+            lastGapLog = clock::now();
+        }
+        if (!fatalLogged && !dev_->fatalError().empty()) {
+            LOG_INFO("live", "device stopped streaming: %s", dev_->fatalError().c_str());
+            fatalLogged = true;
+        }
         const auto period = std::chrono::duration<double>(1.0 / std::clamp(p.rowsPerSec, 1.0, 200.0));
         next = std::max(next + std::chrono::duration_cast<clock::duration>(period), clock::now());
 

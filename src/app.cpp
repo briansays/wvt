@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include "imgui_internal.h"
+#include "log.h"
 #include "platform_x11.h"
 
 namespace {
@@ -33,14 +34,14 @@ float stepW(float chars) { return fieldW(chars) + 2 * (ImGui::GetFrameHeight() +
 
 App::App(X11Window& win) : win_(win) {
     auto wake = [this] { win_.wake(); };
-    wfWorker_ = std::make_unique<Worker<WaterfallReq, WaterfallRes>>(computeWaterfall, wake);
-    dmWorker_ = std::make_unique<Worker<DemodReq, DemodRes>>(computeDemod, wake);
-    ovWorker_ = std::make_unique<Worker<OverviewReq, OverviewRes>>(computeOverview, wake);
+    wfWorker_ = std::make_unique<Worker<WaterfallReq, WaterfallRes>>(computeWaterfall, wake, "waterfall");
+    dmWorker_ = std::make_unique<Worker<DemodReq, DemodRes>>(computeDemod, wake, "demod");
+    ovWorker_ = std::make_unique<Worker<OverviewReq, OverviewRes>>(computeOverview, wake, "overview");
     cmap_ = ImPlotColormap_Viridis;
     demod_.chanBw = 50e3;
     status_ = "No file loaded - type a path in the File box and press Enter (or run: wvt <file>)";
     snprintf(recPrefix_, sizeof recPrefix_, "%s", recCfg_.prefix.c_str());
-    sgPrevWorker_ = std::make_unique<Worker<SigPreviewReq, SigPreviewRes>>(computeSigPreview, wake);
+    sgPrevWorker_ = std::make_unique<Worker<SigPreviewReq, SigPreviewRes>>(computeSigPreview, wake, "siggen preview");
     sgFile_ = std::make_unique<FileGenJob>();
     snprintf(sgPrefix_, sizeof sgPrefix_, "~/wvt-recordings/siggen");
     snprintf(txArgs_, sizeof txArgs_, "%s", txCfg_.args.c_str());
@@ -74,6 +75,7 @@ bool App::openFile(const std::string& path, const CliOverrides& o) {
     std::string err;
     auto f = IqFile::open(g.dataPath, err);
     if (!f) {
+        LOG_ERROR("app", "%s", err.c_str());
         status_ = err;
         return false;
     }
@@ -90,6 +92,8 @@ bool App::openFile(const std::string& path, const CliOverrides& o) {
     if (o.swapIQ) fp_.swapIQ = true;
     metaNote_ = g.source.empty() ? "no metadata found - set format / rate below" : "settings from " + g.source;
     status_ = "Opened " + g.dataPath + " (" + metaNote_ + ")";
+    LOG_INFO("app", "opened %s: %s%s, %s at %s, %s (%s)", g.dataPath.c_str(), formatName(fp_.fmt), fp_.bigEndian ? " big-endian" : "",
+             fmtSI(fs_, "S/s", 6).c_str(), fmtSI(fc_, "Hz", 9).c_str(), fmtSI((double)f->sizeBytes(), "B", 4).c_str(), metaNote_.c_str());
     bookmarks_.clear();
     bookmarkSel_ = -1;
     onSourceChanged(true);

@@ -223,6 +223,7 @@ private:
     RecordConfig recCfg_;
     char recPrefix_[1024] = {};
     std::string recErr_;
+    bool recWasActive_ = false;  // for logging a recording that fails on its own
     std::string lastRecording_;  // path to reopen in file mode
 
     LiveParams liveParams_;
