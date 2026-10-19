@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "app.h"
+#include "gpu.h"
 #include "imgui.h"
 #include "implot.h"
 #include "log.h"
@@ -255,6 +256,9 @@ static void usage() {
         "      --scale S        UI scale factor (default 1, or $WVT_SCALE)\n"
         "      --geometry WxH   initial window size (default 1600x950)\n"
         "      --screenshot F   render, write a PPM screenshot to F and exit\n"
+        "      --gpu auto|on|off  NVIDIA GPU processing (default auto, or $WVT_GPU); on = stop\n"
+        "                       if no GPU can be used\n"
+        "      --gpu-device N   use CUDA device N (see --list-devices)\n"
         "  -v, --verbose [LEVEL]  print log messages to the console: debug | info | warn | error\n"
         "                       (default info; without -v only warnings and errors print)\n"
         "      --log-dir DIR    log file folder (default $WVT_LOG_DIR, then $TMPDIR, then /tmp)\n"
@@ -270,7 +274,7 @@ static void usage() {
         "      --bias-tee       RTL-SDR: power an LNA / active antenna over the coax\n"
         "      --direct-sampling I|Q  RTL-SDR: HF direct sampling (v3: Q)\n"
         "      --ppm N          RTL-SDR frequency correction\n"
-        "      --list-devices   print attached devices and exit\n"
+        "      --list-devices   print attached devices and GPUs, and exit\n"
         "\n"
         "recording (needs --device):\n"
         "      --record PREFIX  record to PREFIX_<date>_<time>_<fc>_<rate>.<ext>\n"
@@ -354,6 +358,8 @@ int main(int argc, char** argv) {
     float scale = 1.f;
     int winW = 1600, winH = 950;
     if (const char* e = getenv("WVT_SCALE")) scale = (float)atof(e);
+    GpuMode gpuMode = GpuMode::Auto;
+    int gpuDevice = -1;
 
     // Logging options come out of argv first, so the rest of the parse is logged.
     LogConfig lc;
@@ -365,6 +371,8 @@ int main(int argc, char** argv) {
         return 2;
     }
     logInit(lc);
+    if (const char* e = getenv("WVT_GPU"); e && *e && !parseGpuMode(e, gpuMode))
+        LOG_WARN("main", "WVT_GPU=%s is not auto, on or off; using auto", e);
     argc = (int)args.size();
     args.push_back(nullptr);
     argv = args.data();
@@ -403,6 +411,15 @@ int main(int argc, char** argv) {
             haveSeg = true;
         }
         else if (a == "--software") software = true;
+        else if (a == "--gpu") {
+            const char* v = next("--gpu");
+            if (!parseGpuMode(v, gpuMode)) { LOG_ERROR("main", "--gpu wants auto, on or off"); return 2; }
+        } else if (a == "--gpu-device") {
+            const char* v = next("--gpu-device");
+            char* end = nullptr;
+            gpuDevice = (int)strtol(v, &end, 10);
+            if (end == v || *end || gpuDevice < 0) { LOG_ERROR("main", "--gpu-device wants a device number"); return 2; }
+        }
         else if (a == "--scale") scale = (float)atof(next("--scale"));
         else if (a == "--geometry") {
             if (sscanf(next("--geometry"), "%dx%d", &winW, &winH) != 2) { LOG_ERROR("main", "bad geometry"); return 2; }
@@ -427,6 +444,8 @@ int main(int argc, char** argv) {
         } else if (a == "--ppm") dev.ppm = atoi(next("--ppm"));
         else if (a == "--list-devices") {
             for (const auto& d : enumerateDevices()) printf("%-8s %-28s %s\n", d.driver.c_str(), d.args.c_str(), d.label.c_str());
+            printf("\nGPUs (--gpu-device N):\n");
+            for (const auto& g : gpuListDevices()) printf("  %s\n", g.c_str());
             return 0;
         } else if (a == "--record") {
             rc.prefix = next("--record");
@@ -640,6 +659,14 @@ int main(int argc, char** argv) {
             return 2;
         }
         return runHeadless(dev, rc);
+    }
+
+    {
+        std::string gpuErr;
+        if (!gpuInit(gpuMode, gpuDevice, gpuErr)) {
+            LOG_ERROR("gpu", "%s", gpuErr.c_str());
+            return 1;
+        }
     }
 
     IMGUI_CHECKVERSION();

@@ -20,6 +20,7 @@
 
 #include "dsp.h"
 #include "engine.h"
+#include "gpu.h"
 #include "iq_file.h"
 #include "ui_util.h"
 
@@ -88,6 +89,44 @@ bool writeTestFile(const std::string& path, int64_t n, double fs) {
         }
     }
     return fclose(f) == 0;
+}
+
+// --- GPU setup --------------------------------------------------------------
+// Option parsing and the init rules. Without a usable GPU, on must fail with
+// a reason, and auto and off must succeed on the CPU.
+void testSetup() {
+    printf("GPU setup\n");
+    GpuMode m = GpuMode::Off;
+    check(parseGpuMode("AUTO", m) && m == GpuMode::Auto, "parse 'AUTO'");
+    check(parseGpuMode("on", m) && m == GpuMode::On && parseGpuMode("0", m) && m == GpuMode::Off, "parse 'on' and '0'");
+    check(!parseGpuMode("maybe", m) && !parseGpuMode("", m), "reject 'maybe' and ''");
+
+    std::string err;
+    check(gpuInit(GpuMode::Off, -1, err) && !gpuEnabled() && !gpuInfo().available, "off: CPU only");
+    gpuSetEnabled(true);
+    check(!gpuEnabled(), "off: the switch cannot turn it on");
+
+    err.clear();
+    check(gpuInit(GpuMode::Auto, -1, err), "auto always starts");
+    const GpuInfo info = gpuInfo();
+    printf("  build: %s; GPU: %s\n", info.built ? "CUDA" : "no CUDA",
+           info.available ? (info.name + ", " + info.version).c_str() : ("none, " + info.reason).c_str());
+    check(info.available || !info.reason.empty(), "auto without a GPU gives the reason");
+    check(gpuEnabled() == info.available, "auto: enabled when a GPU is usable");
+    if (info.available) {
+        gpuSetEnabled(false);
+        check(!gpuEnabled(), "the switch turns it off");
+        gpuSetEnabled(true);
+        check(gpuEnabled(), "the switch turns it on again");
+    }
+    check(gpuInit(GpuMode::Auto, 9999, err) && !gpuInfo().available, "a device that does not exist is not used");
+
+    err.clear();
+    const bool on = gpuInit(GpuMode::On, -1, err);
+    check(on == info.available && (on || !err.empty()), "on: " + std::string(on ? "uses the GPU" : "fails: " + err));
+    check(!gpuListDevices().empty(), "the device list has a line");
+    // Leave it as the benchmark wants it.
+    gpuInit(GpuMode::Auto, -1, err);
 }
 
 // --- File waterfall ---------------------------------------------------------
@@ -216,6 +255,7 @@ int main(int argc, char** argv) {
         dir = tmp = tmpl;
     }
 
+    testSetup();
     const double fs = 20e6;
     if (bench) {
         const int64_t n = (int64_t)samples;

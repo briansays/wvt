@@ -1,7 +1,8 @@
 # Plan: CUDA GPU acceleration (issue #3)
 
 Branch: `3-cuda-gpu`, from `main` at `29dca41` (after the logging merge, PR #15).
-Status: **plan only**. No code yet.
+Status: **steps 0–2 implemented** (2026-10-19). The CPU-only build is tested on macOS.
+`src/gpu_cuda.cu` is **not compiled yet**: there is no CUDA toolkit here (see §9).
 
 Earlier GPU work (`wvt-gpu-dev`, PR #5) is out of date. This plan starts again from `main`
 and does not use that branch.
@@ -238,3 +239,61 @@ is one commit.
    which card?
 7. **Scope for closing #3.** Close #3 after steps 0–6 and 8, and move the channel filter
    (step 7) to a new issue?
+
+## 9. Implementation notes
+
+The decisions in §8 are still open. Until they are answered, the code uses the
+recommendations: static cuFFT, CUDA 12.0 or later, and desktop RTX + data-center targets.
+
+### Files
+
+| File | Change |
+|---|---|
+| `tools/gpu_check.cpp` | Step 0: `--bench` CPU times. Step 1–2: checks of the setup rules (`--gpu` parsing, `auto` / `on` / `off`, the switch, the device list). |
+| `src/gpu.h` | `GpuMode`, `GpuInfo`, `gpuInit`, `gpuInfo`, `gpuEnabled`, `gpuSetEnabled`, `gpuListDevices`. `gpuSpectrogram` and `GpuLiveSpectrum` come with steps 4 and 5. |
+| `src/gpu_backend.h` | New, not in §3: the three functions a backend provides (`gpuBackendBuilt`, `gpuBackendProbe`, `gpuBackendList`). The rules and the log line stay in `gpu_common.cpp`, so both builds share them. |
+| `src/gpu_common.cpp` | Option parsing, the init rules, the INFO line, the switch. |
+| `src/gpu_stub.cpp` | "built without CUDA". |
+| `src/gpu_cuda.cu` | Device discovery: no device, no driver, driver too old, compute below 7.5, less than 1 GB free. `auto` picks the newest architecture, then the most multiprocessors. `CUDA_TRY` is ready for step 4. |
+| `src/main.cpp` | `--gpu`, `--gpu-device`, `WVT_GPU`, usage text, the GPU list in `--list-devices`. |
+| `CMakeLists.txt` | `WVT_WITH_CUDA`, `WVT_CUDA_STATIC` (default `ON`), the `wvt_gpu` library, `gpu_check`. |
+
+### Differences from the plan
+
+- `gpuInit` runs only on the GUI path. The headless paths (`--audio-out`, `--no-gui`,
+  `--gen-out`, `--tx`) do not use the waterfall, so they do not start CUDA, and their
+  output is the same as `main`.
+- `gpu_check` makes its own test signal (two tones, a chirp, 1 µs pulses, noise) as one
+  ci16 file. It does not use `SigGen`. The other formats come with the GPU decode checks in
+  step 4.
+- `--gpu off` never calls the CUDA driver.
+- Default `CMAKE_CUDA_ARCHITECTURES`: `75-real 80-real 86-real 89-real 90` (PTX for newer
+  GPUs), plus `120` with CUDA 12.8 or later. A value given on the command line wins.
+
+### CPU baseline (step 0)
+
+Development Mac, 10 cores, `gpu_check --bench` (64 M samples ci16 at 20 MS/s, 256 MB).
+Wider views need a larger file (`--samples 1G`); the 64 M file clips them.
+
+| Job | Case | Time |
+|---|---|---|
+| File waterfall | N 1024, 100× (52 MS, 100 FFTs/row) | 124 ms |
+| | N 8192, 10× (42 MS) | 126 ms |
+| | N 65536, 1× (34 MS) | 188 ms |
+| Live row (N 2048, 30 rows/s, no 20 MS/s cap) | 20 / 40 / 61.44 MS/s | 5.4 / 10.7 / 15.8 ms per row (16 / 32 / 47 % of a core) |
+| Channel filter + demod (8 MS in, decimation 8) | 255 / 2047 / 8191 taps | 67 / 192 / 660 ms |
+| Waterfall colouring (1024 × 2048) | | 0.8 ms |
+
+The colouring is under 1 ms, so it does not justify GPU rendering (§8, item 1). The
+texture upload needs a GL context and is not measured. The channel filter with many taps
+is slower than the waterfall, so step 7 is worth doing.
+
+### Verification (macOS)
+
+- The build has no warnings. CMake prints `CUDA support disabled (CUDA is not available on
+  macOS)`.
+- `gpu_check`, `siggen_check`, `audio_check`, `log_check` and `segment_check` pass.
+- `--gpu on` exits with status 1 and "built without CUDA". `--gpu maybe` and
+  `--gpu-device x` exit with status 2. A bad `WVT_GPU` gives a WARN and uses `auto`.
+- **Not done:** compiling `gpu_cuda.cu`. It needs nvcc: the CI job in step 3, a CUDA
+  container (Docker is installed here but not running), or the Linux GPU computer.
