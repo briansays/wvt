@@ -9,10 +9,12 @@
 #include <cstring>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "app.h"
 #include "imgui.h"
 #include "implot.h"
+#include "log.h"
 #include "platform_x11.h"
 #include "ui_util.h"
 
@@ -239,6 +241,10 @@ static void usage() {
         "      --scale S        UI scale factor (default 1, or $WVT_SCALE)\n"
         "      --geometry WxH   initial window size (default 1600x950)\n"
         "      --screenshot F   render, write a PPM screenshot to F and exit\n"
+        "  -v, --verbose [LEVEL]  print log messages to the console: debug | info | warn | error\n"
+        "                       (default info; without -v only warnings and errors print)\n"
+        "      --log-dir DIR    log file folder (default $WVT_LOG_DIR, then $TMPDIR, then /tmp)\n"
+        "      --no-log-file    don't write wvt_log_<date>_<time>.log\n"
         "  -h, --help           show this help\n"
         "\n"
         "live devices (-c and -r set the tuning):\n"
@@ -334,6 +340,20 @@ int main(int argc, char** argv) {
     float scale = 1.f;
     int winW = 1600, winH = 950;
     if (const char* e = getenv("WVT_SCALE")) scale = (float)atof(e);
+
+    // Logging options come out of argv first, so the rest of the parse is logged.
+    LogConfig lc;
+    for (int i = 0; i < argc; ++i) lc.commandLine += (i ? " " : "") + std::string(argv[i]);
+    std::vector<char*> args(argv, argv + argc);
+    std::string logErr;
+    if (!logParseArgs(args, lc, logErr)) {
+        LOG_ERROR("main", "%s", logErr.c_str());
+        return 2;
+    }
+    logInit(lc);
+    argc = (int)args.size();
+    args.push_back(nullptr);
+    argv = args.data();
 
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
