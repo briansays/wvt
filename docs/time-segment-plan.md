@@ -1,8 +1,8 @@
 # Plan: open a time segment of a file (issue #16)
 
 Branch: `16-time-segment`, from `main` at `29dca41`.
-Status: **steps 1–5 implemented** (2026-10-19), not committed yet. The GUI is not tested on
-screen; XQuartz was not running in this session. See §7.
+Status: **steps 1–5 implemented** (2026-10-19), PR #17. The user tested the GUI on screen
+(2026-10-19).
 
 ## 1. Goal
 
@@ -176,13 +176,6 @@ The user said to go ahead with the plan, so the recommendations apply:
   no `--segment`, and with `--segment -1:-1`, with and without `--view`. `--help` differs
   only by the new option.
 
-### Not verified
+### GUI
 
-- The GUI. To test it, start XQuartz, then run
-  `build/wvt big.ci16 -f ci16 -r 20M --segment 40:50 -v debug`. Check the GUI rows of §5:
-  - the boxes before and after open;
-  - Enter;
-  - a bad value;
-  - the scrollbar, the overview, `|<` `>|` `All`, and Home / End / A;
-  - the axes in file time;
-  - the audio "Whole segment" range and the playhead.
+The user tested the GUI on screen (2026-10-19).
