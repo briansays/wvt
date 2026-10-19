@@ -40,6 +40,16 @@ bool logEnabled(LogLevel l);
 void logWrite(LogLevel l, const char* component, const char* fmt, ...) __attribute__((format(printf, 3, 4)));
 void logFlush();
 
+// A message the user always sees, as wvt printed before the logger existed
+// ("wvt: wrote x.sigmf-data"): printed whatever the console level, INFO in
+// the file.
+void logStatus(const char* component, const char* fmt, ...) __attribute__((format(printf, 2, 3)));
+// A one-line live display, rewritten in place with "\r" ("wvt: 12 s  3 MB ...").
+// Always printed; written to the file at DEBUG at most every 10 s. Log lines
+// that arrive while it is shown start on a new line. logProgressEnd() ends it.
+void logProgress(const char* component, const char* fmt, ...) __attribute__((format(printf, 2, 3)));
+void logProgressEnd();
+
 // The macros skip formatting when no sink takes the level.
 #define WVT_LOG(lvl, comp, ...)                                     \
     do {                                                            \

@@ -2,8 +2,7 @@
 
 Issue: #14 — *Usability: add verbose console logging with an output timestamped logfile*
 Branch: `14-verbose-logging` (from `main` at `5688d28`)
-Status: **steps 1–2 implemented in the branch (uncommitted)**, with the `log_check` self-test.
-Steps 3–6 remain. The open questions are decided (section 7, 2026-10-18).
+Status: **steps 1–2 committed (`e5f6ffe`), step 3 implemented (uncommitted).** Steps 4–6 remain. The open questions are decided (section 7, 2026-10-18).
 
 ## 1. Goal
 
@@ -67,11 +66,19 @@ temp folder), syslog / journald, and a TRACE level for per-block signal-processi
    - Parse `-v` / `--verbose[=LEVEL]`, `--log-dir`, `--no-log-file` as the first pass over
      `argv`, then call `log::init()` **before** the main parse loop, so arg errors are logged too.
    - Add the options to `usage()` and print the log file path at INFO on start.
-3. **Convert `main.cpp` output** — replace `fprintf(stderr, "wvt: ...")` error / status calls
+3. **Convert `main.cpp` output** — *done.* Replace `fprintf(stderr, "wvt: ...")` error / status calls
    with `LOG_ERROR` / `LOG_WARN` / `LOG_INFO`. Keep as plain `printf`/`fprintf`:
    `usage()`, `--list-devices`, `--list-audio-devices`, and the `\r` progress line of headless
    recording (it is a live display, not a log). Log a progress summary to the file at DEBUG
    instead, once every few seconds.
+   - As built: messages that printed without `-v` before ("streaming from", "recording to",
+     "wrote", "metadata", "TRANSMITTING", "screenshot written") use `logStatus()`: always on the
+     console, INFO in the file. Default console output is byte-for-byte the same as before.
+   - The `\r` lines use `logProgress()` / `logProgressEnd()`: always on the console, DEBUG in the
+     file at most every 10 s. A log line that arrives while a progress line is open starts on a
+     new line, so step 4 logs from worker threads don't garble it.
+   - `wvt: note: ...` messages became WARN (`wvt: warning: ...`). Arg errors are ERROR.
+   - New INFO lines for the GUI path: window size / renderer, device start, file open, exit.
 4. **Add action logs** to the library code (section 5).
 5. **Docs** — README: a short *Logging* section (flag, levels, file location, what to attach to
    a bug report).

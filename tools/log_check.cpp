@@ -160,6 +160,37 @@ void testVerboseConsole(const std::string& dir) {
     fclose(con);
 }
 
+void testStatusProgress(const std::string& dir) {
+    printf("status and progress\n");
+    FILE* con = tmpfile();
+    LogConfig cfg;
+    cfg.dir = dir;
+    cfg.consoleStream = con;
+    logInit(cfg);
+    std::string path = logFilePath();
+    logStatus("rec", "wrote %s", "x.cf32");
+    logProgress("rec", "1 s  2 MB   ");
+    logProgress("rec", "2 s  4 MB   ");
+    LOG_WARN("rec", "gap");
+    logProgress("rec", "3 s  6 MB   ");
+    logProgressEnd();
+    logProgressEnd();  // no second newline
+    logProgress("rec", "again");
+    logProgressEnd();
+    logStatus("rec", "done");
+    std::string c = slurp(con);
+    check(c == "wvt: wrote x.cf32\n\rwvt: 1 s  2 MB   \rwvt: 2 s  4 MB   \nwvt: warning: gap\n"
+               "\rwvt: 3 s  6 MB   \n\rwvt: again\nwvt: done\n",
+          "status always printed; progress rewrites in place; other lines start on a new line");
+    logShutdown();
+    std::string f = slurp(path);
+    check(count(f, "[INFO ] [rec] wrote x.cf32") == 1 && count(f, "[INFO ] [rec] done") == 1, "status is INFO in the file");
+    check(count(f, "[DEBUG] [rec] 1 s  2 MB\n") == 1 && count(f, "2 s  4 MB") == 0 && count(f, "3 s  6 MB") == 0 &&
+              count(f, "[DEBUG] [rec] again\n") == 1,
+          "progress in the file: throttled, restarted after logProgressEnd, padding trimmed");
+    fclose(con);
+}
+
 void testNoFile() {
     printf("no file\n");
     FILE* con = tmpfile();
@@ -223,6 +254,7 @@ int main() {
     testArgs();
     testFile(dir);
     testVerboseConsole(dir);
+    testStatusProgress(dir);
     testNoFile();
     testThreads(dir);
     std::string cmd = "rm -rf '" + dir + "'";

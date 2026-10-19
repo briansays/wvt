@@ -25,6 +25,8 @@ bool g_verbose = false;
 FILE* g_console = nullptr;
 FILE* g_file = nullptr;
 std::string g_path;
+bool g_progressOpen = false;  // a "\r" progress line is on the console without its newline
+std::chrono::steady_clock::time_point g_lastProgressFile;
 
 const char* kNames[] = {"DEBUG", "INFO", "WARN", "ERROR"};
 
@@ -206,41 +208,101 @@ std::string logFilePath() {
 
 bool logEnabled(LogLevel l) { return l < LogLevel::Off && ((int)l >= g_consoleMin || (int)l >= g_fileMin); }
 
-void logWrite(LogLevel l, const char* component, const char* fmt, ...) {
-    if (l >= LogLevel::Off) return;
-    // Format outside the lock.
+namespace {
+
+std::string vformat(const char* fmt, va_list ap) {
     char small[512];
-    std::string big;
-    const char* msg = small;
-    va_list ap;
-    va_start(ap, fmt);
-    int n = vsnprintf(small, sizeof small, fmt, ap);
-    va_end(ap);
-    if (n >= (int)sizeof small) {
-        big.resize(n + 1);
-        va_start(ap, fmt);
-        vsnprintf(&big[0], big.size(), fmt, ap);
-        va_end(ap);
-        big.resize(n);
-        msg = big.c_str();
+    va_list ap2;
+    va_copy(ap2, ap);
+    int n = vsnprintf(small, sizeof small, fmt, ap2);
+    va_end(ap2);
+    std::string msg;
+    if (n < 0) return msg;
+    if (n < (int)sizeof small) {
+        msg.assign(small, n);
+    } else {
+        msg.resize(n + 1);
+        vsnprintf(&msg[0], msg.size(), fmt, ap);
+        msg.resize(n);
     }
-    int len = n < 0 ? 0 : (int)strlen(msg);
-    while (len > 0 && msg[len - 1] == '\n') --len;
+    while (!msg.empty() && msg.back() == '\n') msg.pop_back();
+    return msg;
+}
+
+// Ends an open progress line so the next console line starts in column 0.
+void endProgressLocked(FILE* c) {
+    if (g_progressOpen) fputc('\n', c);
+    g_progressOpen = false;
+}
+
+// forceConsole: print whatever the console level (status messages).
+void emit(LogLevel l, bool forceConsole, const char* component, const std::string& msg) {
     char ts[40];
     stamp(ts, sizeof ts, true);
     const char* name = kNames[(int)l];
-
     std::lock_guard<std::mutex> lk(g_mutex);
-    if ((int)l >= g_consoleMin) {
+    if (forceConsole || (int)l >= g_consoleMin) {
         FILE* c = g_console ? g_console : stderr;
-        if (g_verbose) fprintf(c, "%s [%-5s] [%s] %.*s\n", ts + 11, name, component, len, msg);
-        else if (l == LogLevel::Warn) fprintf(c, "wvt: warning: %.*s\n", len, msg);
-        else fprintf(c, "wvt: %.*s\n", len, msg);
+        endProgressLocked(c);
+        if (g_verbose) fprintf(c, "%s [%-5s] [%s] %s\n", ts + 11, name, component, msg.c_str());
+        else if (l == LogLevel::Warn) fprintf(c, "wvt: warning: %s\n", msg.c_str());
+        else fprintf(c, "wvt: %s\n", msg.c_str());
     }
     if (g_file && (int)l >= g_fileMin) {
-        fprintf(g_file, "%s [%-5s] [%s] %.*s\n", ts, name, component, len, msg);
+        fprintf(g_file, "%s [%-5s] [%s] %s\n", ts, name, component, msg.c_str());
         if (l >= LogLevel::Warn) fflush(g_file);
     }
+}
+
+}  // namespace
+
+void logWrite(LogLevel l, const char* component, const char* fmt, ...) {
+    if (l >= LogLevel::Off) return;
+    va_list ap;
+    va_start(ap, fmt);
+    std::string msg = vformat(fmt, ap);  // outside the lock
+    va_end(ap);
+    emit(l, false, component, msg);
+}
+
+void logStatus(const char* component, const char* fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    std::string msg = vformat(fmt, ap);
+    va_end(ap);
+    emit(LogLevel::Info, true, component, msg);
+}
+
+void logProgress(const char* component, const char* fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    std::string msg = vformat(fmt, ap);
+    va_end(ap);
+    auto now = std::chrono::steady_clock::now();
+    bool toFile;
+    {
+        std::lock_guard<std::mutex> lk(g_mutex);
+        FILE* c = g_console ? g_console : stderr;
+        fprintf(c, "\rwvt: %s", msg.c_str());
+        fflush(c);
+        g_progressOpen = true;
+        toFile = g_file && now - g_lastProgressFile >= std::chrono::seconds(10);
+        if (toFile) g_lastProgressFile = now;
+    }
+    if (toFile) {
+        // Trailing padding only matters on the console.
+        while (!msg.empty() && msg.back() == ' ') msg.pop_back();
+        char ts[40];
+        stamp(ts, sizeof ts, true);
+        std::lock_guard<std::mutex> lk(g_mutex);
+        if (g_file) fprintf(g_file, "%s [DEBUG] [%s] %s\n", ts, component, msg.c_str());
+    }
+}
+
+void logProgressEnd() {
+    std::lock_guard<std::mutex> lk(g_mutex);
+    endProgressLocked(g_console ? g_console : stderr);
+    g_lastProgressFile = {};
 }
 
 void logFlush() {
