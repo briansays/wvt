@@ -84,15 +84,19 @@ void App::setAudioMode(int mode) {
     }
 }
 
-// The play range of the file, in samples.
+// The play range of the file, in samples, inside the loaded segment.
 void App::playRange(int64_t& s0, int64_t& s1) const {
-    auto smp = [&](double t) { return std::clamp<int64_t>((int64_t)std::llround(t * fs_), 0, nSamples_); };
+    auto smp = [&](double t) { return std::clamp<int64_t>((int64_t)std::llround(t * fs_), segS0_, segS1_); };
     switch (auRange_) {
-        case 0: s0 = smp(tmin_); s1 = nSamples_; break;
+        case 0: s0 = smp(tmin_); s1 = segS1_; break;
         case 1: s0 = smp(tmin_); s1 = smp(tmax_); break;
         case 2: s0 = smp(std::min(tm1_, tm2_)); s1 = smp(std::max(tm1_, tm2_)); break;
-        default: s0 = 0; s1 = nSamples_; break;
+        default: s0 = segS0_; s1 = segS1_; break;
     }
+}
+
+const char* App::rangeName(int r) const {
+    return r == 3 && segmentActive() ? "Whole segment" : kRanges[r];
 }
 
 void App::syncAudioChannel() {
@@ -124,7 +128,7 @@ bool App::playAudio(int64_t from) {
         playRange(s0, s1);
         if (from >= 0 && (from < s0 || from >= s1)) {
             s0 = from;
-            s1 = nSamples_;
+            s1 = segS1_;
         }
         ok = audio_->startFile(Source{file_, fp_, fs_, fc_}, s0, s1, from >= 0 ? from : s0, auLoop_, au_, auDevice_, err);
     }
@@ -222,13 +226,13 @@ void App::drawPlayhead(bool vertical) {
     double t = auPlayhead_;
     if (vertical ? ImPlot::DragLineX(50, &t, kColHead, 2.f) : ImPlot::DragLineY(50, &t, kColHead, 2.f)) {
         auDragHead_ = true;
-        auPlayhead_ = std::clamp(t, 0.0, dur_);
+        auPlayhead_ = std::clamp(t, tBegin(), tEnd());
     }
 }
 
 // Shift+click on a time plot or the waterfall plays from there.
 void App::playFrom(double t) {
-    const int64_t s = std::clamp<int64_t>((int64_t)std::llround(t * fs_), 0, nSamples_);
+    const int64_t s = std::clamp<int64_t>((int64_t)std::llround(t * fs_), segS0_, segS1_);
     if (audio_ && audio_->running() && !audio_->isLive()) {
         int64_t s0, s1;
         playRange(s0, s1);
@@ -313,7 +317,7 @@ void App::drawAudioWindow() {
         if (running && std::isfinite(auPlayhead_)) {
             float pos = (float)auPlayhead_;
             ImGui::SetNextItemWidth(-FLT_MIN);
-            if (ImGui::SliderFloat("##pos", &pos, 0.f, (float)dur_, fmtSI(pos, "s", 5).c_str())) {
+            if (ImGui::SliderFloat("##pos", &pos, (float)tBegin(), (float)tEnd(), fmtSI(pos, "s", 5).c_str())) {
                 auPlayhead_ = pos;
                 auDragHead_ = true;
             }
@@ -414,8 +418,12 @@ void App::drawAudioWindow() {
             ImGui::EndCombo();
         }
         if (!liveMode_) {
-            row("Range", "Part of the file to play and to export");
-            ImGui::Combo("##aurange", &auRange_, kRanges, IM_ARRAYSIZE(kRanges));
+            row("Range", "Part of the file to play and to export (always inside the loaded segment)");
+            if (ImGui::BeginCombo("##aurange", rangeName(auRange_))) {
+                for (int i = 0; i < IM_ARRAYSIZE(kRanges); ++i)
+                    if (ImGui::Selectable(rangeName(i), i == auRange_)) auRange_ = i;
+                ImGui::EndCombo();
+            }
             row("");
             ImGui::Checkbox("Loop", &auLoop_);
             ImGui::SameLine();
@@ -504,7 +512,7 @@ void App::drawAudioWindow() {
             int64_t s0, s1;
             playRange(s0, s1);
             ImGui::SameLine();
-            ImGui::TextDisabled("%s, %s", kRanges[auRange_], fmtSI(fs_ > 0 ? (s1 - s0) / fs_ : 0, "s", 4).c_str());
+            ImGui::TextDisabled("%s, %s", rangeName(auRange_), fmtSI(fs_ > 0 ? (s1 - s0) / fs_ : 0, "s", 4).c_str());
             tooltipAlways("Demodulate the range to a WAV file, faster than real time");
         }
     }

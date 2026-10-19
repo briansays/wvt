@@ -4,6 +4,8 @@
 #include <cmath>
 #include <limits>
 
+#include "ui_util.h"
+
 static constexpr float kEps = 1e-20f;
 
 // ---------------------------------------------------------------------------
@@ -443,7 +445,9 @@ std::shared_ptr<DemodRes> computeDemod(const DemodReq& r, const CancelFn& cancel
 std::shared_ptr<OverviewRes> computeOverview(const OverviewReq& r, const CancelFn& cancelled) {
     auto res = std::make_shared<OverviewRes>();
     if (!r.src.file) return res;
-    const int64_t N = r.src.file->numSamples(r.src.fp);
+    const int64_t total = r.src.file->numSamples(r.src.fp);
+    const int64_t base = std::clamp<int64_t>(r.s0, 0, total);
+    const int64_t N = (r.s1 < 0 ? total : std::min(r.s1, total)) - base;
     if (N <= 0) return res;
     const int P = (int)std::min<int64_t>(r.points, N);
     res->t.resize(P);
@@ -454,7 +458,7 @@ std::shared_ptr<OverviewRes> computeOverview(const OverviewReq& r, const CancelF
         std::vector<cf> buf;
         for (int b = b0; b < b1; ++b) {
             if ((b & 31) == 0 && cancelled()) { ab = true; return; }
-            int64_t a = N * b / P, e = N * (b + 1) / P;
+            int64_t a = base + N * b / P, e = base + N * (b + 1) / P;
             // Read at most 4 short probes spread over the bucket.
             const int64_t probe = 2048;
             double sum = 0, pk = 0;
@@ -480,4 +484,35 @@ std::shared_ptr<OverviewRes> computeOverview(const OverviewReq& r, const CancelF
     }, 16);
     if (ab) return nullptr;
     return res;
+}
+
+// ---------------------------------------------------------------------------
+// Time segment
+// ---------------------------------------------------------------------------
+SegmentRange segmentRange(double t0, double t1, double fs, int64_t n) {
+    SegmentRange r;
+    r.s1 = std::max<int64_t>(0, n);
+    if (t0 >= 0 && t1 >= 0 && t1 <= t0) {
+        r.err = "segment end " + fmtSI(t1, "s", 6) + " must be after its start " + fmtSI(t0, "s", 6);
+        return r;
+    }
+    if (n <= 0 || !(fs > 0)) return r;
+    const double dur = n / fs;
+    const int64_t s0 = t0 < 0 ? 0 : (int64_t)std::llround(t0 * fs);
+    int64_t s1 = t1 < 0 ? n : (int64_t)std::llround(t1 * fs);
+    if (s0 >= n) {
+        r.err = "segment start " + fmtSI(t0, "s", 6) + " is past the end of the file (" + fmtSI(dur, "s", 6) + ")";
+        return r;
+    }
+    if (s1 > n) {
+        r.warn = "segment end " + fmtSI(t1, "s", 6) + " is past the end of the file, using the end (" + fmtSI(dur, "s", 6) + ")";
+        s1 = n;
+    }
+    if (s1 <= s0) {
+        r.err = "segment " + fmtSI(t0, "s", 6) + " to " + fmtSI(t1, "s", 6) + " is shorter than one sample";
+        return r;
+    }
+    r.s0 = s0;
+    r.s1 = s1;
+    return r;
 }

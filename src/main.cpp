@@ -138,9 +138,10 @@ static bool parseAudioMode(const std::string& v, int& mode) {
     return false;
 }
 
-// Demodulates a file (or the --view range) to a WAV file and exits.
+// Demodulates a file (or its --segment, or the --view range inside it) to a
+// WAV file and exits.
 static int runAudioExport(const std::string& path, const CliOverrides& ov, bool haveView, double t0, double t1,
-                          const AudioParams& ap, const std::string& out) {
+                          double seg0, double seg1, const AudioParams& ap, const std::string& out) {
     FileMetaGuess g = guessMeta(path);
     std::string err;
     auto f = IqFile::open(g.dataPath, err);
@@ -160,10 +161,18 @@ static int runAudioExport(const std::string& path, const CliOverrides& ov, bool 
     src.fp.swapIQ = ov.swapIQ;
     if (!g.haveRate && !ov.haveRate) LOG_WARN("audio", "sample rate unknown, assuming %s (use -r)", fmtSI(src.fs, "S/s", 4).c_str());
     const int64_t n = f->numSamples(src.fp);
+    SegmentRange seg = segmentRange(seg0, seg1, src.fs, n);
+    if (!seg.err.empty()) {
+        LOG_ERROR("audio", "%s", seg.err.c_str());
+        return 2;
+    }
+    if (!seg.warn.empty()) LOG_WARN("audio", "%s", seg.warn.c_str());
+    if (!seg.whole(n))
+        LOG_INFO("audio", "segment %s to %s", fmtSI(seg.s0 / src.fs, "s", 6).c_str(), fmtSI(seg.s1 / src.fs, "s", 6).c_str());
     WavExportConfig c;
     c.src = src;
-    c.s0 = haveView ? std::clamp<int64_t>((int64_t)std::llround(t0 * src.fs), 0, n) : 0;
-    c.s1 = haveView ? std::clamp<int64_t>((int64_t)std::llround(t1 * src.fs), 0, n) : n;
+    c.s0 = haveView ? std::clamp<int64_t>((int64_t)std::llround(t0 * src.fs), seg.s0, seg.s1) : seg.s0;
+    c.s1 = haveView ? std::clamp<int64_t>((int64_t)std::llround(t1 * src.fs), seg.s0, seg.s1) : seg.s1;
     c.params = ap;
     c.path = expandHome(out);
     WavExportJob job;
@@ -239,6 +248,8 @@ static void usage() {
         "  -H, --header BYTES   bytes to skip at the start of the file\n"
         "      --swap-iq        swap I and Q\n"
         "      --chan OFF:BW    enable the channel filter, e.g. --chan 300k:150k\n"
+        "      --segment T0:T1  load only this part of the file, in seconds; -1 = file\n"
+        "                       start / end, e.g. --segment 40:50 or --segment 40:-1\n"
         "      --view T0:T1     initial time range in seconds, e.g. --view 0.5:0.52\n"
         "      --software       force the software renderer (no GLX)\n"
         "      --scale S        UI scale factor (default 1, or $WVT_SCALE)\n"
@@ -319,8 +330,8 @@ int main(int argc, char** argv) {
     CliOverrides ov;
     std::string path, shotPath;
     bool software = false;
-    bool haveChan = false, haveView = false;
-    double chanOff = 0, chanBw = 0, view0 = 0, view1 = 0;
+    bool haveChan = false, haveView = false, haveSeg = false;
+    double chanOff = 0, chanBw = 0, view0 = 0, view1 = 0, seg0 = -1, seg1 = -1;
     auto parsePair = [](const char* s, double& a, double& b) {
         std::string str(s);
         size_t c = str.find(':');
@@ -386,6 +397,10 @@ int main(int argc, char** argv) {
         } else if (a == "--view") {
             if (!parsePair(next("--view"), view0, view1)) { LOG_ERROR("main", "--view wants T0:T1"); return 2; }
             haveView = true;
+        } else if (a == "--segment") {
+            if (!parsePair(next("--segment"), seg0, seg1)) { LOG_ERROR("main", "--segment wants T0:T1 (-1 = file start / end)"); return 2; }
+            if (seg0 >= 0 && seg1 >= 0 && seg1 <= seg0) { LOG_ERROR("main", "--segment end must be after its start"); return 2; }
+            haveSeg = true;
         }
         else if (a == "--software") software = true;
         else if (a == "--scale") scale = (float)atof(next("--scale"));
@@ -613,7 +628,7 @@ int main(int argc, char** argv) {
             LOG_ERROR("main", "--audio-out needs a file or --device");
             return 2;
         }
-        return runAudioExport(path, ov, haveView, view0, view1, ap, audioOut);
+        return runAudioExport(path, ov, haveView, view0, view1, seg0, seg1, ap, audioOut);
     }
     if ((haveRecord || noGui) && !haveDevice) {
         LOG_ERROR("main", "recording needs --device");
@@ -658,6 +673,7 @@ int main(int argc, char** argv) {
             if (app.startDevice(dev) && haveRecord) app.startRecording(rc);
         } else if (!path.empty()) {
             LOG_INFO("main", "opening %s", path.c_str());
+            if (haveSeg) app.setSegment(seg0, seg1);
             app.openFile(path, ov);  // logs the reason on failure
             if (haveView) app.setView(view0, view1);
             if (haveChan) app.setChannel(chanOff, chanBw);
