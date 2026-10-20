@@ -30,6 +30,10 @@ else()
   set(PLATFORM_LIBS X11::X11 OpenGL::GL)
 endif()
 find_package(Threads REQUIRED)
+if(APPLE)
+  # dsp.cpp uses Accelerate (vDSP) for the FFT; every target that builds it needs it.
+  link_libraries("-framework Accelerate")
+endif()
 
 # Embed a TTF font so the binary is self-contained.
 set(FONT_TTF ${IMGUI_DIR}/misc/fonts/Roboto-Medium.ttf)

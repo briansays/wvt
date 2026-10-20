@@ -192,3 +192,12 @@ VkFFT is the route to cover every vendor with one backend.
 5. **macOS CI job** (step 7): add it? On a private repository, macOS minutes cost 10× Linux
    minutes.
 6. **AMD / Intel:** a separate issue later (recommended), or part of #21?
+
+## 10. Decisions (2026-10-20)
+
+1. **Scope:** the Metal backend and the vDSP CPU FFT.
+2. **GPU FFT:** MPSGraph.
+3. **Minimum macOS** for the GPU path: 14. Older macOS uses the CPU.
+4. **cf64:** decoded on the CPU, chunk by chunk.
+5. **macOS CI job:** skipped (step 7 is dropped).
+6. **AMD / Intel:** a separate issue, #24.

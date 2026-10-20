@@ -100,6 +100,43 @@ bool writeTestFile(const std::string& path, int64_t n, double fs, SampleFormat f
     return fclose(f) == 0;
 }
 
+// --- CPU FFT ----------------------------------------------------------------
+// FFT::forward (vDSP on macOS, radix-2 elsewhere) against a direct DFT in
+// double, and a tone in the right bin at N 65536.
+void testFft() {
+    printf("CPU FFT\n");
+    for (int n : {8, 256, 1024, 4096}) {
+        std::vector<cf> x(n);
+        uint32_t r = 12345;
+        for (auto& v : x) {
+            r = r * 1664525u + 1013904223u;
+            const float a = (r >> 8) / 16777216.f - 0.5f;
+            r = r * 1664525u + 1013904223u;
+            v = cf(a, (r >> 8) / 16777216.f - 0.5f);
+        }
+        std::vector<cf> y = x;
+        getFFT(n)->forward(y.data());
+        double err = 0, peak = 0;
+        for (int k = 0; k < n; ++k) {
+            std::complex<double> acc = 0;
+            for (int i = 0; i < n; ++i) acc += std::complex<double>(x[i]) * std::polar(1.0, -2 * M_PI * (double)k * i / n);
+            err = std::max(err, std::abs(acc - std::complex<double>(y[k])));
+            peak = std::max(peak, std::abs(acc));
+        }
+        char b[96];
+        snprintf(b, sizeof b, "N %d matches a direct DFT (max error %.1e of the peak)", n, err / peak);
+        check(err <= 1e-5 * peak, b);
+    }
+    const int n = 65536, bin = 12345;
+    std::vector<cf> x(n);
+    for (int i = 0; i < n; ++i) x[i] = std::polar(1.f, (float)(2 * M_PI * (double)bin * i / n));
+    getFFT(n)->forward(x.data());
+    int best = 0;
+    for (int k = 1; k < n; ++k)
+        if (std::norm(x[k]) > std::norm(x[best])) best = k;
+    check(best == bin && std::fabs(std::abs(x[bin]) / n - 1.0) < 1e-4, "N 65536: a tone lands in its bin with amplitude N");
+}
+
 // --- GPU setup --------------------------------------------------------------
 // Option parsing and the init rules. Without a usable GPU, on must fail with
 // a reason, and auto and off must succeed on the CPU.
@@ -646,6 +683,7 @@ int main(int argc, char** argv) {
         dir = tmp = tmpl;
     }
 
+    testFft();
     testSetup();
     testSpectrogram(dir);
     testLive();
