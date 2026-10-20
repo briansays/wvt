@@ -352,31 +352,31 @@ ParamCheck checkParams(const WaveformParams& p) {
         return c;
     }
     const double nyq = p.rate / 2;
-    const bool fSweep = p.mode == GenMode::CW && p.fSweep != SweepShape::Off;
-    const bool aSweep = p.mode == GenMode::CW && p.aSweep != SweepShape::Off;
+    const bool fSweep = p.sweeping() && p.fSweep != SweepShape::Off;
+    const bool aSweep = p.sweeping() && p.aSweep != SweepShape::Off;
     if (!(p.ampDb <= 0)) err("Amplitude must be 0 dBFS or less");
     if (!fSweep && p.mode != GenMode::Chain && !(std::fabs(p.offset) < nyq)) err("Offset must be inside the band (|offset| < " + fmtSI(nyq, "Hz") + ")");
+    if (fSweep) {
+        if (!(std::fabs(p.fFrom) < nyq && std::fabs(p.fTo) < nyq))
+            err("The sweep must stay inside the band (|from| and |to| < " + fmtSI(nyq, "Hz") + ")");
+        if (p.fFrom == p.fTo) err("The sweep needs different From and To frequencies");
+        if (p.fSweep == SweepShape::Stepped) {
+            if (!(p.fStep > 0)) err("The frequency step must be positive");
+            else if (p.sweepSteps() > 1000000) err("More than 1000000 steps: use a larger step");
+            if (!(p.fDwell * p.rate >= 1)) err("Dwell must be at least one sample (" + fmtSI(1 / p.rate, "s") + ")");
+        }
+    }
+    if (aSweep) {
+        if (p.aSweep == SweepShape::Stepped) err("The level can't be stepped");
+        if (!(p.aFrom <= 0 && p.aTo <= 0)) err("Sweep levels must be 0 dBFS or less");
+        if (p.aFrom == p.aTo) err("The level sweep needs different From and To levels");
+    }
+    if ((fSweep || aSweep) && p.fSweep != SweepShape::Stepped && !(p.sweepPeriod * p.rate >= 2))
+        err("The sweep period must be at least 2 samples (" + fmtSI(2 / p.rate, "s") + ")");
     if (p.mode == GenMode::CW) {
-        if (fSweep) {
-            if (p.driftHzPerSec != 0) warn("Drift is ignored while the frequency sweeps");
-            if (!(std::fabs(p.fFrom) < nyq && std::fabs(p.fTo) < nyq))
-                err("The sweep must stay inside the band (|from| and |to| < " + fmtSI(nyq, "Hz") + ")");
-            if (p.fFrom == p.fTo) err("The sweep needs different From and To frequencies");
-            if (p.fSweep == SweepShape::Stepped) {
-                if (!(p.fStep > 0)) err("The frequency step must be positive");
-                else if (p.sweepSteps() > 1000000) err("More than 1000000 steps: use a larger step");
-                if (!(p.fDwell * p.rate >= 1)) err("Dwell must be at least one sample (" + fmtSI(1 / p.rate, "s") + ")");
-            }
-        } else if (p.driftHzPerSec != 0) {
+        if (fSweep && p.driftHzPerSec != 0) warn("Drift is ignored while the frequency sweeps");
+        else if (p.driftHzPerSec != 0)
             warn("The tone drifts by " + fmtSI(std::fabs(p.driftHzPerSec), "Hz/s") + " and wraps around at the band edge");
-        }
-        if (aSweep) {
-            if (p.aSweep == SweepShape::Stepped) err("The level can't be stepped");
-            if (!(p.aFrom <= 0 && p.aTo <= 0)) err("Sweep levels must be 0 dBFS or less");
-            if (p.aFrom == p.aTo) err("The level sweep needs different From and To levels");
-        }
-        if ((fSweep || aSweep) && p.fSweep != SweepShape::Stepped && !(p.sweepPeriod * p.rate >= 2))
-            err("The sweep period must be at least 2 samples (" + fmtSI(2 / p.rate, "s") + ")");
     } else if (p.mode == GenMode::Chain) {
         if (p.chain.empty()) err("Add at least one recording to the chain");
         for (size_t i = 0; i < p.chain.size(); ++i) {
@@ -430,9 +430,13 @@ ParamCheck checkParams(const WaveformParams& p) {
         if (p.startDelay < 0) err("Start delay can't be negative");
         if (p.intra == IntraMod::LfmUp || p.intra == IntraMod::LfmDown || p.intra == IntraMod::LfmTriangle) {
             if (!(p.chirpBw > 0)) err("Chirp bandwidth must be positive");
-            else if (std::fabs(p.offset) + p.chirpBw / 2 > nyq)
+            else if ((fSweep ? std::max(std::fabs(p.fFrom), std::fabs(p.fTo)) : std::fabs(p.offset)) + p.chirpBw / 2 > nyq)
                 warn("The chirp runs past the band edge and will alias");
         }
+        if ((fSweep || aSweep) && p.sweepSamples() < 2 * p.meanPri() * p.rate)
+            warn("The sweep period is shorter than two PRIs: each pulse samples it, so few points of it are heard");
+        else if (p.fSweep == SweepShape::Stepped && fSweep && p.fDwell < p.meanPri())
+            warn("The dwell is shorter than the PRI: some steps get no pulse");
         if (p.intra == IntraMod::Barker) {
             if (!barkerCode(p.barkerLen)) err("Barker codes exist only for lengths 2, 3, 4, 5, 7, 11 and 13");
             else if (pwS / p.barkerLen < 1) err("Barker chips would be shorter than one sample: widen the pulse or use a shorter code");
@@ -497,9 +501,16 @@ std::string describeParams(const WaveformParams& p) {
         if (p.burstPulses > 0) s += ", bursts of " + std::to_string(p.burstPulses);
         if (p.intra == IntraMod::Barker) s += ", Barker-" + std::to_string(p.barkerLen);
         else if (p.intra != IntraMod::None) s += ", " + std::string(intraModName(p.intra)) + " " + fmtSI(p.chirpBw, "Hz");
-        s += ", offset " + fmtSI(p.offset, "Hz");
+        if (p.fSweep == SweepShape::Stepped)
+            s += ", stepped " + fmtSI(p.fFrom, "Hz") + " to " + fmtSI(p.fTo, "Hz") + " by " + fmtSI(p.fStep, "Hz") + ", " +
+                 fmtSI(p.fDwell, "s") + " dwell";
+        else if (p.fSweep != SweepShape::Off)
+            s += ", sweep " + fmtSI(p.fFrom, "Hz") + " to " + fmtSI(p.fTo, "Hz") + " " + lower(sweepShapeName(p.fSweep)) + " " +
+                 fmtSI(p.sweepPeriod, "s");
+        else
+            s += ", offset " + fmtSI(p.offset, "Hz");
     }
-    if (p.mode == GenMode::CW && p.aSweep != SweepShape::Off) {
+    if (p.sweeping() && p.aSweep != SweepShape::Off) {
         snprintf(amp, sizeof amp, "%.1f to %.1f dBFS", p.aFrom, p.aTo);
         s += ", level " + std::string(amp) + " " + lower(sweepShapeName(p.aSweep));
         if (p.fSweep == SweepShape::Off) s += " " + fmtSI(p.sweepPeriod, "s");
@@ -523,20 +534,21 @@ std::string paramsJson(const WaveformParams& p) {
         add("amplitude_dbfs", num(p.ampDb));
     }
     add("phase_deg", num(p.phaseDeg));
+    if (p.sweeping()) {
+        auto name = [&](SweepShape v) { return str(lower(sweepShapeName(v)).c_str()); };
+        std::string w = "{\"period_s\": " + num((double)p.sweepSamples() / p.rate);
+        if (p.fSweep != SweepShape::Off) {
+            w += ", \"frequency\": " + name(p.fSweep) + ", \"from_hz\": " + num(p.fFrom) + ", \"to_hz\": " + num(p.fTo);
+            if (p.fSweep == SweepShape::Stepped)
+                w += ", \"step_hz\": " + num(p.fStep) + ", \"dwell_s\": " + num(p.fDwell);
+        }
+        if (p.aSweep != SweepShape::Off)
+            w += ", \"level\": " + name(p.aSweep) + ", \"from_dbfs\": " + num(p.aFrom) + ", \"to_dbfs\": " + num(p.aTo);
+        if (p.mode == GenMode::Pulsed) w += ", \"per_pulse\": true";
+        add("sweep", w + "}");
+    }
     if (p.mode == GenMode::CW) {
         add("drift_hz_per_s", num(p.driftHzPerSec));
-        if (p.sweeping()) {
-            auto name = [&](SweepShape v) { return str(lower(sweepShapeName(v)).c_str()); };
-            std::string w = "{\"period_s\": " + num((double)p.sweepSamples() / p.rate);
-            if (p.fSweep != SweepShape::Off) {
-                w += ", \"frequency\": " + name(p.fSweep) + ", \"from_hz\": " + num(p.fFrom) + ", \"to_hz\": " + num(p.fTo);
-                if (p.fSweep == SweepShape::Stepped)
-                    w += ", \"step_hz\": " + num(p.fStep) + ", \"dwell_s\": " + num(p.fDwell);
-            }
-            if (p.aSweep != SweepShape::Off)
-                w += ", \"level\": " + name(p.aSweep) + ", \"from_dbfs\": " + num(p.aFrom) + ", \"to_dbfs\": " + num(p.aTo);
-            add("sweep", w + "}");
-        }
     } else if (p.mode == GenMode::Chain) {
         std::string a = "[";
         for (size_t i = 0; i < p.chain.size(); ++i) {
@@ -621,6 +633,14 @@ void SigGen::apply(const WaveformParams& p) {
     offset_ = p.offset;
     ph_ += (p.phaseDeg - old.phaseDeg) * M_PI / 180;
     if (p.seed != old.seed) jitterRng_ = 0x9e3779b97f4a7c15ull ^ ((uint64_t)p.seed * 0xbf58476d1ce4e5b9ull);
+    // A sweep setting change starts the period again (the phase stays continuous).
+    if (!sameSweep(old, p)) {
+        sweepN_ = 0;
+        sweepT0_ = n_;
+    }
+    if (p.sweeping() && p.aSweep != SweepShape::Off)
+        noiseAmp_ = std::pow(10.0, std::max(p.aFrom, p.aTo) / 20);  // noise follows the peak
+    if (p.mode == GenMode::Pulsed && p.sweeping()) sweepPulse();  // until the next pulse picks its own
     if (p.mode == GenMode::Chain) {
         applyChain(old, p);
         return;
@@ -629,9 +649,6 @@ void SigGen::apply(const WaveformParams& p) {
     curItem_ = -1;
     chainEnd_ = false;
     if (p.mode == GenMode::CW) {
-        // A sweep setting change starts the period again (the phase stays continuous).
-        if (!sameSweep(old, p)) sweepN_ = 0;
-        if (p.aSweep != SweepShape::Off) noiseAmp_ = std::pow(10.0, std::max(p.aFrom, p.aTo) / 20);  // noise follows the peak
         tmpl_.reset();
         wave_.reset();
         err_.clear();
@@ -922,9 +939,23 @@ void SigGen::sweep(std::complex<float>* out, int64_t m) {
     }
 }
 
-void SigGen::seekSweep(int64_t k) {
+void SigGen::seekSweep(int64_t k, int64_t pulseIn) {
     const int64_t P = p_.sweepSamples();
     sweepN_ = ((k % P) + P) % P;
+    if (p_.mode == GenMode::Pulsed) {
+        pulseIn = std::max<int64_t>(0, pulseIn);
+        sweepT0_ = n_ + pulseIn - sweepN_;
+        curStart_ = -1;
+        nextStart_ = (double)(n_ + pulseIn);
+    }
+}
+
+// A pulse takes the sweep's frequency and level at the sample it starts on.
+void SigGen::sweepPulse() {
+    const int64_t P = p_.sweepSamples();
+    const int64_t k = ((n_ - sweepT0_) % P + P) % P;
+    if (p_.fSweep != SweepShape::Off) offset_ = p_.sweepOffsetAt(k);
+    if (p_.aSweep != SweepShape::Off) amp_ = std::pow(10.0, p_.sweepLevelAt(k) / 20);
 }
 
 void SigGen::advanceCarrier(int64_t m) {
@@ -965,7 +996,7 @@ void SigGen::generate(std::complex<float>* out, int64_t n) {
     int64_t i = 0;
     while (i < n) {
         if (p_.mode == GenMode::CW) {
-            if (p_.sweeping()) sweep(out + i, n - i);
+            if (p_.sweeping()) sweep(out + i, n - i);  // (CW: continuous; pulsed sweeps go pulse by pulse)
             else carrier(out + i, nullptr, n - i);
             n_ += n - i;
             i = n;
@@ -1010,6 +1041,7 @@ void SigGen::generate(std::complex<float>* out, int64_t n) {
             startChainItem();
             pulses_.push_back({n_, tmplLen(), curItem_, rep});
         } else {
+            if (p_.mode == GenMode::Pulsed && p_.sweeping()) sweepPulse();
             pulses_.push_back({n_, L});
         }
         ++burstCount_;

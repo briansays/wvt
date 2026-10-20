@@ -92,7 +92,7 @@ struct SigPreviewRes {
     SigPreviewReq req;
     std::vector<double> t, mag, i, q;  // time from the preview start (s); i/q only when `iq`
     bool iq = false;
-    std::vector<double> sweepF, sweepDb;  // sweep: frequency (Hz) and level (dBFS) at each t, over one period
+    std::vector<double> sweepT, sweepF, sweepDb;  // sweep: frequency (Hz) and level (dBFS) over one period
     std::vector<double> f, db;  // absolute frequency, power per bin in dBFS
     double rbw = 0;             // spectrum bin width, Hz
     bool hold = false;          // the spectrum is a max-hold (a sweep), not an average
