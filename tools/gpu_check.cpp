@@ -3,7 +3,7 @@
 //   gpu_check [--bench] [--samples N] [scratch_dir]
 //
 // Without --bench it checks the GPU setup rules and, when a GPU can be used,
-// compares the GPU waterfall with the CPU one in every sample format.
+// compares the GPU waterfall, live spectrum and channel filter with the CPU.
 // --bench also prints times for the jobs a GPU could take over: the file
 // waterfall (CPU and GPU), the live spectrum row, the channel filter and the
 // waterfall colouring. The test file is a ci16 recording of N samples (default 64M,
@@ -397,6 +397,102 @@ void testLive() {
     check(gpuLiveUsable(), "gpuInit turns the live path on again");
 }
 
+// --- Channel filter: GPU against CPU -------------------------------------------
+void testChannel(const std::string& dir) {
+    printf("\nGPU channel filter\n");
+    CancelFn never = [] { return false; };
+    if (!gpuChannelUsable()) {
+        ChanJob j;
+        std::vector<float> y(2);
+        check(gpuChannelize(j, y.data(), never) == GpuStatus::Unavailable, "no GPU: the channel filter is unavailable");
+        printf("  GPU against CPU comparison skipped: %s\n", gpuInfo().reason.c_str());
+        return;
+    }
+    const double fs = 20e6;
+    const int64_t n = 26'000'000;
+    struct Case {
+        const char* name;
+        SampleFormat fmt;
+        int64_t inStart, outLen;
+        int decim, taps;
+        double frac;
+    };
+    const Case cases[] = {
+        {"ci16, 255 taps, decimation 8", SampleFormat::CI16, 1000, 1'000'000, 8, 255, 0.11},
+        {"ci16, 8191 taps, decimation 1", SampleFormat::CI16, 5000, 100'000, 1, 8191, -0.27},
+        {"ci16, no mix", SampleFormat::CI16, 0, 200'000, 4, 2047, 0.0},
+        {"ci16, starts before the file", SampleFormat::CI16, -50'000, 100'000, 2, 511, 0.2},
+        {"ci16, runs past the end", SampleFormat::CI16, n - 100'000, 50'000, 4, 1023, 0.05},
+        {"ci16, 3 chunks (24 MS in)", SampleFormat::CI16, 0, 3'000'000, 8, 255, 0.11},
+        {"ci16, 13001 taps (not in shared memory)", SampleFormat::CI16, 0, 20'000, 10, 13001, 0.3},
+        {"cu8", SampleFormat::CU8, 1000, 500'000, 8, 255, 0.11},
+        {"cf32", SampleFormat::CF32, 1000, 500'000, 8, 255, 0.11},
+    };
+    SampleFormat written = SampleFormat::Count;
+    std::shared_ptr<IqFile> file;
+    const std::string path = dir + "/gpu_chan.bin";
+    for (const auto& c : cases) {
+        if (c.fmt != written) {
+            file.reset();
+            const int64_t len = c.fmt == SampleFormat::CI16 ? n : 2'000'000;
+            if (!writeTestFile(path, len, fs, c.fmt)) {
+                check(false, "write the test file");
+                return;
+            }
+            std::string err;
+            file = IqFile::open(path, err);
+            written = c.fmt;
+        }
+        const auto h = designLowpass(c.taps, 0.4 / c.decim);
+        ChanJob j;
+        j.file = file.get();
+        j.fp.fmt = c.fmt;
+        j.inStart = c.inStart;
+        j.outLen = c.outLen;
+        j.decim = c.decim;
+        j.frac = c.frac;
+        j.h = h.data();
+        j.taps = c.taps;
+        std::vector<cf> cpu(c.outLen), gpu(c.outLen, cf(-9.f, -9.f));
+        channelizeCpu(j, cpu.data(), never);
+        const GpuStatus st = gpuChannelize(j, reinterpret_cast<float*>(gpu.data()), never);
+        if (st != GpuStatus::Ok) {
+            check(false, std::string(c.name) + ": GPU status " + std::to_string((int)st));
+            continue;
+        }
+        double peak = 0, diff = 0;
+        for (size_t k = 0; k < cpu.size(); ++k) {
+            peak = std::max(peak, (double)std::abs(cpu[k]));
+            diff = std::max(diff, (double)std::abs(gpu[k] - cpu[k]));
+        }
+        char b[200];
+        snprintf(b, sizeof b, "%s: max error %.2g of the peak", c.name, peak > 0 ? diff / peak : diff);
+        check(peak > 0 ? diff <= 1e-4 * peak : diff == 0, b);
+    }
+    // Cancel, and a forced failure that turns off only this path.
+    const auto h = designLowpass(255, 0.05);
+    ChanJob j;
+    j.file = file.get();
+    j.fp.fmt = written;
+    j.outLen = 1000;
+    j.decim = 8;
+    j.h = h.data();
+    j.taps = 255;
+    std::vector<cf> y(j.outLen);
+    check(gpuChannelize(j, reinterpret_cast<float*>(y.data()), [] { return true; }) == GpuStatus::Cancelled,
+          "cancel stops the GPU job");
+    setenv("WVT_GPU_FORCE_FAIL", "1", 1);
+    const GpuStatus st = gpuChannelize(j, reinterpret_cast<float*>(y.data()), never);
+    unsetenv("WVT_GPU_FORCE_FAIL");
+    check(st == GpuStatus::Failed && !gpuChannelUsable() && gpuSpectrogramUsable() && gpuLiveUsable(),
+          "a channel filter failure turns off only that path");
+    std::string err;
+    gpuInit(GpuMode::Auto, -1, err);
+    check(gpuChannelUsable(), "gpuInit turns the path on again");
+    file.reset();
+    unlink(path.c_str());
+}
+
 // --- File waterfall ---------------------------------------------------------
 // Zoom 1 = the span where one FFT per row at 50 % overlap covers the view.
 void benchWaterfall(const Source& src, int64_t nSamples) {
@@ -475,8 +571,9 @@ void benchLive(const std::vector<uint8_t>& raw) {
 
 // --- Channel filter -----------------------------------------------------------
 void benchDemod(const Source& src, int64_t nSamples) {
+    const bool gpu = gpuChannelUsable();
     printf("\nchannel filter + demod (dense, 8 MS input, decimation 8)\n");
-    printf("  %-6s %s\n", "taps", "time");
+    printf("  %-6s %-11s%s\n", "taps", "CPU time", gpu ? "GPU time   speed-up" : "");
     CancelFn never = [] { return false; };
     for (int taps : {255, 2047, 8191}) {
         DemodReq r;
@@ -489,8 +586,15 @@ void benchDemod(const Source& src, int64_t nSamples) {
         r.taps = taps;
         r.decim = 8;
         std::shared_ptr<DemodRes> res;
+        gpuSetEnabled(false);
         const double ms = timeIt(2, [&] { res = computeDemod(r, never); });
-        printf("  %-6d %8.1f ms%s\n", taps, ms, res && res->sparse ? "  (sparse!)" : "");
+        gpuSetEnabled(true);
+        printf("  %-6d %8.1f ms", taps, ms);
+        if (gpu) {
+            const double gms = timeIt(2, [&] { res = computeDemod(r, never); });
+            printf("  %8.1f ms  %5.1fx", gms, ms / gms);
+        }
+        printf("%s\n", res && res->sparse ? "  (sparse!)" : "");
     }
 }
 
@@ -545,6 +649,7 @@ int main(int argc, char** argv) {
     testSetup();
     testSpectrogram(dir);
     testLive();
+    testChannel(dir);
     const double fs = 20e6;
     if (bench) {
         const int64_t n = (int64_t)samples;

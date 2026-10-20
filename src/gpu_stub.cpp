@@ -18,6 +18,10 @@ GpuStatus gpuBackendLiveRun(GpuLiveImpl*, const uint8_t*, const FormatParams&, i
     return GpuStatus::Unavailable;
 }
 
+GpuStatus gpuBackendChannelize(const ChanJob&, float*, const std::function<bool()>&, std::string&, bool&) {
+    return GpuStatus::Unavailable;
+}
+
 GpuStatus gpuBackendSpectrogram(const SpecJob&, float*, const std::function<bool()>&, std::string&, bool&) {
     return GpuStatus::Unavailable;
 }

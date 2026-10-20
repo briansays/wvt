@@ -62,8 +62,8 @@ wvt uses the UHD C API, so you do not need Boost headers to build it.
 
 ### Optional: GPU acceleration
 
-On Linux with an NVIDIA GPU, wvt can compute the file waterfall and the live spectrum on the
-GPU. This lets wide views keep "FFT sees 100 %", and lets the live spectrum analyze every
+On Linux with an NVIDIA GPU, wvt can compute the file waterfall, the live spectrum and the
+channel filter of the demodulator plots on the GPU. This lets wide views keep "FFT sees 100 %", and lets the live spectrum analyze every
 sample at USRP rates. The results look the same as on the CPU.
 
 - **Build:** the CUDA toolkit 12.0 or later (12.8 or later for RTX 50-series cards), with
@@ -442,7 +442,7 @@ between blocks, so the audio is continuous. `build/audio_check` tests each mode 
 ## Signal processing
 
 - **Waterfall:** windowed FFTs with fftshift, in dBFS. The view fits in a maximum of *Rows* rows. When a row covers more time than one FFT, the row averages enough FFTs to cover its full time slice. Thus short pulses cannot fall between FFTs. *Avg* sets the minimum number of FFTs for each row. Above 256 M samples of FFT input (2 G on the GPU), wvt uses a sample of each slice. The settings row then shows the percentage of the view that the FFTs see. wvt max-pools adjacent bins to *Cols* columns, so narrow signals stay visible. The spectrum plot shows the average and the peak hold of the rows in the view.
-- **Channel** (optional): mixes the chosen offset down to 0 Hz, applies a windowed-sinc FIR low-pass (Blackman), then decimates. Auto settings: decimation = ⌊Fs / 2·BW⌋ and taps ≈ 12·Fs / BW. The mixer phase is a function of the absolute sample number, so the results do not move when you pan.
+- **Channel** (optional): mixes the chosen offset down to 0 Hz, applies a windowed-sinc FIR low-pass (Blackman), then decimates. Auto settings: decimation = ⌊Fs / 2·BW⌋ and taps ≈ 12·Fs / BW. With a GPU, large full-resolution views run the mixer and filter there. The mixer phase is a function of the absolute sample number, so the results do not move when you pan.
 - **AM:** |x|, as linear, dB, or normalized m(t) = |x| / mean − 1. Modulation index m = (max − min) / (max + min).
 - **FM:** instantaneous frequency arg(x[n]·x*[n−1])·Fs / 2π, either absolute (offset from the capture center) or relative to the channel center. The readout shows mean, peak deviation and rms deviation.
 - **PM:** phase, either wrapped, unwrapped, or unwrapped with the best-fit line removed (this removes any remaining carrier offset). Radians or degrees.

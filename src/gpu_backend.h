@@ -24,5 +24,8 @@ void gpuBackendLiveDestroy(GpuLiveImpl* impl);
 GpuStatus gpuBackendLiveRun(GpuLiveImpl* impl, const uint8_t* raw, const FormatParams& fp, int n, int frames,
                             const float* win, float* pw, std::string& err, bool& oom);
 
+GpuStatus gpuBackendChannelize(const ChanJob& job, float* y, const std::function<bool()>& cancelled, std::string& err,
+                               bool& oom);
+
 GpuStatus gpuBackendSpectrogram(const SpecJob& job, float* lin, const std::function<bool()>& cancelled, std::string& err,
                                 bool& oom);

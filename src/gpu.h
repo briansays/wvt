@@ -85,6 +85,25 @@ private:
 };
 bool gpuLiveUsable();  // GpuLiveSpectrum::run would try the GPU
 
+// A channel filter job for the dense demodulator: mix the input down by
+// `frac` cycles per sample (phase from the absolute sample index), then
+// y[j] = sum over m of h[m] * x[inStart + j * decim + m], for j in [0, outLen).
+// Samples outside the file are zero. Runs on the CPU (channelizeCpu in
+// engine.h) or on the GPU (gpuChannelize).
+struct ChanJob {
+    const IqFile* file = nullptr;
+    FormatParams fp;
+    int64_t inStart = 0, outLen = 0;
+    int decim = 1;
+    double frac = 0;  // chanOffset / fs
+    const float* h = nullptr;
+    int taps = 0;
+};
+// y gets outLen complex values (interleaved re, im). Same status and
+// fallback rules as gpuSpectrogram, with its own "failed earlier" state.
+GpuStatus gpuChannelize(const ChanJob& job, float* y, const std::function<bool()>& cancelled);
+bool gpuChannelUsable();  // gpuChannelize would try the GPU
+
 // One line per path that fell back to the CPU, e.g. "waterfall: uses the CPU
 // after an error: ...". Empty when nothing failed.
 std::string gpuFallbackNotes();

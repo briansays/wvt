@@ -7,6 +7,8 @@
 #include "ui_util.h"
 
 static constexpr float kEps = 1e-20f;
+// Channel filter jobs below this many multiply-adds stay on the CPU.
+static constexpr double kGpuMinChanMacs = 2e7;
 
 // ---------------------------------------------------------------------------
 // Waterfall
@@ -159,6 +161,51 @@ ChanDesign chanDesign(const DemodReq& r) {
     return d;
 }
 
+bool channelizeCpu(const ChanJob& job, cf* y, const CancelFn& cancelled, bool threaded) {
+    const int thr = threaded ? 1 : (1 << 30);  // parallelFor minChunk; huge = run inline
+    const int N = job.taps, D = job.decim;
+    const int64_t M = job.outLen, inStart = job.inStart;
+    const int64_t inLen = (M - 1) * D + N;
+    std::vector<cf> x(inLen);
+    job.file->read(job.fp, inStart, inLen, x.data());
+    if (cancelled()) return false;
+    // Frequency shift by -offset, phase referenced to absolute sample index.
+    const double frac = job.frac;
+    if (frac != 0.0) {
+        parallelFor((int)((inLen + 4095) / 4096), [&](int cb, int ce) {
+            for (int c = cb; c < ce; ++c) {
+                int64_t a = (int64_t)c * 4096, b = std::min<int64_t>(inLen, a + 4096);
+                double cyc = std::fmod(frac * (double)(inStart + a), 1.0);
+                std::complex<double> rot = std::polar(1.0, -2.0 * M_PI * cyc);
+                const std::complex<double> step = std::polar(1.0, -2.0 * M_PI * frac);
+                for (int64_t k = a; k < b; ++k) {
+                    const float rr = (float)rot.real(), ri = (float)rot.imag();
+                    const float xr = x[k].real(), xi = x[k].imag();
+                    x[k] = cf(xr * rr - xi * ri, xr * ri + xi * rr);
+                    rot *= step;
+                }
+            }
+        }, thr);
+    }
+    if (cancelled()) return false;
+    // FIR low-pass + decimate (only the kept outputs are computed)
+    const float* h = job.h;
+    std::atomic<bool> ab{false};
+    parallelFor((int)M, [&](int b, int e) {
+        for (int j = b; j < e; ++j) {
+            if ((j & 8191) == 0 && cancelled()) { ab = true; return; }
+            const cf* xp = &x[(size_t)j * D];
+            float ar = 0, ai = 0;
+            for (int m = 0; m < N; ++m) {
+                ar += h[m] * xp[m].real();
+                ai += h[m] * xp[m].imag();
+            }
+            y[j] = cf(ar, ai);
+        }
+    }, threaded ? 2048 : (1 << 30));
+    return !ab;
+}
+
 namespace {
 
 struct RawChannels {
@@ -171,7 +218,6 @@ struct RawChannels {
 // results don't shift when the view pans.
 bool processRange(const DemodReq& r, const ChanDesign& cd, const std::vector<float>& h, int64_t jA, int64_t jB,
                   RawChannels& out, const CancelFn& cancelled, bool threaded = true) {
-    const int thr = threaded ? 1 : (1 << 30);  // parallelFor minChunk; huge = run inline
     const Source& src = r.src;
     const int D = cd.decim;
     const int64_t M = jB - jA + 1;  // +1 leading sample for the FM difference
@@ -183,46 +229,23 @@ bool processRange(const DemodReq& r, const ChanDesign& cd, const std::vector<flo
         src.file->read(src.fp, j0, M, y.data());
     } else {
         const int N = (int)h.size();
-        const int half = N / 2;
-        const int64_t inStart = j0 * D - half;
-        const int64_t inLen = (M - 1) * D + N;
-        std::vector<cf> x(inLen);
-        src.file->read(src.fp, inStart, inLen, x.data());
-        if (cancelled()) return false;
-        // Frequency shift by -offset, phase referenced to absolute sample index.
-        const double frac = r.chanOffset / src.fs;
-        if (frac != 0.0) {
-            parallelFor((int)((inLen + 4095) / 4096), [&](int cb, int ce) {
-                for (int c = cb; c < ce; ++c) {
-                    int64_t a = (int64_t)c * 4096, b = std::min<int64_t>(inLen, a + 4096);
-                    double cyc = std::fmod(frac * (double)(inStart + a), 1.0);
-                    std::complex<double> rot = std::polar(1.0, -2.0 * M_PI * cyc);
-                    const std::complex<double> step = std::polar(1.0, -2.0 * M_PI * frac);
-                    for (int64_t k = a; k < b; ++k) {
-                        const float rr = (float)rot.real(), ri = (float)rot.imag();
-                        const float xr = x[k].real(), xi = x[k].imag();
-                        x[k] = cf(xr * rr - xi * ri, xr * ri + xi * rr);
-                        rot *= step;
-                    }
-                }
-            }, thr);
+        ChanJob job;
+        job.file = src.file.get();
+        job.fp = src.fp;
+        job.inStart = j0 * D - N / 2;
+        job.outLen = M;
+        job.decim = D;
+        job.frac = r.chanOffset / src.fs;
+        job.h = h.data();
+        job.taps = N;
+        // The GPU pays off only on large jobs (a few ms of CPU work).
+        bool done = false;
+        if (threaded && (double)M * N >= kGpuMinChanMacs && gpuChannelUsable()) {
+            const GpuStatus st = gpuChannelize(job, reinterpret_cast<float*>(y.data()), cancelled);
+            if (st == GpuStatus::Cancelled) return false;
+            done = st == GpuStatus::Ok;
         }
-        if (cancelled()) return false;
-        // FIR low-pass + decimate (only the kept outputs are computed)
-        std::atomic<bool> ab{false};
-        parallelFor((int)M, [&](int b, int e) {
-            for (int j = b; j < e; ++j) {
-                if ((j & 8191) == 0 && cancelled()) { ab = true; return; }
-                const cf* xp = &x[(size_t)j * D];
-                float ar = 0, ai = 0;
-                for (int m = 0; m < N; ++m) {
-                    ar += h[m] * xp[m].real();
-                    ai += h[m] * xp[m].imag();
-                }
-                y[j] = cf(ar, ai);
-            }
-        }, threaded ? 2048 : (1 << 30));
-        if (ab) return false;
+        if (!done && !channelizeCpu(job, y.data(), cancelled, threaded)) return false;
     }
     if (cancelled()) return false;
 

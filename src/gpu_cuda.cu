@@ -197,9 +197,47 @@ __device__ inline T loadSample(const uint8_t* p, bool swap) {
     return u.v;
 }
 
-// Same rules as decodeSamples() in iq_file.cpp, then the window. valid[j]
-// is the part [x, y) of FFT j inside the file; the rest is zero. With valid
-// null, every sample is used.
+// One sample, with the rules of decodeSamples() in iq_file.cpp.
+__device__ inline void decodeOne(const uint8_t* p, int fmt, int bps, bool bigEndian, bool swapIQ, float& re, float& im) {
+    const int half = bps / 2;
+    re = im = 0.f;
+    switch ((SampleFormat)fmt) {
+        case SampleFormat::CF32:
+            re = loadSample<float>(p, bigEndian);
+            im = loadSample<float>(p + half, bigEndian);
+            break;
+        case SampleFormat::CF64:
+            re = (float)loadSample<double>(p, bigEndian);
+            im = (float)loadSample<double>(p + half, bigEndian);
+            break;
+        case SampleFormat::CI16:
+            re = loadSample<int16_t>(p, bigEndian) * (1.f / 32768.f);
+            im = loadSample<int16_t>(p + half, bigEndian) * (1.f / 32768.f);
+            break;
+        case SampleFormat::CI32:
+            re = (float)(loadSample<int32_t>(p, bigEndian) * (1.0 / 2147483648.0));
+            im = (float)(loadSample<int32_t>(p + half, bigEndian) * (1.0 / 2147483648.0));
+            break;
+        case SampleFormat::CI8:
+            re = (int8_t)p[0] * (1.f / 128.f);
+            im = (int8_t)p[1] * (1.f / 128.f);
+            break;
+        case SampleFormat::CU8:
+            re = (p[0] - 127.5f) * (1.f / 127.5f);
+            im = (p[1] - 127.5f) * (1.f / 127.5f);
+            break;
+        default: break;
+    }
+    if (swapIQ) {
+        const float t = re;
+        re = im;
+        im = t;
+    }
+}
+
+// Decodes FFT j's samples, then applies the window. valid[j] is the part
+// [x, y) of FFT j inside the file; the rest is zero. With valid null, every
+// sample is used.
 __global__ void decodeWindowKernel(const uint8_t* raw, const int2* valid, const float* win, int m, int log2n, int fmt,
                                    int bps, bool bigEndian, bool swapIQ, cufftComplex* out) {
     const int64_t idx = (int64_t)blockIdx.x * blockDim.x + threadIdx.x;
@@ -208,42 +246,7 @@ __global__ void decodeWindowKernel(const uint8_t* raw, const int2* valid, const 
     const int j = (int)(idx >> log2n), i = (int)(idx & (n - 1));
     const int2 v = valid ? valid[j] : make_int2(0, n);
     float re = 0.f, im = 0.f;
-    if (i >= v.x && i < v.y) {
-        const uint8_t* p = raw + idx * bps;
-        const int half = bps / 2;
-        switch ((SampleFormat)fmt) {
-            case SampleFormat::CF32:
-                re = loadSample<float>(p, bigEndian);
-                im = loadSample<float>(p + half, bigEndian);
-                break;
-            case SampleFormat::CF64:
-                re = (float)loadSample<double>(p, bigEndian);
-                im = (float)loadSample<double>(p + half, bigEndian);
-                break;
-            case SampleFormat::CI16:
-                re = loadSample<int16_t>(p, bigEndian) * (1.f / 32768.f);
-                im = loadSample<int16_t>(p + half, bigEndian) * (1.f / 32768.f);
-                break;
-            case SampleFormat::CI32:
-                re = (float)(loadSample<int32_t>(p, bigEndian) * (1.0 / 2147483648.0));
-                im = (float)(loadSample<int32_t>(p + half, bigEndian) * (1.0 / 2147483648.0));
-                break;
-            case SampleFormat::CI8:
-                re = (int8_t)p[0] * (1.f / 128.f);
-                im = (int8_t)p[1] * (1.f / 128.f);
-                break;
-            case SampleFormat::CU8:
-                re = (p[0] - 127.5f) * (1.f / 127.5f);
-                im = (p[1] - 127.5f) * (1.f / 127.5f);
-                break;
-            default: break;
-        }
-        if (swapIQ) {
-            const float t = re;
-            re = im;
-            im = t;
-        }
-    }
+    if (i >= v.x && i < v.y) decodeOne(raw + idx * bps, fmt, bps, bigEndian, swapIQ, re, im);
     const float w = win[i];
     out[idx] = make_cuComplex(re * w, im * w);
 }
@@ -561,5 +564,124 @@ GpuStatus gpuBackendLiveRun(GpuLiveImpl* L, const uint8_t* raw, const FormatPara
     }
     CUDA_TRY(cudaMemcpyAsync(pw, L->dPw, (size_t)n * sizeof(float), cudaMemcpyDeviceToHost, L->stream));
     CUDA_TRY(cudaStreamSynchronize(L->stream));
+    return GpuStatus::Ok;
+}
+
+// ---------------------------------------------------------------------------
+// Channel filter (dense demodulator)
+// ---------------------------------------------------------------------------
+// Chunks of output samples whose input fits in kChunkSamples. Per chunk: the
+// raw bytes inside the file go up straight from the mapping, then decode and
+// mix, then a direct FIR that computes only the kept (decimated) outputs.
+namespace {
+constexpr int kMaxSharedTaps = 12000;  // 48 KB of shared memory
+
+// x[k] = sample in0 + k, zero outside [lo, hi), mixed down by frac cycles per
+// sample with the phase taken from the absolute index (as the CPU does).
+__global__ void decodeMixKernel(const uint8_t* raw, int64_t lo, int64_t hi, int64_t len, int fmt, int bps, bool bigEndian,
+                                bool swapIQ, int64_t in0, double frac, cufftComplex* x) {
+    const int64_t k = (int64_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (k >= len) return;
+    float re = 0.f, im = 0.f;
+    if (k >= lo && k < hi) decodeOne(raw + k * bps, fmt, bps, bigEndian, swapIQ, re, im);
+    if (frac != 0.0) {
+        double cyc = frac * (double)(in0 + k);
+        cyc -= floor(cyc);
+        float sn, cs;
+        sincospif((float)(-2.0 * cyc), &sn, &cs);
+        const float r = re * cs - im * sn;
+        im = re * sn + im * cs;
+        re = r;
+    }
+    x[k] = make_cuComplex(re, im);
+}
+
+// y[j] = sum over m of h[m] * x[j * D + m], j in [0, J). The taps go to
+// shared memory when they fit.
+__global__ void firKernel(const cufftComplex* x, const float* h, int N, int D, int64_t J, bool sharedTaps, cufftComplex* y) {
+    extern __shared__ float sh[];
+    const float* hp = h;
+    if (sharedTaps) {
+        for (int m = threadIdx.x; m < N; m += blockDim.x) sh[m] = h[m];
+        __syncthreads();
+        hp = sh;
+    }
+    const int64_t j = (int64_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (j >= J) return;
+    const cufftComplex* xp = x + j * D;
+    float ar = 0.f, ai = 0.f;
+    for (int m = 0; m < N; ++m) {
+        const cufftComplex v = xp[m];
+        ar += hp[m] * v.x;
+        ai += hp[m] * v.y;
+    }
+    y[j] = make_cuComplex(ar, ai);
+}
+
+struct ChanContext {
+    int device = -1;
+    cudaStream_t stream = nullptr;
+    uint8_t* dRaw = nullptr;
+    cufftComplex *dX = nullptr, *dY = nullptr;
+    float* dH = nullptr;
+    size_t capRaw = 0, capX = 0, capY = 0, capH = 0;
+
+    ~ChanContext() {
+        for (void* d : {(void*)dRaw, (void*)dX, (void*)dY, (void*)dH}) cudaFree(d);
+        if (stream) cudaStreamDestroy(stream);
+        cudaGetLastError();
+    }
+};
+thread_local ChanContext t_chan;
+}  // namespace
+
+GpuStatus gpuBackendChannelize(const ChanJob& j, float* y, const std::function<bool()>& cancelled, std::string& err,
+                               bool& oom) {
+    ChanContext& c = t_chan;
+    const int dev = gpuInfo().device;
+    CUDA_TRY(cudaSetDevice(dev));
+    if (c.device != dev) {
+        if (c.stream) cudaStreamDestroy(c.stream);
+        c.stream = nullptr;
+        CUDA_TRY(cudaStreamCreateWithFlags(&c.stream, cudaStreamNonBlocking));
+        c.device = dev;
+    }
+    const int N = j.taps, D = j.decim, bps = formatBytesPerSample(j.fp.fmt);
+    if (N < 1 || D < 1 || j.outLen < 1) {
+        err = "bad channel filter job";
+        return GpuStatus::Failed;
+    }
+    const int64_t fileSamples = j.file->numSamples(j.fp);
+    const uint8_t* base = j.file->data() + j.fp.headerBytes;
+    // Outputs per chunk, so that its input ((J - 1) * D + N samples) fits.
+    const int64_t chunkOut = std::min<int64_t>(j.outLen, std::max<int64_t>(1, (kChunkSamples - N) / D + 1));
+    const int64_t chunkIn = (chunkOut - 1) * D + N;
+    CUDA_TRY(growDevice(c.dRaw, c.capRaw, (size_t)chunkIn * bps));
+    CUDA_TRY(growDevice(c.dX, c.capX, (size_t)chunkIn));
+    CUDA_TRY(growDevice(c.dY, c.capY, (size_t)chunkOut));
+    CUDA_TRY(growDevice(c.dH, c.capH, (size_t)N));
+    CUDA_TRY(cudaMemcpyAsync(c.dH, j.h, (size_t)N * sizeof(float), cudaMemcpyHostToDevice, c.stream));
+    const bool sharedTaps = N <= kMaxSharedTaps;
+
+    for (int64_t j0 = 0; j0 < j.outLen; j0 += chunkOut) {
+        if (cancelled()) {
+            cudaStreamSynchronize(c.stream);
+            return GpuStatus::Cancelled;
+        }
+        const int64_t J = std::min(chunkOut, j.outLen - j0);
+        const int64_t in0 = j.inStart + j0 * D, len = (J - 1) * D + N;
+        const int64_t lo = std::max<int64_t>(0, -in0), hi = std::max(lo, std::min<int64_t>(len, fileSamples - in0));
+        if (hi > lo)
+            CUDA_TRY(cudaMemcpyAsync(c.dRaw + lo * bps, base + (in0 + lo) * bps, (size_t)(hi - lo) * bps,
+                                     cudaMemcpyHostToDevice, c.stream));
+        decodeMixKernel<<<blocksFor(len), 256, 0, c.stream>>>(c.dRaw, lo, hi, len, (int)j.fp.fmt, bps, j.fp.bigEndian,
+                                                             j.fp.swapIQ, in0, j.frac, c.dX);
+        CUDA_TRY(cudaGetLastError());
+        firKernel<<<blocksFor(J), 256, sharedTaps ? (size_t)N * sizeof(float) : 0, c.stream>>>(c.dX, c.dH, N, D, J,
+                                                                                               sharedTaps, c.dY);
+        CUDA_TRY(cudaGetLastError());
+        CUDA_TRY(cudaMemcpyAsync(y + 2 * j0, c.dY, (size_t)J * sizeof(cufftComplex), cudaMemcpyDeviceToHost, c.stream));
+    }
+    CUDA_TRY(cudaStreamSynchronize(c.stream));
     return GpuStatus::Ok;
 }

@@ -1,7 +1,7 @@
 # Plan: CUDA GPU acceleration (issue #3)
 
 Branch: `3-cuda-gpu`, from `main` at `29dca41` (after the logging merge, PR #15).
-Status: **steps 0–2, 4–6 and 8 implemented** (2026-10-19). The CPU-only build is tested on
+Status: **steps 0–2 and 4–8 implemented** (2026-10-19). The CPU-only build is tested on
 macOS. The CUDA build is compiled and tested in CUDA 12.6 and 12.8 containers with no GPU.
 **The GPU code has not run on a GPU yet** (see §9).
 
@@ -422,3 +422,28 @@ tooltip has the fallback note.
 options, `--gpu`, the checkbox, the fallback, `gpu_check`). The options list, the live
 *Avg* text (100 MS/s on the GPU), the waterfall budget (2 G on the GPU), the status bar row
 and the source table are updated.
+
+### Step 7: channel filter on the GPU
+
+Done after step 6, without a GPU measurement first: the CPU baseline already shows the
+filter as the slowest job (660 ms for 8191 taps on 8 MS).
+
+| File | Change |
+|---|---|
+| `src/gpu.h` | `ChanJob` (mix, FIR, decimate; shared by the CPU and the GPU), `gpuChannelize`, `gpuChannelUsable`. |
+| `src/gpu_common.cpp` | A third fallback path, "channel filter". |
+| `src/gpu_cuda.cu` | `decodeOne` (the decode rules, now shared by all kernels), `decodeMixKernel` (decode, zero outside the file, mix with the phase from the absolute index: `frac * index` in double, reduced to [0, 1), then `sincospif` in float), `firKernel` (direct FIR, only the kept outputs, taps in shared memory up to 12000), `gpuBackendChannelize` (chunks of up to 8 M input samples; the raw bytes go up straight from the mapping). |
+| `src/engine.h`, `src/engine.cpp` | `channelizeCpu`: the old mix + FIR code, moved unchanged. `processRange` tries the GPU in dense mode when the job has at least 2·10⁷ multiply-adds (`kGpuMinChanMacs`, a few ms of CPU work); sparse mode (short blocks per pixel) stays on the CPU. The atan2 / unwrap / smoothing stays on the CPU. |
+| `tools/gpu_check.cpp` | GPU against CPU (1e-4 of the peak): 255 to 13001 taps, decimation 1 to 10, no mix, before and after the file, 3 chunks, cu8 / ci16 / cf32; cancel; a forced failure turns off only this path. `--bench` adds the GPU column. |
+
+Differences from the plan: no overlap-save FFT convolution for many taps. The direct
+kernel does N multiply-adds per kept output with the taps in shared memory; the benchmark
+on the GPU will show if FFT convolution is needed.
+
+Checks: the CPU demodulator is **bit-identical** to before (checksums of 18 `computeDemod`
+results: cf32 / ci16 / cu8, dense and sparse, decimation 1, 8191 taps, mix on and off,
+views before and past the file). macOS and the CUDA 12.8 container: no warnings, all
+self-tests pass, the GPU comparisons are skipped there.
+
+**Still to do on the GPU computer:** `gpu_check` and the channel filter rows of
+`gpu_check --bench`.

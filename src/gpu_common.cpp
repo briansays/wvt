@@ -31,7 +31,7 @@ struct PathState {
         note.clear();
     }
 };
-PathState g_spec{"waterfall"}, g_live{"live spectrum"};
+PathState g_spec{"waterfall"}, g_live{"live spectrum"}, g_chan{"channel filter"};
 
 bool forcedFail(std::string& err) {
     const char* f = getenv("WVT_GPU_FORCE_FAIL");
@@ -82,6 +82,7 @@ bool gpuInit(GpuMode mode, int device, std::string& err) {
     g_enabled = false;
     g_spec.reset();
     g_live.reset();
+    g_chan.reset();
     if (mode == GpuMode::Off) {
         // Off does not touch the driver at all.
         g_info.built = gpuBackendBuilt();
@@ -128,9 +129,20 @@ GpuStatus gpuSpectrogram(const SpecJob& job, float* lin, const std::function<boo
 std::string gpuFallbackNotes() {
     std::lock_guard<std::mutex> lk(g_noteMutex);
     std::string s;
-    for (const PathState* p : {&g_spec, &g_live})
+    for (const PathState* p : {&g_spec, &g_live, &g_chan})
         if (!p->note.empty()) s += (s.empty() ? "" : "\n") + p->note;
     return s;
+}
+
+bool gpuChannelUsable() { return gpuEnabled() && !g_chan.broken; }
+
+GpuStatus gpuChannelize(const ChanJob& job, float* y, const std::function<bool()>& cancelled) {
+    if (!gpuChannelUsable()) return GpuStatus::Unavailable;
+    std::string err;
+    bool oom = false;
+    const GpuStatus st = forcedFail(err) ? GpuStatus::Failed : gpuBackendChannelize(job, y, cancelled, err, oom);
+    if (st == GpuStatus::Failed) noteFailure(g_chan, err, oom);
+    return st;
 }
 
 bool gpuLiveUsable() { return gpuEnabled() && !g_live.broken; }

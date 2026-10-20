@@ -234,6 +234,9 @@ struct ChanDesign {
     int decim = 1, taps = 0;
 };
 ChanDesign chanDesign(const DemodReq& r);
+// The channel filter (mix + FIR + decimate) on the CPU threads, or inline
+// when threaded is false. False when cancelled.
+bool channelizeCpu(const ChanJob& job, cf* y, const CancelFn& cancelled, bool threaded = true);
 
 // ---------------------------------------------------------------------------
 // Time segment of a file (issue #16)
