@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cfloat>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -194,4 +195,64 @@ void SetupStyle(float scale) {
     ps.FitPadding = ImVec2(0, 0.08f);
     ps.LineWeight = 1.2f;
     ps.Colors[ImPlotCol_PlotBg] = ImVec4(0.05f, 0.05f, 0.06f, 1.f);
+}
+
+void tooltipAlways(const char* text) {
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("%s", text);
+}
+
+bool beginForm(const char* id, float labelEm) {
+    if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingStretchProp)) return false;
+    ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * labelEm);
+    ImGui::TableSetupColumn("field", ImGuiTableColumnFlags_WidthStretch);
+    return true;
+}
+
+void row(const char* label, const char* tip) {
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(0);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(label);
+    if (tip) tooltipAlways(tip);
+    ImGui::TableSetColumnIndex(1);
+    ImGui::SetNextItemWidth(-FLT_MIN);
+}
+
+bool redButton(const char* label, const ImVec2& size) {
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.55f, 0.12f, 0.12f, 1.f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.75f, 0.18f, 0.18f, 1.f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.85f, 0.22f, 0.22f, 1.f));
+    bool r = ImGui::Button(label, size);
+    ImGui::PopStyleColor(3);
+    return r;
+}
+
+bool settingsButton(const char* popupId, const char* tip) {
+    // The font has no gear glyph, so the gear is drawn: a ring with 8 teeth.
+    const float h = ImGui::GetFrameHeight();
+    ImGui::PushID(popupId);
+    const bool clicked = ImGui::Button("##gear", ImVec2(h, h));
+    ImGui::PopID();
+    if (tip) tooltipAlways(tip);
+    const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+    const ImVec2 c((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f);
+    const float r = h * 0.24f;
+    const ImU32 col = ImGui::GetColorU32(ImGuiCol_Text);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    for (int i = 0; i < 8; ++i) {
+        const float ang = i * 3.14159265f / 4, ca = std::cos(ang), sa = std::sin(ang);
+        dl->AddLine(ImVec2(c.x + ca * r, c.y + sa * r), ImVec2(c.x + ca * r * 1.45f, c.y + sa * r * 1.45f), col, h * 0.11f);
+    }
+    dl->AddCircle(c, r, col, 16, h * 0.09f);
+    dl->AddCircleFilled(c, r * 0.35f, col, 12);
+    if (clicked) ImGui::OpenPopup(popupId);
+    return clicked;
+}
+
+void groupSeparator() {
+    ImGui::SameLine();
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float h = ImGui::GetFrameHeight();
+    ImGui::GetWindowDrawList()->AddLine(ImVec2(p.x, p.y + 3), ImVec2(p.x, p.y + h - 3), ImGui::GetColorU32(ImGuiCol_Separator));
+    ImGui::Dummy(ImVec2(1, h));
 }

@@ -22,27 +22,8 @@ double nowSec() {
     return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
-void tooltipAlways(const char* text) {
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("%s", text);
-}
 
-// Starts a "label | field" row in a two-column table; the field fills the column.
-void row(const char* label, const char* tip = nullptr) {
-    ImGui::TableNextRow();
-    ImGui::TableSetColumnIndex(0);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(label);
-    if (tip) tooltipAlways(tip);
-    ImGui::TableSetColumnIndex(1);
-    ImGui::SetNextItemWidth(-FLT_MIN);
-}
 
-bool beginForm(const char* id) {
-    if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingStretchProp)) return false;
-    ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 6.5f);
-    ImGui::TableSetupColumn("field", ImGuiTableColumnFlags_WidthStretch);
-    return true;
-}
 
 std::string baseName(const std::string& p) { return p.substr(p.find_last_of('/') + 1); }
 }  // namespace
@@ -200,7 +181,7 @@ void App::drawExportWindow() {
     if (ImGui::Button("Select...")) exSelecting_ = true;
     tooltipAlways("Drag a box on the waterfall (Esc cancels)");
 
-    if (beginForm("##exform")) {
+    if (beginForm("##exform", 6.5f)) {
         // --- time ---
         const char* tTip = "Time range in seconds of file time, inside the loaded segment.";
         if (exInSamples_) {

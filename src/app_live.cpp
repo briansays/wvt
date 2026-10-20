@@ -38,10 +38,6 @@ const char* driverName(const std::string& d) {
     return "Simulator";
 }
 
-// Tooltip that also shows over a disabled item.
-void tooltipAlways(const char* text) {
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("%s", text);
-}
 }  // namespace
 
 // ---------------------------------------------------------------------------

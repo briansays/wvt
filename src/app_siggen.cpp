@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "app.h"
+#include "ui_util.h"
 #include "log.h"
 #include "platform_x11.h"
 
@@ -21,27 +22,8 @@ const ImVec4 kColQ(1.00f, 0.55f, 0.25f, 1.f);
 const SampleFormat kFileFmts[] = {SampleFormat::CF32, SampleFormat::CI16, SampleFormat::CI8, SampleFormat::CU8};
 const char* kFileFmtNames[] = {"cf32 (float, exact)", "ci16", "ci8", "cu8 (RTL-SDR style)"};
 
-void tooltipAlways(const char* text) {
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("%s", text);
-}
 
-// Starts a "label | field" row in a two-column table; the field fills the column.
-void row(const char* label, const char* tip = nullptr) {
-    ImGui::TableNextRow();
-    ImGui::TableSetColumnIndex(0);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(label);
-    if (tip) tooltipAlways(tip);
-    ImGui::TableSetColumnIndex(1);
-    ImGui::SetNextItemWidth(-FLT_MIN);
-}
 
-bool beginForm(const char* id) {
-    if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingStretchProp)) return false;
-    ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 8.5f);
-    ImGui::TableSetupColumn("field", ImGuiTableColumnFlags_WidthStretch);
-    return true;
-}
 
 std::string staggerText(const std::vector<double>& v) {
     std::string s;
@@ -72,14 +54,6 @@ bool parseStagger(const char* text, std::vector<double>& out) {
 }
 
 // Red-tinted button for transmit actions.
-bool redButton(const char* label, const ImVec2& size = ImVec2(0, 0)) {
-    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.55f, 0.12f, 0.12f, 1.f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.75f, 0.18f, 0.18f, 1.f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.85f, 0.22f, 0.22f, 1.f));
-    bool r = ImGui::Button(label, size);
-    ImGui::PopStyleColor(3);
-    return r;
-}
 
 bool haveTx() {
     for (const auto& d : sdrDrivers())
@@ -208,7 +182,7 @@ void App::drawSigGenWindow() {
 
     // --- output selector ---
     const bool fileActive = sgFileSt_.active;
-    if (beginForm("##sgout")) {
+    if (beginForm("##sgout", 8.5f)) {
         row("Output");
         const char* outs[] = {"File (SigMF / raw)", "Loopback (live view)", "USRP transmit"};
         ImGui::BeginDisabled(txOn || fileActive);
@@ -268,7 +242,7 @@ void App::drawSigGenWaveform() {
     const bool fileActive = sgFileSt_.active;
     WaveformParams& p = sg_;
 
-    if (ImGui::CollapsingHeader("Carrier", ImGuiTreeNodeFlags_DefaultOpen) && beginForm("##sgcarrier")) {
+    if (ImGui::CollapsingHeader("Carrier", ImGuiTreeNodeFlags_DefaultOpen) && beginForm("##sgcarrier", 8.5f)) {
         row("Sample rate");
         double rate = p.rate;
         const bool lockRate = txOn || fileActive || (sigGenLoopback() && liveRecording());
@@ -317,7 +291,7 @@ void App::drawSigGenWaveform() {
     }
 
     if (p.mode == GenMode::CW) {
-        if (ImGui::CollapsingHeader("CW", ImGuiTreeNodeFlags_DefaultOpen) && beginForm("##sgcw")) {
+        if (ImGui::CollapsingHeader("CW", ImGuiTreeNodeFlags_DefaultOpen) && beginForm("##sgcw", 8.5f)) {
             row("Drift");
             InputSI("##sgdrift", &p.driftHzPerSec, "Hz/s", -FLT_MIN);
             tooltipAlways("Linear frequency drift, e.g. to test a tracking loop. 0 = steady tone.");
@@ -326,7 +300,7 @@ void App::drawSigGenWaveform() {
     } else if (p.mode == GenMode::Playback) {
         drawSigGenPlayback();
     } else {
-        if (ImGui::CollapsingHeader("Pulse", ImGuiTreeNodeFlags_DefaultOpen) && beginForm("##sgpulse")) {
+        if (ImGui::CollapsingHeader("Pulse", ImGuiTreeNodeFlags_DefaultOpen) && beginForm("##sgpulse", 8.5f)) {
             row("PRI / PRF", "Pulse repetition interval, or its inverse, the repetition frequency");
             const float half = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemInnerSpacing.x) / 2;
             InputSI("##sgpri", &p.pri, "s", half);
@@ -424,7 +398,7 @@ void App::drawSigGenWaveform() {
         }
     }
 
-    if (ImGui::CollapsingHeader("Impairments") && beginForm("##sgimp")) {
+    if (ImGui::CollapsingHeader("Impairments") && beginForm("##sgimp", 8.5f)) {
         row("Noise");
         ImGui::Checkbox("##sgnoise", &p.noise);
         ImGui::SameLine();
@@ -499,7 +473,7 @@ void App::setPlaybackFile(const std::string& path, bool fromViewer) {
 
 void App::drawSigGenPlayback() {
     WaveformParams& p = sg_;
-    if (!ImGui::CollapsingHeader("Playback", ImGuiTreeNodeFlags_DefaultOpen) || !beginForm("##sgplay")) return;
+    if (!ImGui::CollapsingHeader("Playback", ImGuiTreeNodeFlags_DefaultOpen) || !beginForm("##sgplay", 8.5f)) return;
     const ImGuiStyle& st = ImGui::GetStyle();
     const float half = (ImGui::GetContentRegionAvail().x - st.ItemInnerSpacing.x) / 2;
 
@@ -651,7 +625,7 @@ void App::drawSigGenFile() {
     const bool active = sgFileSt_.active;
     FileGenConfig& c = sgFileCfg_;
     ImGui::BeginDisabled(active);
-    if (beginForm("##sgfile")) {
+    if (beginForm("##sgfile", 8.5f)) {
         row("Save to");
         ImGui::InputText("##sgprefix", sgPrefix_, sizeof sgPrefix_);
         tooltipAlways("Path prefix. Date, time, frequency and rate are appended, and missing folders are created.");
@@ -786,7 +760,7 @@ void App::drawSigGenTx() {
     }
     const bool txOn = tx_ && tx_->running();
 
-    if (beginForm("##sgtx")) {
+    if (beginForm("##sgtx", 8.5f)) {
         ImGui::BeginDisabled(txOn);
         row("Device args");
         ImGui::InputText("##txargs", txArgs_, sizeof txArgs_);
