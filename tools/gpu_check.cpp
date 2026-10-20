@@ -309,6 +309,94 @@ void testSpectrogram(const std::string& dir) {
     }
 }
 
+// --- Live spectrum: GPU against CPU -------------------------------------------
+// The CPU row math of LiveEngine::spectrumLoop: summed fftshifted powers.
+void liveCpu(const uint8_t* raw, const FormatParams& fp, int n, int frames, const float* win, float* pw) {
+    std::vector<cf> buf((size_t)n * frames), seg(n);
+    decodeSamples(fp, raw, (int64_t)n * frames, buf.data());
+    auto fft = getFFT(n);
+    std::fill(pw, pw + n, 0.f);
+    for (int a = 0; a < frames; ++a) {
+        const cf* s = &buf[(size_t)a * n];
+        for (int i = 0; i < n; ++i) seg[i] = s[i] * win[i];
+        fft->forward(seg.data());
+        for (int i = 0; i < n; ++i) pw[i] += std::norm(seg[(i + n / 2) & (n - 1)]);
+    }
+}
+
+// Raw samples of makeSignal in fmt (little-endian unless bigEndian).
+std::vector<uint8_t> rawSignal(int64_t count, SampleFormat fmt, bool bigEndian = false) {
+    std::vector<cf> x(count);
+    makeSignal(0, count, 20e6, x.data());
+    const int bps = formatBytesPerSample(fmt), half = bps / 2;
+    std::vector<uint8_t> raw((size_t)count * bps);
+    encodeSamples(fmt, x.data(), count, raw.data());
+    if (bigEndian)
+        for (int64_t v = 0; v < count * 2; ++v) std::reverse(&raw[v * half], &raw[v * half] + half);
+    return raw;
+}
+
+void testLive() {
+    printf("\nGPU live spectrum\n");
+    GpuLiveSpectrum live;
+    if (!gpuLiveUsable()) {
+        std::vector<uint8_t> raw(4 * 1024);
+        std::vector<float> win(1024, 1.f), pw(1024);
+        check(live.run(raw.data(), FormatParams{}, 1024, 1, win.data(), pw.data()) == GpuStatus::Unavailable,
+              "no GPU: the live spectrum is unavailable");
+        printf("  GPU against CPU comparison skipped: %s\n", gpuInfo().reason.c_str());
+        return;
+    }
+    struct Case {
+        const char* name;
+        SampleFormat fmt;
+        bool bigEndian, swapIQ;
+        int n, frames;
+    };
+    const Case cases[] = {
+        {"cu8 (RTL-SDR)", SampleFormat::CU8, false, false, 2048, 39},
+        {"ci16 (USRP), 20 MS/s", SampleFormat::CI16, false, false, 2048, 325},
+        {"ci16, 61.44 MS/s", SampleFormat::CI16, false, false, 2048, 1000},
+        {"ci16, one frame", SampleFormat::CI16, false, false, 1024, 1},
+        {"cf32 big-endian, swap IQ", SampleFormat::CF32, true, true, 4096, 50},
+        {"ci16, N 65536, 2 chunks", SampleFormat::CI16, false, false, 65536, 200},
+    };
+    for (const auto& c : cases) {
+        FormatParams fp;
+        fp.fmt = c.fmt;
+        fp.bigEndian = c.bigEndian;
+        fp.swapIQ = c.swapIQ;
+        const auto raw = rawSignal((int64_t)c.n * c.frames, c.fmt, c.bigEndian);
+        const auto win = makeWindow(WindowType::BlackmanHarris, c.n);
+        std::vector<float> cpu(c.n), gpu(c.n, -1.f);
+        liveCpu(raw.data(), fp, c.n, c.frames, win.data(), cpu.data());
+        const GpuStatus st = live.run(raw.data(), fp, c.n, c.frames, win.data(), gpu.data());
+        if (st != GpuStatus::Ok) {
+            check(false, std::string(c.name) + ": GPU status " + std::to_string((int)st));
+            continue;
+        }
+        const Diff d = compareLin(cpu, gpu);
+        char b[200];
+        snprintf(b, sizeof b, "%s (N %d, %d frames): max %.4f dB on %lld strong bins", c.name, c.n, c.frames, d.strongDb,
+                 (long long)d.compared);
+        check(d.strongDb <= 0.05 && d.zeroMismatch == 0, b);
+    }
+    // A forced failure turns the live path off until gpuInit.
+    const auto raw = rawSignal(2048, SampleFormat::CI16);
+    const auto win = makeWindow(WindowType::Hann, 2048);
+    std::vector<float> pw(2048);
+    FormatParams fp;
+    fp.fmt = SampleFormat::CI16;
+    setenv("WVT_GPU_FORCE_FAIL", "1", 1);
+    const GpuStatus st = live.run(raw.data(), fp, 2048, 1, win.data(), pw.data());
+    unsetenv("WVT_GPU_FORCE_FAIL");
+    check(st == GpuStatus::Failed && !gpuLiveUsable() && gpuSpectrogramUsable(),
+          "a live failure turns off only the live path");
+    std::string err;
+    gpuInit(GpuMode::Auto, -1, err);
+    check(gpuLiveUsable(), "gpuInit turns the live path on again");
+}
+
 // --- File waterfall ---------------------------------------------------------
 // Zoom 1 = the span where one FFT per row at 50 % overlap covers the view.
 void benchWaterfall(const Source& src, int64_t nSamples) {
@@ -348,7 +436,10 @@ void benchWaterfall(const Source& src, int64_t nSamples) {
 // auto averaging over every new sample (no 20 MS/s cap).
 void benchLive(const std::vector<uint8_t>& raw) {
     printf("\nlive spectrum row (N 2048, 30 rows/s, every sample analyzed, ci16)\n");
-    printf("  %-11s %-6s %-11s %s\n", "rate", "FFTs", "time/row", "CPU share of one core");
+    const bool gpuOk = gpuLiveUsable();
+    printf("  %-11s %-6s %-11s %-23s%s\n", "rate", "FFTs", "time/row", "CPU share of one core", gpuOk ? "GPU time/row" : "");
+    GpuLiveSpectrum gpu;
+    std::vector<float> gpw(2048);
     const int n = 2048;
     FormatParams fp;
     fp.fmt = SampleFormat::CI16;
@@ -371,7 +462,14 @@ void benchLive(const std::vector<uint8_t>& raw) {
                 for (int i = 0; i < n; ++i) pw[i] += std::norm(seg[(i + n / 2) & (n - 1)]);
             }
         });
-        printf("  %-11s %-6d %8.2f ms  %5.0f %%\n", fmtSI(rate, "S/s", 4).c_str(), frames, ms, ms * 30 / 10);
+        printf("  %-11s %-6d %8.2f ms  %5.0f %%                ", fmtSI(rate, "S/s", 4).c_str(), frames, ms, ms * 30 / 10);
+        if (gpuOk) {
+            GpuStatus st = GpuStatus::Ok;
+            const double gms = timeIt(5, [&] { st = gpu.run(raw.data(), fp, n, frames, win.data(), gpw.data()); });
+            if (st != GpuStatus::Ok) check(false, "GPU live row at " + fmtSI(rate, "S/s", 4));
+            printf("%8.2f ms", gms);
+        }
+        printf("\n");
     }
 }
 
@@ -446,6 +544,7 @@ int main(int argc, char** argv) {
 
     testSetup();
     testSpectrogram(dir);
+    testLive();
     const double fs = 20e6;
     if (bench) {
         const int64_t n = (int64_t)samples;

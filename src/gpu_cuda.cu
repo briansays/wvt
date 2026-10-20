@@ -196,14 +196,15 @@ __device__ inline T loadSample(const uint8_t* p, bool swap) {
 }
 
 // Same rules as decodeSamples() in iq_file.cpp, then the window. valid[j]
-// is the part [x, y) of FFT j inside the file; the rest is zero.
+// is the part [x, y) of FFT j inside the file; the rest is zero. With valid
+// null, every sample is used.
 __global__ void decodeWindowKernel(const uint8_t* raw, const int2* valid, const float* win, int m, int log2n, int fmt,
                                    int bps, bool bigEndian, bool swapIQ, cufftComplex* out) {
     const int64_t idx = (int64_t)blockIdx.x * blockDim.x + threadIdx.x;
     const int n = 1 << log2n;
     if (idx >= (int64_t)m * n) return;
     const int j = (int)(idx >> log2n), i = (int)(idx & (n - 1));
-    const int2 v = valid[j];
+    const int2 v = valid ? valid[j] : make_int2(0, n);
     float re = 0.f, im = 0.f;
     if (i >= v.x && i < v.y) {
         const uint8_t* p = raw + idx * bps;
@@ -277,6 +278,63 @@ __global__ void poolKernel(const float* acc, int rowsHere, int n, int cols, floa
 
 inline unsigned blocksFor(int64_t threads) { return (unsigned)((threads + 255) / 256); }
 
+// A few batched C2C plans on one stream, least recently used replaced first.
+struct PlanCache {
+    struct Plan {
+        int n = 0, batch = 0;
+        cufftHandle h = 0;
+        uint64_t used = 0;
+    };
+    Plan plans[4];
+    uint64_t tick = 0;
+
+    void release() {
+        for (auto& p : plans)
+            if (p.batch) cufftDestroy(p.h);
+        *this = PlanCache{};
+    }
+    GpuStatus get(int n, int batch, cudaStream_t stream, cufftHandle& out, std::string& err, bool& oom) {
+        ++tick;
+        for (auto& p : plans)
+            if (p.batch && p.n == n && p.batch == batch) {
+                p.used = tick;
+                out = p.h;
+                return GpuStatus::Ok;
+            }
+        Plan* victim = &plans[0];
+        for (auto& p : plans)
+            if (!p.batch || p.used < victim->used) victim = &p;
+        if (victim->batch) {
+            cufftDestroy(victim->h);
+            *victim = Plan{};
+        }
+        cufftHandle h;
+        CUFFT_TRY(cufftPlan1d(&h, n, CUFFT_C2C, batch));
+        if (const cufftResult r = cufftSetStream(h, stream); r != CUFFT_SUCCESS) {
+            cufftDestroy(h);
+            CUFFT_TRY(r);
+        }
+        *victim = Plan{n, batch, h, tick};
+        out = h;
+        return GpuStatus::Ok;
+    }
+};
+
+// The smallest power of two >= count, at most cap (itself a power of two),
+// so few distinct plans are made.
+int batchFor(int64_t count, int64_t cap) {
+    int64_t b = 1;
+    while (b < count) b <<= 1;
+    return (int)std::min(b, cap);
+}
+
+// log2(n), or -1 when n is not a power of two.
+int log2Of(int n) {
+    int k = 0;
+    while ((1 << k) < n) ++k;
+    return n > 0 && (1 << k) == n ? k : -1;
+}
+
 // Per-thread state: the stream, the buffers (kept between calls, grown as
 // needed) and a few cuFFT plans. Each worker thread gets its own.
 struct SpecState {
@@ -291,20 +349,13 @@ struct SpecState {
     int2* hValid[2] = {nullptr, nullptr};
     size_t capHRaw = 0, capHValid = 0;
     cudaEvent_t slotFree[2] = {nullptr, nullptr};
-    struct Plan {
-        int n = 0, batch = 0;
-        cufftHandle h = 0;
-        uint64_t used = 0;
-    };
-    Plan plans[4];
-    uint64_t tick = 0;
+    PlanCache plans;
 };
 struct SpecContext : SpecState {
     ~SpecContext() { release(); }
     void release() {
         // Errors are ignored: at exit the runtime may already be gone.
-        for (auto& p : plans)
-            if (p.batch) cufftDestroy(p.h);
+        plans.release();
         for (void* d : {(void*)dX, (void*)dRaw, (void*)dValid, (void*)dWin, (void*)dAcc, (void*)dLin}) cudaFree(d);
         for (int k = 0; k < 2; ++k) {
             cudaFreeHost(hRaw[k]);
@@ -343,33 +394,6 @@ cudaError_t growHost(T* (&p)[2], size_t& cap, size_t count) {
     return cudaSuccess;
 }
 
-// A cached batched C2C plan for size n and `batch` transforms.
-GpuStatus getPlan(SpecContext& c, int n, int batch, cufftHandle& out, std::string& err, bool& oom) {
-    ++c.tick;
-    for (auto& p : c.plans)
-        if (p.batch && p.n == n && p.batch == batch) {
-            p.used = c.tick;
-            out = p.h;
-            return GpuStatus::Ok;
-        }
-    auto* victim = &c.plans[0];
-    for (auto& p : c.plans)
-        if (!p.batch || p.used < victim->used) victim = &p;
-    if (victim->batch) {
-        cufftDestroy(victim->h);
-        *victim = SpecState::Plan{};
-    }
-    cufftHandle h;
-    CUFFT_TRY(cufftPlan1d(&h, n, CUFFT_C2C, batch));
-    if (const cufftResult r = cufftSetStream(h, c.stream); r != CUFFT_SUCCESS) {
-        cufftDestroy(h);
-        CUFFT_TRY(r);
-    }
-    *victim = SpecState::Plan{n, batch, h, c.tick};
-    out = h;
-    return GpuStatus::Ok;
-}
-
 // Copies FFTs [f0, f0 + m) (global index row * avg + a) into dst, on the CPU
 // threads (reading the mapped file is the slow part). Each FFT takes
 // n * bps bytes; valid[k] is its part inside the file.
@@ -406,12 +430,10 @@ GpuStatus gpuBackendSpectrogram(const SpecJob& j, float* lin, const std::functio
         CUDA_TRY(cudaSetDevice(dev));
     }
 
-    const int n = j.n, bps = formatBytesPerSample(j.fp.fmt);
-    int log2n = 0;
-    while ((1 << log2n) < n) ++log2n;
+    const int n = j.n, bps = formatBytesPerSample(j.fp.fmt), log2n = log2Of(n);
     const int64_t totalFfts = (int64_t)j.rows * j.avg;
     const int64_t fileSamples = j.file->numSamples(j.fp);
-    if (j.rows <= 0 || j.cols <= 0 || n <= 0 || (1 << log2n) != n) {
+    if (j.rows <= 0 || j.cols <= 0 || log2n < 0) {
         err = "bad spectrogram job";
         return GpuStatus::Failed;
     }
@@ -420,9 +442,7 @@ GpuStatus gpuBackendSpectrogram(const SpecJob& j, float* lin, const std::functio
     const int64_t maxFfts = std::max<int64_t>(1, kChunkSamples / n);
     const int64_t chunkFfts = std::min(maxFfts, totalFfts);
     const int rowsPerGroup = j.avg <= chunkFfts ? (int)(chunkFfts / j.avg) : 1;
-    int batch = 1;  // a power of two, so few distinct plans are made
-    while (batch < chunkFfts) batch <<= 1;
-    batch = (int)std::min<int64_t>(batch, maxFfts);
+    const int batch = batchFor(chunkFfts, maxFfts);
 
     CUDA_TRY(growDevice(c.dX, c.capX, (size_t)batch * n));
     CUDA_TRY(growDevice(c.dRaw, c.capRaw, (size_t)batch * n * bps));
@@ -433,7 +453,7 @@ GpuStatus gpuBackendSpectrogram(const SpecJob& j, float* lin, const std::functio
     CUDA_TRY(growHost(c.hRaw, c.capHRaw, (size_t)batch * n * bps));
     CUDA_TRY(growHost(c.hValid, c.capHValid, (size_t)batch));
     cufftHandle plan;
-    if (const GpuStatus st = getPlan(c, n, batch, plan, err, oom); st != GpuStatus::Ok) return st;
+    if (const GpuStatus st = c.plans.get(n, batch, c.stream, plan, err, oom); st != GpuStatus::Ok) return st;
 
     CUDA_TRY(cudaMemcpyAsync(c.dWin, j.win, (size_t)n * sizeof(float), cudaMemcpyHostToDevice, c.stream));
     const float scale = j.norm / j.avg;
@@ -470,5 +490,74 @@ GpuStatus gpuBackendSpectrogram(const SpecJob& j, float* lin, const std::functio
     }
     CUDA_TRY(cudaMemcpyAsync(lin, c.dLin, (size_t)j.rows * j.cols * sizeof(float), cudaMemcpyDeviceToHost, c.stream));
     CUDA_TRY(cudaStreamSynchronize(c.stream));
+    return GpuStatus::Ok;
+}
+
+// ---------------------------------------------------------------------------
+// Live spectrum
+// ---------------------------------------------------------------------------
+// One row: frames * n raw samples go up, n summed powers come back. Large
+// rows go in chunks of kChunkSamples.
+struct GpuLiveImpl {
+    int device = -1;
+    cudaStream_t stream = nullptr;
+    cufftComplex* dX = nullptr;
+    uint8_t* dRaw = nullptr;
+    float *dWin = nullptr, *dPw = nullptr;
+    size_t capX = 0, capRaw = 0, capWin = 0, capPw = 0;
+    PlanCache plans;
+
+    ~GpuLiveImpl() {
+        plans.release();
+        for (void* d : {(void*)dX, (void*)dRaw, (void*)dWin, (void*)dPw}) cudaFree(d);
+        if (stream) cudaStreamDestroy(stream);
+        cudaGetLastError();
+    }
+};
+
+GpuLiveImpl* gpuBackendLiveCreate() { return new GpuLiveImpl; }
+void gpuBackendLiveDestroy(GpuLiveImpl* impl) { delete impl; }
+
+GpuStatus gpuBackendLiveRun(GpuLiveImpl* L, const uint8_t* raw, const FormatParams& fp, int n, int frames,
+                            const float* win, float* pw, std::string& err, bool& oom) {
+    const int dev = gpuInfo().device;
+    CUDA_TRY(cudaSetDevice(dev));
+    if (L->device != dev) {
+        if (L->stream) cudaStreamDestroy(L->stream);
+        L->stream = nullptr;
+        CUDA_TRY(cudaStreamCreateWithFlags(&L->stream, cudaStreamNonBlocking));
+        L->device = dev;
+    }
+    const int log2n = log2Of(n), bps = formatBytesPerSample(fp.fmt);
+    if (log2n < 0 || frames < 1) {
+        err = "bad live spectrum job";
+        return GpuStatus::Failed;
+    }
+    const int64_t maxFrames = std::max<int64_t>(1, kChunkSamples / n);
+    const int64_t chunk = std::min<int64_t>(frames, maxFrames);
+    const int batch = batchFor(chunk, maxFrames);
+    CUDA_TRY(growDevice(L->dX, L->capX, (size_t)batch * n));
+    CUDA_TRY(growDevice(L->dRaw, L->capRaw, (size_t)chunk * n * bps));
+    CUDA_TRY(growDevice(L->dWin, L->capWin, (size_t)n));
+    CUDA_TRY(growDevice(L->dPw, L->capPw, (size_t)n));
+    cufftHandle plan;
+    if (const GpuStatus st = L->plans.get(n, batch, L->stream, plan, err, oom); st != GpuStatus::Ok) return st;
+
+    CUDA_TRY(cudaMemcpyAsync(L->dWin, win, (size_t)n * sizeof(float), cudaMemcpyHostToDevice, L->stream));
+    CUDA_TRY(cudaMemsetAsync(L->dPw, 0, (size_t)n * sizeof(float), L->stream));
+    for (int64_t f0 = 0; f0 < frames; f0 += chunk) {
+        const int m = (int)std::min<int64_t>(chunk, frames - f0);
+        CUDA_TRY(cudaMemcpyAsync(L->dRaw, raw + (size_t)f0 * n * bps, (size_t)m * n * bps, cudaMemcpyHostToDevice,
+                                 L->stream));
+        decodeWindowKernel<<<blocksFor((int64_t)m * n), 256, 0, L->stream>>>(L->dRaw, nullptr, L->dWin, m, log2n,
+                                                                            (int)fp.fmt, bps, fp.bigEndian, fp.swapIQ, L->dX);
+        CUDA_TRY(cudaGetLastError());
+        CUFFT_TRY(cufftExecC2C(plan, L->dX, L->dX, CUFFT_FORWARD));
+        // One "row" holding all the frames; this chunk adds frames [f0, f0 + m).
+        accumulateKernel<<<blocksFor(n), 256, 0, L->stream>>>(L->dX, f0, f0 + m, 0, 1, frames, log2n, L->dPw);
+        CUDA_TRY(cudaGetLastError());
+    }
+    CUDA_TRY(cudaMemcpyAsync(pw, L->dPw, (size_t)n * sizeof(float), cudaMemcpyDeviceToHost, L->stream));
+    CUDA_TRY(cudaStreamSynchronize(L->stream));
     return GpuStatus::Ok;
 }

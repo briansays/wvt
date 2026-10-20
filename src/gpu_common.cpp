@@ -15,8 +15,37 @@ GpuInfo g_info = [] {
     return i;
 }();
 std::atomic<bool> g_enabled{false};
-std::atomic<bool> g_specBroken{false};  // the waterfall path failed: CPU from now on
-std::atomic<bool> g_specOomLogged{false};
+// One per GPU path: after a failure (not out of memory) the path uses the
+// CPU until the next gpuInit.
+struct PathState {
+    const char* name;
+    std::atomic<bool> broken{false}, oomLogged{false};
+    void reset() {
+        broken = false;
+        oomLogged = false;
+    }
+};
+PathState g_spec{"waterfall"}, g_live{"live spectrum"};
+
+bool forcedFail(std::string& err) {
+    const char* f = getenv("WVT_GPU_FORCE_FAIL");
+    if (!f || !*f || *f == '0') return false;
+    err = "forced by WVT_GPU_FORCE_FAIL";
+    return true;
+}
+
+// Logs a failed call and applies the fallback rule.
+void noteFailure(PathState& p, const std::string& err, bool oom) {
+    if (oom) {
+        // Smaller jobs may still fit, so the path stays on.
+        if (!p.oomLogged.exchange(true))
+            LOG_WARN("gpu", "%s: the GPU is out of memory (%s); such jobs use the CPU", p.name, err.c_str());
+        else
+            LOG_DEBUG("gpu", "%s: out of memory again (%s)", p.name, err.c_str());
+    } else if (!p.broken.exchange(true)) {
+        LOG_WARN("gpu", "%s on the GPU failed: %s; it uses the CPU from now on", p.name, err.c_str());
+    }
+}
 }  // namespace
 
 bool parseGpuMode(const char* s, GpuMode& out) {
@@ -41,8 +70,8 @@ const char* gpuModeName(GpuMode m) {
 bool gpuInit(GpuMode mode, int device, std::string& err) {
     g_info = GpuInfo{};
     g_enabled = false;
-    g_specBroken = false;
-    g_specOomLogged = false;
+    g_spec.reset();
+    g_live.reset();
     if (mode == GpuMode::Off) {
         // Off does not touch the driver at all.
         g_info.built = gpuBackendBuilt();
@@ -75,28 +104,33 @@ void gpuSetEnabled(bool on) {
 
 std::vector<std::string> gpuListDevices() { return gpuBackendList(); }
 
-bool gpuSpectrogramUsable() { return gpuEnabled() && !g_specBroken; }
+bool gpuSpectrogramUsable() { return gpuEnabled() && !g_spec.broken; }
 
 GpuStatus gpuSpectrogram(const SpecJob& job, float* lin, const std::function<bool()>& cancelled) {
     if (!gpuSpectrogramUsable()) return GpuStatus::Unavailable;
     std::string err;
     bool oom = false;
+    const GpuStatus st = forcedFail(err) ? GpuStatus::Failed : gpuBackendSpectrogram(job, lin, cancelled, err, oom);
+    if (st == GpuStatus::Failed) noteFailure(g_spec, err, oom);
+    return st;
+}
+
+bool gpuLiveUsable() { return gpuEnabled() && !g_live.broken; }
+
+GpuLiveSpectrum::GpuLiveSpectrum() = default;
+GpuLiveSpectrum::~GpuLiveSpectrum() { gpuBackendLiveDestroy(impl_); }
+
+GpuStatus GpuLiveSpectrum::run(const uint8_t* raw, const FormatParams& fp, int n, int frames, const float* win, float* pw) {
+    if (!gpuLiveUsable()) return GpuStatus::Unavailable;
+    std::string err;
+    bool oom = false;
     GpuStatus st;
-    if (const char* f = getenv("WVT_GPU_FORCE_FAIL"); f && *f && *f != '0') {
+    if (forcedFail(err)) {
         st = GpuStatus::Failed;
-        err = "forced by WVT_GPU_FORCE_FAIL";
     } else {
-        st = gpuBackendSpectrogram(job, lin, cancelled, err, oom);
+        if (!impl_) impl_ = gpuBackendLiveCreate();
+        st = impl_ ? gpuBackendLiveRun(impl_, raw, fp, n, frames, win, pw, err, oom) : GpuStatus::Unavailable;
     }
-    if (st != GpuStatus::Failed) return st;
-    if (oom) {
-        // Smaller views may still fit, so the path stays on.
-        if (!g_specOomLogged.exchange(true))
-            LOG_WARN("gpu", "waterfall: the GPU is out of memory (%s); such views use the CPU", err.c_str());
-        else
-            LOG_DEBUG("gpu", "waterfall: out of memory again (%s)", err.c_str());
-    } else if (!g_specBroken.exchange(true)) {
-        LOG_WARN("gpu", "waterfall on the GPU failed: %s; the waterfall uses the CPU from now on", err.c_str());
-    }
+    if (st == GpuStatus::Failed) noteFailure(g_live, err, oom);
     return st;
 }

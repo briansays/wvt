@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -61,6 +62,27 @@ enum class GpuStatus : int { Ok = 0, Cancelled, Unavailable, Failed };
 // fail, to test the fallback.
 GpuStatus gpuSpectrogram(const SpecJob& job, float* lin, const std::function<bool()>& cancelled);
 bool gpuSpectrogramUsable();  // gpuSpectrogram would try the GPU
+
+// Live spectrum rows on the GPU. One object per thread (the live spectrum
+// thread owns one); it keeps its stream, buffers and cuFFT plans between
+// rows. The fallback rules are the same as for gpuSpectrogram, with their own
+// "failed earlier" state.
+struct GpuLiveImpl;
+class GpuLiveSpectrum {
+public:
+    GpuLiveSpectrum();
+    ~GpuLiveSpectrum();
+    GpuLiveSpectrum(const GpuLiveSpectrum&) = delete;
+    GpuLiveSpectrum& operator=(const GpuLiveSpectrum&) = delete;
+    // raw: frames * n packed samples in format fp (no header). Writes the n
+    // fftshifted powers |X|^2 of the windowed FFTs, summed over the frames,
+    // to pw: the same values as the CPU loop in LiveEngine::spectrumLoop.
+    GpuStatus run(const uint8_t* raw, const FormatParams& fp, int n, int frames, const float* win, float* pw);
+
+private:
+    GpuLiveImpl* impl_ = nullptr;
+};
+bool gpuLiveUsable();  // GpuLiveSpectrum::run would try the GPU
 
 // One line per CUDA device for --list-devices, or one line that says why
 // there are none.

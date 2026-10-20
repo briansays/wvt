@@ -1,9 +1,9 @@
 # Plan: CUDA GPU acceleration (issue #3)
 
 Branch: `3-cuda-gpu`, from `main` at `29dca41` (after the logging merge, PR #15).
-Status: **steps 0–2 and 4 implemented** (2026-10-19). The CPU-only build is tested on
+Status: **steps 0–2, 4 and 5 implemented** (2026-10-19). The CPU-only build is tested on
 macOS. The CUDA build is compiled and tested in CUDA 12.6 and 12.8 containers with no GPU.
-**The GPU waterfall has not run on a GPU yet** (see §9).
+**The GPU code has not run on a GPU yet** (see §9).
 
 Earlier GPU work (`wvt-gpu-dev`, PR #5) is out of date. This plan starts again from `main`
 and does not use that branch.
@@ -361,3 +361,27 @@ Checks:
 0.05 dB) and `gpu_check --bench --samples 1G`. Then set the GPU budget (2 G samples now)
 from the times. The budget is wall time, not only FFT work: a wide view reads up to 8× more
 of the file than on the CPU.
+
+### Step 5: live spectrum on the GPU
+
+| File | Change |
+|---|---|
+| `src/gpu.h` | `GpuLiveSpectrum` (a class with a hidden backend object, not the virtual `create` of §4, so the fallback rules stay in `gpu_common.cpp`) and `gpuLiveUsable`. `run` takes the format, N and the frame count on each call, so the loop does not make a new object when N or the format changes. |
+| `src/gpu_common.cpp` | The fallback rules are now per path (`PathState`): a live failure turns off only the live path, and a waterfall failure only the waterfall. `gpuInit` resets both. |
+| `src/gpu_cuda.cu` | `gpuBackendLiveRun`: copy the raw row up, then `decodeWindowKernel` (no "inside the file" table), batched cuFFT, and `accumulateKernel` as one row of all the frames. Rows over 8 M samples go in chunks. The plan cache is shared (`PlanCache`). |
+| `src/live.cpp` | `spectrumLoop` tries the GPU first. Auto averaging analyzes up to 100 MS/s on the GPU (`kGpuMaxAnalyzeRate`) and 20 MS/s on the CPU. The column pooling and the "FFT sees" figure are unchanged. On a GPU failure the CPU does that row; the next rows use the CPU cap. |
+| `src/live.h` | `Stats::gpu`: the last row came from the GPU (for the status bar in step 6). |
+| `src/app_live.cpp` | The Avg tooltip: "up to 20 MS/s, or 100 MS/s on the GPU". |
+| `tools/gpu_check.cpp` | GPU against CPU for cu8, ci16 at 20 and 61.44 MS/s, one frame, big-endian cf32 with swapped I/Q, and N 65536 over two chunks. A forced live failure turns off only the live path. `--bench` adds the GPU time per row. |
+
+The row is copied from ordinary (pageable) memory: at 100 MS/s and 30 rows/s that is
+13 MB per row for ci16. If the benchmark shows the copy matters, read the ring straight into
+a pinned buffer.
+
+Checks: macOS (no warnings, all self-tests pass, `--device sim` records with the live
+loop running) and the CUDA 12.8 container (no warnings, self-tests pass, comparisons
+skipped: "no NVIDIA driver").
+
+**Still to do on the GPU computer:** `gpu_check` and `gpu_check --bench`; then the GUI with
+a USRP at 40 MS/s or more (acceptance §7 item 5: "FFT sees" stays at 100 % at 30 rows/s,
+no dropped samples).

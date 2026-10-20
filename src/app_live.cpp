@@ -546,7 +546,7 @@ void App::drawLiveLeft() {
     }
     label("Avg", fieldW(8));
     ImGui::SliderInt("##lavg", &liveParams_.avg, 0, 64, liveParams_.avg == 0 ? "auto" : "%d");
-    ImGui::SetItemTooltip("FFTs averaged into each waterfall row.\nauto: all samples since the previous row (up to 20 MS/s),\nso nothing is missed at RTL-SDR rates. Lower values show short bursts more sharply.");
+    ImGui::SetItemTooltip("FFTs averaged into each waterfall row.\nauto: all samples since the previous row (up to 20 MS/s,\nor 100 MS/s on the GPU), so nothing is missed at RTL-SDR rates. Lower values show short bursts more sharply.");
     label("Rows/s", stepW(4));
     if (ImGui::InputDouble("##lrps", &liveParams_.rowsPerSec, 5, 10, "%.0f"))
         liveParams_.rowsPerSec = std::clamp(liveParams_.rowsPerSec, 1.0, 100.0);

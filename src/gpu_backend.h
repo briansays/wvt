@@ -18,5 +18,11 @@ std::vector<std::string> gpuBackendList();
 
 // The spectrogram on the device chosen by gpuInit. On Failed, err says why
 // and oom is true when the GPU ran out of memory.
+// Live spectrum state, created on first use by the thread that runs it.
+GpuLiveImpl* gpuBackendLiveCreate();
+void gpuBackendLiveDestroy(GpuLiveImpl* impl);
+GpuStatus gpuBackendLiveRun(GpuLiveImpl* impl, const uint8_t* raw, const FormatParams& fp, int n, int frames,
+                            const float* win, float* pw, std::string& err, bool& oom);
+
 GpuStatus gpuBackendSpectrogram(const SpecJob& job, float* lin, const std::function<bool()>& cancelled, std::string& err,
                                 bool& oom);
