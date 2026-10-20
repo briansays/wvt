@@ -2,7 +2,8 @@
 
 Branch: `18-region-export`, from `main` at `8896568`, rebased on `2c3c7cd` (after the GPU
 merge, PR #20).
-Status: **steps 1–9 implemented** (2026-10-20). The GUI still needs a test on screen (§8).
+Status: **steps 1–9 implemented** (2026-10-20), PR #22. The user tested the GUI on screen
+(2026-10-20).
 
 ## 1. Goal
 
@@ -206,8 +207,6 @@ The user said to go with the recommendations:
   the two time lines on the waterfall) and with `--chan 300k:150k` (band 100.225–100.375 MHz,
   200 kS/s, 295 taps, decimation 10, the box on the waterfall).
 
-### GUI: still to test on screen
+### GUI
 
-The right-click menu, right-drag still zooming, select mode (drag, Esc), moving and resizing
-the box, the shaded range on the time plots, each "Fill from" button, Export with progress and
-Cancel, the "Replace?" question, and an export of a large file.
+The user tested the GUI on screen (2026-10-20).
