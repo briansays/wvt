@@ -1,7 +1,8 @@
 # Plan: labels outside the plots and a tidier UI (issues #12 and #19)
 
 Branch: `19-ui-cleanup`, from `main` at `328f5be`.
-Status: **steps 1–10 implemented** (2026-10-20). Not yet checked on screen by the user.
+Status: **steps 1–10 implemented** (2026-10-20), PR #26. The user tested the GUI on screen
+(2026-10-20).
 
 ## 1. Goal
 
@@ -267,3 +268,8 @@ right-click, readouts on the header rows, and the sample field moved off the row
   and mouse, live Record ⚙. File → Quit ends the program.
 - `--export-window` and `--gen pulsed` open their windows as before.
 - All six self-tests pass.
+
+### GUI
+
+The user tested the new layout on screen (2026-10-20): the menus and shortcuts, the ⚙ popups,
+the time-plot right-click, the legends, the region selection and resizing the window.
