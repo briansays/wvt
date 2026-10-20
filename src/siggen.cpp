@@ -2,9 +2,13 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <cstdio>
+#include <cstring>
 
 #include "dsp.h"
+#include "json.h"
+#include "recorder.h"
 #include "ui_util.h"
 
 namespace {
@@ -81,6 +85,16 @@ bool sameSchedule(const WaveformParams& a, const WaveformParams& b) {
            a.burstGap == b.burstGap && a.playLoop == b.playLoop && a.playGap == b.playGap;
 }
 
+// True if a and b chain the same recordings (a change otherwise starts the chain again).
+bool sameChain(const WaveformParams& a, const WaveformParams& b) {
+    if (a.mode != b.mode || a.rate != b.rate || a.chain.size() != b.chain.size()) return false;
+    for (size_t i = 0; i < a.chain.size(); ++i) {
+        const ChainItem &x = a.chain[i], &y = b.chain[i];
+        if (x.path != y.path || !(x.fp == y.fp) || x.fileRate != y.fileRate || x.start != y.start || x.len != y.len) return false;
+    }
+    return true;
+}
+
 // True if a and b sweep the same way (a change otherwise starts the period again).
 bool sameSweep(const WaveformParams& a, const WaveformParams& b) {
     return a.mode == b.mode && a.rate == b.rate && a.fSweep == b.fSweep && a.fFrom == b.fFrom && a.fTo == b.fTo &&
@@ -101,6 +115,147 @@ double shapeAt(SweepShape s, double from, double to, int64_t k, int64_t P, doubl
     }
 }
 }  // namespace
+
+WaveformParams chainItemParams(const WaveformParams& p, size_t i) {
+    WaveformParams q;
+    q.mode = GenMode::Playback;
+    q.rate = p.rate;
+    q.fc = p.fc;
+    if (i < p.chain.size()) {
+        const ChainItem& c = p.chain[i];
+        q.playPath = c.path;
+        q.playFp = c.fp;
+        q.playRate = c.fileRate;
+        q.playStart = c.start;
+        q.playLen = c.len;
+        q.offset = c.offset;
+        q.ampDb = c.ampDb;
+    }
+    return q;
+}
+
+ChainItem makeChainItem(const std::string& path, const WaveformParams& p, std::string* note) {
+    const FileMetaGuess g = guessMeta(expandHome(path));
+    ChainItem c;
+    c.path = g.dataPath;
+    if (g.haveFmt) {
+        c.fp.fmt = g.fmt;
+        c.fp.bigEndian = g.bigEndian;
+    }
+    c.fileRate = g.haveRate ? g.rate : 0;
+    std::string n = g.source.empty() ? "no metadata found: set its format and rate" : "settings from " + g.source;
+    if (g.haveFc) {
+        c.offset = g.fc - p.fc;
+        if (!(std::fabs(c.offset) < p.rate / 2)) {
+            n += "; its frequency (" + fmtSI(g.fc, "Hz", 9) + ") is outside the band, so it plays at the center";
+            c.offset = 0;
+        }
+    }
+    if (note) *note = n;
+    return c;
+}
+
+namespace {
+std::string dirOf(const std::string& path) {
+    const size_t k = path.find_last_of('/');
+    return k == std::string::npos ? "." : path.substr(0, k);
+}
+}  // namespace
+
+bool saveChain(const std::string& path, const WaveformParams& p, std::string& err) {
+    const std::string full = expandHome(path);
+    const std::string dir = dirOf(full) + "/";
+    std::string j = "{\n  \"wvt_chain\": 1,\n";
+    j += "  \"sample_rate\": " + num(p.rate) + ",\n";
+    j += "  \"center_freq\": " + num(p.fc) + ",\n";
+    j += "  \"loops\": " + std::to_string(p.chainLoops) + ",\n";
+    j += "  \"start_delay_s\": " + num(p.startDelay) + ",\n";
+    j += "  \"items\": [";
+    for (size_t i = 0; i < p.chain.size(); ++i) {
+        const ChainItem& c = p.chain[i];
+        std::string f = c.path;
+        if (f.rfind(dir, 0) == 0) f = f.substr(dir.size());  // beside the chain file, or below it
+        std::string fmt = formatName(c.fp.fmt);
+        fmt = fmt.substr(0, fmt.find(' ')) + (c.fp.bigEndian ? "_be" : "_le");
+        j += std::string(i ? "," : "") + "\n    {\"path\": " + jsonQuote(f) + ", \"datatype\": \"" + fmt + "\"";
+        if (c.fp.swapIQ) j += ", \"swap_iq\": true";
+        if (c.fp.headerBytes) j += ", \"header_bytes\": " + std::to_string(c.fp.headerBytes);
+        j += ", \"file_rate\": " + num(c.fileRate) + ", \"start_s\": " + num(c.start) + ", \"length_s\": " + num(c.len) +
+             ", \"offset_hz\": " + num(c.offset) + ", \"level_dbfs\": " + (c.keepLevel ? std::string("null") : num(c.ampDb)) +
+             ", \"repeats\": " + std::to_string(c.repeats) + ", \"gap_after_s\": " + num(c.gapAfter) + "}";
+    }
+    j += "\n  ]\n}\n";
+    FILE* f = fopen(full.c_str(), "wb");
+    if (!f) {
+        err = "can't write " + full + ": " + strerror(errno);
+        return false;
+    }
+    const bool ok = fwrite(j.data(), 1, j.size(), f) == j.size();
+    if (fclose(f) != 0 || !ok) {
+        err = "can't write " + full;
+        return false;
+    }
+    return true;
+}
+
+bool loadChain(const std::string& path, WaveformParams& p, std::string& err) {
+    const std::string full = expandHome(path);
+    FILE* f = fopen(full.c_str(), "rb");
+    if (!f) {
+        err = "can't open " + full + ": " + strerror(errno);
+        return false;
+    }
+    std::string text;
+    char buf[65536];
+    for (size_t n; (n = fread(buf, 1, sizeof buf, f)) > 0;) text.append(buf, n);
+    fclose(f);
+    JsonValue v;
+    if (!parseJson(text, v, err)) {
+        err = full + ": " + err;
+        return false;
+    }
+    const JsonValue* items = v.get("items");
+    if (!v.get("wvt_chain") || !items || items->type != JsonValue::Type::Array) {
+        err = full + " is not a wvt chain file";
+        return false;
+    }
+    std::vector<ChainItem> chain;
+    for (const JsonValue& it : items->arr) {
+        ChainItem c;
+        c.path = it.string("path");
+        if (c.path.empty()) {
+            err = full + ": an item has no path";
+            return false;
+        }
+        if (c.path[0] != '/' && c.path[0] != '~') c.path = dirOf(full) + "/" + c.path;
+        c.path = expandHome(c.path);
+        bool be = false;
+        if (!parseFormatName(it.string("datatype", "cf32_le"), c.fp.fmt, be)) {
+            err = full + ": unknown datatype " + it.string("datatype");
+            return false;
+        }
+        c.fp.bigEndian = be;
+        c.fp.swapIQ = it.boolean("swap_iq");
+        c.fp.headerBytes = (int64_t)it.number("header_bytes");
+        c.fileRate = it.number("file_rate");
+        c.start = it.number("start_s");
+        c.len = it.number("length_s");
+        c.offset = it.number("offset_hz");
+        const JsonValue* lvl = it.get("level_dbfs");
+        c.keepLevel = !lvl || lvl->type != JsonValue::Type::Number;
+        if (!c.keepLevel) c.ampDb = lvl->num;
+        c.repeats = (int)it.number("repeats", 1);
+        c.gapAfter = it.number("gap_after_s");
+        chain.push_back(std::move(c));
+    }
+    p.chain = std::move(chain);
+    p.chainLoops = (int)v.number("loops");
+    p.startDelay = v.number("start_delay_s");
+    if (v.number("sample_rate") > 0) p.rate = v.number("sample_rate");
+    if (v.get("center_freq")) p.fc = v.number("center_freq");
+    p.mode = GenMode::Chain;
+    return true;
+}
 
 const char* edgeName(EdgeShape e) {
     switch (e) {
@@ -200,7 +355,7 @@ ParamCheck checkParams(const WaveformParams& p) {
     const bool fSweep = p.sweeping() && p.fSweep != SweepShape::Off;
     const bool aSweep = p.sweeping() && p.aSweep != SweepShape::Off;
     if (!(p.ampDb <= 0)) err("Amplitude must be 0 dBFS or less");
-    if (!fSweep && !(std::fabs(p.offset) < nyq)) err("Offset must be inside the band (|offset| < " + fmtSI(nyq, "Hz") + ")");
+    if (!fSweep && p.mode != GenMode::Chain && !(std::fabs(p.offset) < nyq)) err("Offset must be inside the band (|offset| < " + fmtSI(nyq, "Hz") + ")");
     if (fSweep) {
         if (!(std::fabs(p.fFrom) < nyq && std::fabs(p.fTo) < nyq))
             err("The sweep must stay inside the band (|from| and |to| < " + fmtSI(nyq, "Hz") + ")");
@@ -222,6 +377,23 @@ ParamCheck checkParams(const WaveformParams& p) {
         if (fSweep && p.driftHzPerSec != 0) warn("Drift is ignored while the frequency sweeps");
         else if (p.driftHzPerSec != 0)
             warn("The tone drifts by " + fmtSI(std::fabs(p.driftHzPerSec), "Hz/s") + " and wraps around at the band edge");
+    } else if (p.mode == GenMode::Chain) {
+        if (p.chain.empty()) err("Add at least one recording to the chain");
+        for (size_t i = 0; i < p.chain.size(); ++i) {
+            const ChainItem& c = p.chain[i];
+            const std::string n = "Item " + std::to_string(i + 1) + ": ";
+            const double fr = c.fileRate > 0 ? c.fileRate : p.rate;
+            if (c.path.empty()) err(n + "choose a recording");
+            if (c.fileRate < 0) err(n + "the recording's sample rate can't be negative");
+            else if (fr / p.rate > 64 || p.rate / fr > 64) err(n + "the recording's rate and the output rate differ by more than 64x");
+            if (c.start < 0 || c.len < 0) err(n + "the segment start and length can't be negative");
+            if (!(std::fabs(c.offset) < nyq)) err(n + "the offset must be inside the band (|offset| < " + fmtSI(nyq, "Hz") + ")");
+            if (!c.keepLevel && !(c.ampDb <= 0)) err(n + "the level must be 0 dBFS or less");
+            if (c.repeats < 1) err(n + "repeats must be at least 1");
+            if (c.gapAfter < 0) err(n + "the gap can't be negative");
+        }
+        if (p.chainLoops < 0) err("The loop count can't be negative");
+        if (p.startDelay < 0) err("Start delay can't be negative");
     } else if (p.mode == GenMode::Playback) {
         const double fr = playFileRate(p);
         if (p.playPath.empty()) err("Choose a recording to play");
@@ -275,7 +447,7 @@ ParamCheck checkParams(const WaveformParams& p) {
     if (std::fabs(p.iqPhaseDeg) >= 45) err("IQ phase error must be within +-45 degrees");
     if (p.linewidth < 0) err("Linewidth can't be negative");
 
-    if (c.ok()) {
+    if (c.ok() && p.mode != GenMode::Chain) {  // (a chain's levels are known only once it's loaded)
         const double amp = std::pow(10.0, (aSweep ? std::max(p.aFrom, p.aTo) : p.ampDb) / 20);
         double peak = amp * std::max(1.0, std::pow(10.0, p.iqGainDb / 20)) + std::max(std::fabs(p.dcI), std::fabs(p.dcQ));
         if (p.noise) peak += 3 * amp * std::sqrt(std::pow(10.0, -p.snrDb / 10) / 2);
@@ -297,6 +469,11 @@ std::string describeParams(const WaveformParams& p) {
     } else if (p.mode == GenMode::CW) {
         s = "CW, offset " + fmtSI(p.offset, "Hz");
         if (p.driftHzPerSec != 0) s += ", drift " + fmtSI(p.driftHzPerSec, "Hz/s");
+    } else if (p.mode == GenMode::Chain) {
+        s = "chain of " + std::to_string(p.chain.size()) + (p.chain.size() == 1 ? " recording" : " recordings");
+        s += p.chainLoops > 0 ? ", " + std::to_string(p.chainLoops) + (p.chainLoops == 1 ? " pass" : " passes") : ", looped";
+        if (p.noise) s += ", SNR " + num(p.snrDb) + " dB";
+        return s;
     } else if (p.mode == GenMode::Playback) {
         s = "playback of " + baseName(p.playPath);
         if (p.playStart > 0 || p.playLen > 0)
@@ -348,9 +525,14 @@ std::string paramsJson(const WaveformParams& p) {
     std::string j = "{";
     auto add = [&](const char* k, const std::string& v) { j += std::string(j.size() > 1 ? ", " : "") + "\"" + k + "\": " + v; };
     auto str = [](const char* s) { return std::string("\"") + s + "\""; };
-    add("mode", str(p.mode == GenMode::CW ? "cw" : p.mode == GenMode::Pulsed ? "pulsed" : "playback"));
-    add("offset_hz", num(p.offset));
-    add("amplitude_dbfs", num(p.ampDb));
+    add("mode", str(p.mode == GenMode::CW       ? "cw"
+                    : p.mode == GenMode::Pulsed ? "pulsed"
+                    : p.mode == GenMode::Chain  ? "chain"
+                                                : "playback"));
+    if (p.mode != GenMode::Chain) {  // (each chain item has its own)
+        add("offset_hz", num(p.offset));
+        add("amplitude_dbfs", num(p.ampDb));
+    }
     add("phase_deg", num(p.phaseDeg));
     if (p.sweeping()) {
         auto name = [&](SweepShape v) { return str(lower(sweepShapeName(v)).c_str()); };
@@ -367,6 +549,21 @@ std::string paramsJson(const WaveformParams& p) {
     }
     if (p.mode == GenMode::CW) {
         add("drift_hz_per_s", num(p.driftHzPerSec));
+    } else if (p.mode == GenMode::Chain) {
+        std::string a = "[";
+        for (size_t i = 0; i < p.chain.size(); ++i) {
+            const ChainItem& c = p.chain[i];
+            std::string fmt = formatName(c.fp.fmt);
+            fmt = fmt.substr(0, fmt.find(' ')) + (c.fp.bigEndian ? "_be" : "");
+            a += std::string(i ? ", " : "") + "{\"source_file\": " + jsonString(c.path) + ", \"source_datatype\": \"" + fmt +
+                 "\", \"source_rate_hz\": " + num(c.fileRate > 0 ? c.fileRate : p.rate) + ", \"segment_start_s\": " +
+                 num(c.start) + ", \"segment_length_s\": " + num(c.len) + ", \"offset_hz\": " + num(c.offset) +
+                 ", \"level_dbfs\": " + (c.keepLevel ? std::string("\"as recorded\"") : num(c.ampDb)) +
+                 ", \"repeats\": " + std::to_string(c.repeats) + ", \"gap_after_s\": " + num(c.gapAfter) + "}";
+        }
+        add("chain", a + "]");
+        add("loops", std::to_string(p.chainLoops));
+        add("start_delay_s", num(p.startDelay));
     } else if (p.mode == GenMode::Playback) {
         add("source_file", jsonString(p.playPath));
         std::string fmt = formatName(p.playFp.fmt);
@@ -444,6 +641,13 @@ void SigGen::apply(const WaveformParams& p) {
     if (p.sweeping() && p.aSweep != SweepShape::Off)
         noiseAmp_ = std::pow(10.0, std::max(p.aFrom, p.aTo) / 20);  // noise follows the peak
     if (p.mode == GenMode::Pulsed && p.sweeping()) sweepPulse();  // until the next pulse picks its own
+    if (p.mode == GenMode::Chain) {
+        applyChain(old, p);
+        return;
+    }
+    waves_.clear();
+    curItem_ = -1;
+    chainEnd_ = false;
     if (p.mode == GenMode::CW) {
         tmpl_.reset();
         wave_.reset();
@@ -481,6 +685,78 @@ void SigGen::apply(const WaveformParams& p) {
         }
         nextStart_ = std::max(nextStart_, (double)n_);
     }
+}
+
+void SigGen::applyChain(const WaveformParams& old, const WaveformParams& p) {
+    // The items normally come from the cache: the window loads them before it publishes.
+    std::vector<std::shared_ptr<const PlaybackWave>> w(p.chain.size());
+    err_.clear();
+    if (p.chain.empty()) err_ = "the chain is empty";
+    for (size_t i = 0; i < p.chain.size(); ++i) {
+        std::string e;
+        w[i] = loadPlayback(chainItemParams(p, i), e);
+        if (!w[i]) {
+            err_ = "item " + std::to_string(i + 1) + ": " + e;
+            w.clear();
+            break;
+        }
+    }
+    waves_ = std::move(w);
+    wave_.reset();
+    // The SNR refers to the loudest item.
+    noiseAmp_ = 0;
+    for (size_t i = 0; i < waves_.size(); ++i)
+        noiseAmp_ = std::max(noiseAmp_, p.chain[i].keepLevel ? waves_[i]->peak : std::pow(10.0, p.chain[i].ampDb / 20));
+    if (!(noiseAmp_ > 0)) noiseAmp_ = 1;
+
+    if (old.mode != GenMode::Chain || !sameChain(old, p) || waves_.empty() || lastStart_ < 0) {
+        // Different recordings (or nothing played yet): start from the first item.
+        const bool wasChain = old.mode == GenMode::Chain && lastStart_ >= 0;
+        chainIdx_ = 0;
+        chainRep_ = chainPass_ = chainDone_ = 0;
+        chainEnd_ = false;
+        curStart_ = -1;
+        curItem_ = -1;
+        tmpl_.reset();
+        if (!wasChain) {
+            lastStart_ = -1;
+            nextStart_ = std::max((double)n_, p.startDelay * p.rate);
+        } else if (nextStart_ >= kNever) {
+            nextStart_ = (double)n_;  // a finished chain plays again
+        }
+        nextStart_ = std::max(nextStart_, (double)n_);
+        return;
+    }
+    // Same recordings. A larger loop count revives a chain that was ending.
+    if (chainEnd_ && (p.chainLoops == 0 || chainDone_ < p.chainLoops)) {
+        chainEnd_ = false;
+        nextStart_ = std::max(chainResume_, (double)n_);
+    }
+    if (chainIdx_ >= p.chain.size()) chainIdx_ = 0;
+    if (curItem_ >= 0) setItemLevel();  // offset and level apply at once
+}
+
+// The carrier offset and gain of the item that is playing.
+void SigGen::setItemLevel() {
+    const ChainItem& c = p_.chain[(size_t)curItem_];
+    offset_ = c.offset;
+    amp_ = c.keepLevel ? 1.0 : std::pow(10.0, c.ampDb / 20) / waves_[(size_t)curItem_]->peak;
+}
+
+void SigGen::startChainItem() {
+    curItem_ = (int)chainIdx_;
+    const auto& w = waves_[chainIdx_];
+    tmpl_ = std::shared_ptr<const std::vector<std::complex<float>>>(w, &w->s);
+    if (chainIdx_ == 0 && chainRep_ == 0) ++chainPass_;
+    setItemLevel();
+}
+
+bool SigGen::canApplyNow() const {
+    if (curStart_ < 0) return true;
+    if (p_.mode == GenMode::Pulsed) return false;  // after the pulse
+    // A chain with other recordings starts again after the item that plays.
+    if (p_.mode == GenMode::Chain && pending_.mode == GenMode::Chain) return sameChain(p_, pending_);
+    return true;
 }
 
 void SigGen::buildTemplate() {
@@ -527,6 +803,27 @@ double SigGen::nextPri() {
 
 // start: where the last pulse was due, unrounded, so fractional PRIs don't accumulate rounding.
 void SigGen::scheduleAfter(double start) {
+    if (p_.mode == GenMode::Chain) {
+        const ChainItem& c = p_.chain[(size_t)curItem_];
+        const double next = start + (double)tmplLen() + c.gapAfter * p_.rate;
+        if (++chainRep_ >= std::max(1, c.repeats)) {
+            chainRep_ = 0;
+            if (++chainIdx_ >= p_.chain.size()) {
+                chainIdx_ = 0;
+                ++chainDone_;
+            }
+        }
+        if (chainIdx_ == 0 && chainRep_ == 0 && p_.chainLoops > 0 && chainDone_ >= p_.chainLoops) {
+            // The last pass: the output ends after this item's gap.
+            chainEnd_ = true;
+            chainEndAt_ = std::llround(next);
+            chainResume_ = next;
+            nextStart_ = kNever;
+        } else {
+            nextStart_ = next;
+        }
+        return;
+    }
     if (p_.mode == GenMode::Playback) {
         nextStart_ = p_.playLoop ? start + (double)tmplLen() + p_.playGap * p_.rate : kNever;
         return;
@@ -690,9 +987,9 @@ void SigGen::impair(std::complex<float>* out, int64_t m) {
 
 void SigGen::generate(std::complex<float>* out, int64_t n) {
     pulses_.clear();
-    // Pulsed changes wait for the pulse to end; playback changes (a recording can
-    // be long) and CW changes apply now.
-    if (hasPending_ && (p_.mode != GenMode::Pulsed || curStart_ < 0)) {
+    // Pulsed changes wait for the pulse to end, and so does a chain of other
+    // recordings; playback changes (a recording can be long) and CW changes apply now.
+    if (hasPending_ && canApplyNow()) {
         hasPending_ = false;
         apply(pending_);
     }
@@ -706,7 +1003,7 @@ void SigGen::generate(std::complex<float>* out, int64_t n) {
             break;
         }
         const int64_t L = tmplLen();
-        if (L == 0) {  // playback without a recording: silence
+        if (p_.mode == GenMode::Chain ? waves_.empty() : L == 0) {  // playback without a recording: silence
             std::fill(out + i, out + n, std::complex<float>(0.f, 0.f));
             advanceCarrier(n - i);
             n_ += n - i;
@@ -739,8 +1036,14 @@ void SigGen::generate(std::complex<float>* out, int64_t n) {
         // On time, keep the exact due position. Late (after a change), restart the grid here.
         lastStartF_ = std::llround(nextStart_) == n_ ? nextStart_ : (double)n_;
         curStart_ = lastStart_ = n_;
-        if (p_.mode == GenMode::Pulsed && p_.sweeping()) sweepPulse();
-        pulses_.push_back({n_, L});
+        if (p_.mode == GenMode::Chain) {
+            const int rep = chainRep_;
+            startChainItem();
+            pulses_.push_back({n_, tmplLen(), curItem_, rep});
+        } else {
+            if (p_.mode == GenMode::Pulsed && p_.sweeping()) sweepPulse();
+            pulses_.push_back({n_, L});
+        }
         ++burstCount_;
         if (p_.burstPulses > 0 && burstCount_ >= p_.burstPulses) burstCount_ = 0;
         scheduleAfter(lastStartF_);
@@ -760,10 +1063,25 @@ struct WaveKey {
 };
 WaveKey waveKey(const WaveformParams& p) { return {p.playPath, p.playFp, playFileRate(p), p.rate, p.playStart, p.playLen}; }
 
+// The cache: every loaded waveform, up to a budget. The least recently used
+// ones that nothing else holds are dropped first (issue #27: a chain keeps
+// several recordings loaded).
+struct CacheEntry {
+    WaveKey key;
+    std::shared_ptr<const PlaybackWave> w;
+    uint64_t used = 0;
+};
 std::mutex gWaveM;  // guards the cache
 std::mutex gLoadM;  // one load at a time, so concurrent users wait for it instead of repeating it
-WaveKey gWaveKey;
-std::shared_ptr<const PlaybackWave> gWave;
+std::vector<CacheEntry> gCache;
+uint64_t gUseClock = 0;
+int64_t gBudget = kPlayCacheBudget;
+
+int64_t cacheSamplesLocked() {
+    int64_t n = 0;
+    for (const auto& e : gCache) n += (int64_t)e.w->s.size();
+    return n;
+}
 
 double besselI0(double x) {
     double s = 1, t = 1;
@@ -825,12 +1143,27 @@ bool resample(const std::vector<cf>& x, double ratio, std::vector<cf>& y, const 
 std::shared_ptr<const PlaybackWave> cachedPlayback(const WaveformParams& p) {
     const WaveKey k = waveKey(p);
     std::lock_guard<std::mutex> lk(gWaveM);
-    return gWave && gWaveKey == k ? gWave : nullptr;
+    for (auto& e : gCache)
+        if (e.key == k) {
+            e.used = ++gUseClock;
+            return e.w;
+        }
+    return nullptr;
 }
 
 void forgetPlayback() {
     std::lock_guard<std::mutex> lk(gWaveM);
-    gWave.reset();
+    gCache.clear();
+}
+
+int64_t playbackCacheSamples() {
+    std::lock_guard<std::mutex> lk(gWaveM);
+    return cacheSamplesLocked();
+}
+
+void setPlaybackCacheBudget(int64_t samples) {
+    std::lock_guard<std::mutex> lk(gWaveM);
+    gBudget = samples > 0 ? samples : kPlayCacheBudget;
 }
 
 std::shared_ptr<const PlaybackWave> loadPlayback(const WaveformParams& p, std::string& err,
@@ -895,8 +1228,16 @@ std::shared_ptr<const PlaybackWave> loadPlayback(const WaveformParams& p, std::s
         return nullptr;
     }
     std::lock_guard<std::mutex> lk(gWaveM);
-    gWaveKey = waveKey(p);
-    gWave = w;
+    gCache.push_back({waveKey(p), w, ++gUseClock});
+    // Over the budget: drop the least recently used waveforms nobody holds (not this one).
+    for (int64_t total = cacheSamplesLocked(); total > gBudget;) {
+        size_t victim = gCache.size();
+        for (size_t i = 0; i + 1 < gCache.size(); ++i)
+            if (gCache[i].w.use_count() == 1 && (victim == gCache.size() || gCache[i].used < gCache[victim].used)) victim = i;
+        if (victim == gCache.size()) break;
+        total -= (int64_t)gCache[victim].w->s.size();
+        gCache.erase(gCache.begin() + (std::ptrdiff_t)victim);
+    }
     return w;
 }
 
@@ -932,4 +1273,7 @@ WaveformParams BusSigGen::fetch() {
 void BusSigGen::generate(std::complex<float>* out, int64_t n) {
     if (sigGenBus().version() != ver_) gen_.setParams(fetch());
     gen_.generate(out, n);
+    passes_.store(gen_.chainPasses(), std::memory_order_relaxed);
+    finished_.store(gen_.finished(), std::memory_order_relaxed);
+    sigGenBus().reportChain(gen_.chainPasses(), gen_.finished());
 }

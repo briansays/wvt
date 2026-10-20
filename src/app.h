@@ -144,6 +144,12 @@ private:
     void drawSigGenTx();
     void drawSigGenPlayback();
     void setPlaybackFile(const std::string& path, bool fromViewer = false);
+    // chain playback (app_chain.cpp)
+    void drawSigGenChain();
+    void drawChainItem(ChainItem& c, const SigPreviewRes::ChainInfo* info);
+    void drawChainPreview(const SigPreviewRes& r);
+    void addChainItem(const std::string& path, bool fromViewer = false, bool markers = false);
+    bool chainLoaded(int* loaded = nullptr) const;  // every item is in the playback cache
     void pollSigGen();
     bool sigGenBusy() const;
     bool sigGenLoopback() const;
@@ -327,6 +333,11 @@ private:
     std::unique_ptr<Worker<SigPreviewReq, SigPreviewRes>> sgPrevWorker_;
     std::shared_ptr<SigPreviewRes> sgPrev_;
     bool sgPrevTrain_ = false;
+    char sgChainAdd_[1024] = {};
+    char sgChainFile_[1024] = {};
+    int sgChainSel_ = -1;  // item whose details show
+    std::string sgChainNote_;
+    bool sgChainNoteErr_ = false;
     std::unique_ptr<TxEngine> tx_;
     TxEngine::Stats txStats_;
     TxConfig txCfg_;

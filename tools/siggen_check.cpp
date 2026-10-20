@@ -1,8 +1,10 @@
 // siggen_check - verifies the signal generator: tone frequency and level,
 // pulse timing (fixed, stagger, jitter, bursts), chirp sweep, Barker chips,
 // edges, noise level, deferred parameter changes, file output, playback
-// of recordings (looping, gaps, segments, resampling, SigMF round trip) and
-// CW frequency and level sweeps.
+// of recordings (looping, gaps, segments, resampling, SigMF round trip),
+// CW frequency and level sweeps, and chains of recordings (order, repeats,
+// gaps, levels, offsets, loops, changes while running, chain files, the
+// waveform cache, the JSON reader).
 //
 //   siggen_check [scratch_dir]     exit status 0 = all checks passed
 #include <cmath>
@@ -17,6 +19,7 @@
 
 #include "dsp.h"
 #include "iq_file.h"
+#include "json.h"
 #include "siggen.h"
 #include "siggen_out.h"
 
@@ -879,6 +882,210 @@ int main(int argc, char** argv) {
             }
         check(pr && pr->hold && !pr->sweepF.empty() && !pr->t.empty() && lit > inside * 0.9,
               "pulsed sweep preview: the pulse, the sweep curves and a max-hold over the band", fmt("%g of %g bins", lit, inside));
+    }
+
+    // --- Chains ---
+    {
+        const double rate = 2e6;
+        auto tone = [&](double f, double a, int n) {
+            std::vector<cf> v((size_t)n);
+            for (int i = 0; i < n; ++i) v[(size_t)i] = std::polar((float)a, (float)(2 * M_PI * f * i / rate));
+            return v;
+        };
+        const std::vector<cf> A = tone(100e3, 0.5, 1000), B = tone(-200e3, 0.25, 600), C = tone(300e3, 0.8, 400);
+        const std::string pa = dir + "/sgcheck_chain_a.cf32", pb = dir + "/sgcheck_chain_b.cf32", pc = dir + "/sgcheck_chain_c.cf32";
+        writeCf32(pa, A);
+        writeCf32(pb, B);
+        writeCf32(pc, C);
+        forgetPlayback();
+        WaveformParams p;
+        p.mode = GenMode::Chain;
+        p.rate = rate;
+        p.fc = 915e6;
+        ChainItem ia, ib, ic;
+        ia.path = pa;
+        ia.gapAfter = 50e-6;  // 100 samples
+        ib.path = pb;
+        ib.repeats = 2;
+        ic.path = pc;
+        ic.gapAfter = 100e-6;  // 200 samples
+        p.chain = {ia, ib, ic};
+        check(checkParams(p).ok(), "a 3-item chain is valid", checkParams(p).ok() ? "" : checkParams(p).errors.front());
+        // One pass: 1000 + 100, 600, 600, 400 + 200 = 2900 samples.
+        SigGen g(p);
+        std::vector<cf> v(2 * 2900);
+        g.generate(v.data(), (int64_t)v.size());
+        std::vector<int64_t> starts;
+        std::vector<int> items;
+        for (const auto& pl : g.lastPulses()) {
+            starts.push_back(pl.start);
+            items.push_back(pl.item);
+        }
+        check(items == std::vector<int>{0, 1, 1, 2, 0, 1, 1, 2} &&
+                  starts == std::vector<int64_t>{0, 1100, 1700, 2300, 2900, 4000, 4600, 5200},
+              "chain order, repeats and gaps, to the sample");
+        bool quiet = true;
+        for (size_t i = 1000; i < 1100; ++i) quiet &= std::abs(v[i]) == 0;
+        for (size_t i = 2700; i < 2900; ++i) quiet &= std::abs(v[i]) == 0;
+        check(quiet, "silence in the gaps");
+        const double dA = maxDiff(v.data(), A.data(), 1000), dB = maxDiff(v.data() + 1700, B.data(), 600),
+                     dC = maxDiff(v.data() + 2300, C.data(), 400);
+        check(std::max({dA, dB, dC}) < 1e-6, "as recorded: the samples play unchanged", fmt("max diff %.2g", std::max({dA, dB, dC})));
+        check(g.chainPasses() == 2 && !g.finished() && g.endSample() < 0, "forever: 2 passes, not finishing");
+
+        // Level and offset per item.
+        WaveformParams q = p;
+        q.chain[1].keepLevel = false;
+        q.chain[1].ampDb = -6;
+        q.chain[2].offset = 100e3;
+        v = gen(q, 2900);
+        double pk = 0;
+        for (size_t i = 1100; i < 1700; ++i) pk = std::max(pk, (double)std::abs(v[i]));
+        check(std::fabs(20 * std::log10(pk) + 6) < 0.01, "item level: the peak plays at -6 dBFS", fmt("%.3f dBFS", 20 * std::log10(pk)));
+        const double f = meanFreq(v, 2300, 2700, rate);
+        check(std::fabs(f - 400e3) < 1, "item offset: +100 kHz moves the 300 kHz tone to 400 kHz", fmt("%.2f Hz", f));
+        q.chain[0].offset = 1.5e6;
+        check(!checkParams(q).ok(), "rejects an item offset outside the band");
+        q = p;
+        q.chain[0].repeats = 0;
+        check(!checkParams(q).ok(), "rejects 0 plays");
+        q.chain.clear();
+        check(!checkParams(q).ok(), "rejects an empty chain");
+
+        // A set number of passes ends after the last gap, then silence.
+        q = p;
+        q.chainLoops = 3;
+        q.startDelay = 100e-6;  // 200 samples
+        SigGen g3(q);
+        std::vector<cf> w(12000);
+        g3.generate(w.data(), (int64_t)w.size());
+        bool tail = true;
+        for (size_t i = 200 + 3 * 2900; i < w.size(); ++i) tail &= std::abs(w[i]) == 0;
+        check(g3.finished() && g3.endSample() == 200 + 3 * 2900 && g3.chainPasses() == 3 && tail,
+              "3 loops: ends after 3 passes (start delay + 3 x 2900 samples)",
+              fmt("end %g, passes %g", (double)g3.endSample(), g3.chainPasses()));
+        // A larger loop count revives it.
+        q.chainLoops = 4;
+        g3.setParams(q);
+        g3.generate(w.data(), 2000);  // (the 4th pass would end 2900 samples on)
+        check(!g3.finished() && g3.chainPasses() == 4, "raising the loop count plays on");
+
+        // Reordering while an item plays: it finishes, then the new order starts.
+        SigGen gr(p);
+        std::vector<cf> x(1200), y(1000);
+        gr.generate(x.data(), 1200);  // B started at 1100
+        q = p;
+        q.chain = {ic, ia, ib};
+        gr.setParams(q);
+        gr.generate(y.data(), 1000);
+        const auto& pls = gr.lastPulses();
+        check(pls.size() == 1 && pls[0].start == 1700 && pls[0].item == 0 && pls[0].len == 400 &&
+                  maxDiff(y.data(), B.data() + 100, 500) < 1e-6,
+              "a new order starts after the item that plays");
+        // A level change applies at once.
+        SigGen gl(p);
+        gl.generate(x.data(), 1150);  // B plays from 1100
+        q = p;
+        q.chain[1].keepLevel = false;
+        q.chain[1].ampDb = -20;
+        gl.setParams(q);
+        gl.generate(y.data(), 100);
+        pk = 0;
+        for (size_t i = 0; i < 100; ++i) pk = std::max(pk, (double)std::abs(y[i]));
+        check(std::fabs(20 * std::log10(pk) + 20) < 0.01, "an item's level changes while it plays");
+
+        // File: exactly 2 passes, items annotated.
+        FileGenJob job;
+        FileGenConfig c;
+        c.rec.prefix = dir + "/sgcheck_chain";
+        c.pulses = 2;
+        c.annotatePulses = true;
+        std::string err;
+        if (job.start(p, c, err)) {
+            auto st = waitJob(job);
+            check(fileSize(st.rec.dataPath) == 2 * 2900 * 8, "2 passes of cf32 = 46400 bytes", fmt("%g bytes", (double)fileSize(st.rec.dataPath)));
+            const std::string meta = readFile(st.rec.metaPath);
+            check(countOf(meta, "\"core:label\": \"") == 8 && countOf(meta, "sgcheck_chain_b.cf32 (2/2)") == 2 &&
+                      meta.find("\"mode\": \"chain\"") != std::string::npos,
+                  "chain file metadata: 8 item annotations and the chain");
+            remove(st.rec.dataPath.c_str());
+            remove(st.rec.metaPath.c_str());
+        } else {
+            check(false, "chain file starts", err);
+        }
+        // A finite chain ends the file by itself, whatever the duration.
+        q = p;
+        q.chainLoops = 1;
+        c.pulses = 0;
+        c.seconds = 1;
+        if (job.start(q, c, err)) {
+            auto st = waitJob(job);
+            check(fileSize(st.rec.dataPath) == 2900 * 8 && st.error.empty(), "1 loop: the file is one pass long",
+                  fmt("%g bytes", (double)fileSize(st.rec.dataPath)));
+            remove(st.rec.dataPath.c_str());
+            remove(st.rec.metaPath.c_str());
+        }
+
+        // The streaming wrapper reports the end (the transmitter stops on it).
+        sigGenBus().publish(q);
+        BusSigGen bg(rate, NAN);
+        std::vector<cf> z(4000);
+        bg.generate(z.data(), 4000);
+        check(bg.finished() && bg.chainPasses() == 1 && sigGenBus().chainFinished(), "the bus stream reports a finished chain");
+
+        // Chain files.
+        const std::string cf = dir + "/sgcheck.wvtchain.json";
+        q = p;
+        q.chainLoops = 5;
+        q.startDelay = 0.25;
+        q.chain[1].keepLevel = false;
+        q.chain[1].ampDb = -12.5;
+        q.chain[2].offset = -250e3;
+        q.chain[0].start = 1e-4;
+        q.chain[0].len = 2e-4;
+        WaveformParams r;
+        if (saveChain(cf, q, err) && loadChain(cf, r, err)) {
+            const std::string text = readFile(cf);
+            check(r.chain == q.chain && r.chainLoops == 5 && r.startDelay == 0.25 && r.rate == rate && r.fc == 915e6 &&
+                      r.mode == GenMode::Chain && text.find("\"path\": \"sgcheck_chain_a.cf32\"") != std::string::npos,
+                  "chain file round trip (paths stored relative to it)");
+        } else {
+            check(false, "chain file round trip", err);
+        }
+        remove(cf.c_str());
+        check(!loadChain(dir + "/no-such.wvtchain.json", r, err), "a missing chain file is an error", err);
+
+        // The cache keeps waveforms in use and drops the least recently used others.
+        forgetPlayback();
+        setPlaybackCacheBudget(2000);
+        auto held = loadPlayback(chainItemParams(p, 0), err);  // A: 1000, held
+        loadPlayback(chainItemParams(p, 1), err);              // B: 600
+        loadPlayback(chainItemParams(p, 2), err);              // C: 400 (2000 in all)
+        WaveformParams d = chainItemParams(p, 0);
+        d.playStart = 250e-6;  // A from sample 500: 500 more samples, over the budget
+        auto extra = loadPlayback(d, err);
+        check(held && extra && cachedPlayback(chainItemParams(p, 0)) && !cachedPlayback(chainItemParams(p, 1)) &&
+                  cachedPlayback(chainItemParams(p, 2)) && playbackCacheSamples() == 1900,
+              "cache budget: drops the least recently used waveform nobody holds",
+              fmt("%g samples cached", (double)playbackCacheSamples()));
+        setPlaybackCacheBudget(0);
+        forgetPlayback();
+        remove(pa.c_str());
+        remove(pb.c_str());
+        remove(pc.c_str());
+    }
+
+    // --- JSON reader ---
+    {
+        JsonValue v;
+        std::string err;
+        const bool ok = parseJson(R"({"a": [1, -2.5e3, true, null, {"b": "x\"y\\z\né"}], "c": {}, "d": []})", v, err);
+        const JsonValue* a = v.get("a");
+        check(ok && a && a->arr.size() == 5 && a->arr[1].num == -2500 && a->arr[2].b && a->arr[3].isNull() &&
+                  a->arr[4].string("b") == "x\"y\\z\n\xc3\xa9" && v.get("c") && v.get("d"),
+              "JSON: arrays, numbers, escapes, unicode", err);
+        check(!parseJson("{\"a\": [1, 2}", v, err) && err.find("line 1") != std::string::npos, "JSON: reports errors", err);
+        check(jsonQuote("a\"b\\c\n") == "\"a\\\"b\\\\c\\n\"", "JSON: quoting");
     }
 
     printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "all checks passed", failures, failures == 1 ? "" : "s");

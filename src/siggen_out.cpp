@@ -12,8 +12,31 @@
 // File generation
 // ---------------------------------------------------------------------------
 const char* eventName(const WaveformParams& p) {
-    return p.mode == GenMode::Playback ? "play" : p.mode == GenMode::CW ? "sweep" : "pulse";
+    switch (p.mode) {
+        case GenMode::Playback: return "play";
+        case GenMode::CW: return "sweep";
+        case GenMode::Chain: return "pass";
+        default: return "pulse";
+    }
 }
+
+namespace {
+// Loads every recording the waveform needs, so the streaming threads find them in the cache.
+bool preload(const WaveformParams& p, std::string& err) {
+    if (p.mode == GenMode::Playback) return loadPlayback(p, err) != nullptr;
+    if (p.mode != GenMode::Chain) return true;
+    for (size_t i = 0; i < p.chain.size(); ++i) {
+        std::string e;
+        if (!loadPlayback(chainItemParams(p, i), e)) {
+            err = "item " + std::to_string(i + 1) + ": " + e;
+            return false;
+        }
+    }
+    return true;
+}
+
+std::string baseName(const std::string& path) { return path.substr(path.find_last_of('/') + 1); }
+}  // namespace
 
 bool FileGenJob::start(const WaveformParams& p, const FileGenConfig& cfg, std::string& err) {
     cancel();
@@ -30,6 +53,10 @@ bool FileGenJob::start(const WaveformParams& p, const FileGenConfig& cfg, std::s
     }
     p_ = p;
     cfg_ = cfg;
+    if (p.mode == GenMode::Chain && !preload(p, err)) {
+        LOG_DEBUG("siggen", "chain: %s", err.c_str());
+        return false;
+    }
     if (p.mode == GenMode::Playback) {
         auto w = loadPlayback(p, err);
         if (!w) {
@@ -102,24 +129,40 @@ void FileGenJob::run() {
         }
         int64_t n = total > 0 ? std::min(chunk, total - done) : chunk;
         gen.generate(buf.data(), n);
+        const bool chain = p_.mode == GenMode::Chain;
         for (const auto& pl : gen.lastPulses()) {
-            if (cfg_.pulses > 0 && pulses == cfg_.pulses) {
+            // A chain counts passes (its first item's first play) and marks every item.
+            const bool counts = !chain || (pl.item == 0 && pl.rep == 0);
+            if (counts && cfg_.pulses > 0 && pulses == cfg_.pulses) {
                 // The pulse after the last one marks the end of the last PRI.
                 n = pl.start - done;
                 finished = true;
                 break;
             }
-            ++pulses;
-            if (cfg_.annotatePulses)
+            if (counts) ++pulses;
+            if (!cfg_.annotatePulses) continue;
+            if (chain) {
+                const ChainItem& c = p_.chain[(size_t)pl.item];
+                std::string label = std::to_string(pl.item + 1) + ": " + baseName(c.path);
+                if (c.repeats > 1) label += " (" + std::to_string(pl.rep + 1) + "/" + std::to_string(c.repeats) + ")";
+                rec_.annotate(pl.start, pl.len, label);
+            }
+            else
                 rec_.annotate(pl.start, pl.len, std::string(p_.mode == GenMode::Playback ? "playback" : eventName(p_)) + " " +
                                                     std::to_string(pulses));
+        }
+        // A finite chain ends after its last pass.
+        const int64_t end = gen.endSample();
+        if (end >= 0 && end <= done + n) {
+            n = std::max<int64_t>(0, end - done);
+            finished = true;
         }
         encodeSamples(cfg_.fmt, buf.data(), n, raw.data());
         ring_->push(raw.data(), n);
         done += n;
         if (total > 0) {
             progress_ = (double)done / (double)total;
-            finished = done >= total;
+            finished = finished || done >= total;
         } else {
             progress_ = (double)pulses / (double)cfg_.pulses;
         }
@@ -149,8 +192,8 @@ bool TxEngine::start(const TxConfig& cfg, std::string& err) {
         LOG_DEBUG("tx", "rejected: %s", err.c_str());
         return false;
     }
-    // Load the recording now, not in the transmit thread where it would underflow.
-    if (p.mode == GenMode::Playback && !loadPlayback(p, err)) {
+    // Load the recordings now, not in the transmit thread where it would underflow.
+    if (!preload(p, err)) {
         LOG_DEBUG("tx", "playback file: %s", err.c_str());
         return false;
     }
@@ -218,13 +261,106 @@ TxEngine::Stats TxEngine::stats() const {
     s.gain = tx_->gain();
     s.range = tx_->gainRange();
     s.tx = tx_->stats();
+    s.finished = gen_ && gen_->finished();
+    s.chainPasses = gen_ ? gen_->chainPasses() : 0;
     return s;
 }
 
 // ---------------------------------------------------------------------------
 // Preview
 // ---------------------------------------------------------------------------
+namespace {
+// A chain: load every item, then one pass in time (envelope, item plays) and
+// its average spectrum, from blocks spread over the pass.
+std::shared_ptr<SigPreviewRes> chainPreview(const SigPreviewReq& r, const CancelFn& cancelled) {
+    auto res = std::make_shared<SigPreviewRes>();
+    res->req = r;
+    WaveformParams p = r.p;
+    const double rate = p.rate;
+    double pass = 0;  // samples
+    for (size_t i = 0; i < p.chain.size(); ++i) {
+        SigPreviewRes::ChainInfo ci;
+        auto w = loadPlayback(chainItemParams(p, i), ci.error, cancelled);
+        if (cancelled()) return nullptr;
+        if (w) {
+            const ChainItem& c = p.chain[i];
+            ci.samples = (int64_t)w->s.size();
+            ci.seconds = (double)ci.samples / rate;
+            ci.fileSeconds = (double)w->fileSamples / w->fileRate;
+            ci.peakDb = 20 * std::log10(w->peak);
+            ci.outPeakDb = (c.keepLevel ? ci.peakDb : c.ampDb) + 20 * std::log10(w->outPeak / w->peak);
+            res->chainSamples += ci.samples;
+            pass += std::max(1, c.repeats) * ((double)ci.samples + c.gapAfter * rate);
+        } else if (res->error.empty()) {
+            res->error = "item " + std::to_string(i + 1) + ": " + ci.error;
+        }
+        res->chainItems.push_back(ci);
+    }
+    if (p.chain.empty()) res->error = "the chain is empty";
+    if (res->chainSamples > kPlayCacheBudget && res->error.empty())
+        res->error = "the chain holds " + fmtSI((double)res->chainSamples, "S") + ", more than the " +
+                     fmtSI((double)kPlayCacheBudget, "S") + " that can be loaded at once";
+    if (!res->error.empty()) return res;
+    res->passSeconds = pass / rate;
+
+    // One pass, without the start delay or the loop limit.
+    p.startDelay = 0;
+    p.chainLoops = 0;
+    constexpr int64_t kMaxPoints = 2000;
+    const int64_t n = std::min<int64_t>(std::llround(pass), kMaxPlaySamples + (8 << 20));
+    const int nfft = 4096;
+    const int64_t blocks = std::max<int64_t>(1, n / nfft);
+    const int64_t stride = std::max<int64_t>(1, blocks / 512);  // up to 512 spectrum blocks
+    auto fft = getFFT(nfft);
+    auto win = makeWindow(WindowType::BlackmanHarris, nfft);
+    double wsum = 0;
+    for (float w : win) wsum += w;
+    std::vector<double> acc(nfft, 0.0);
+    std::vector<cf> seg(nfft);
+    int segs = 0;
+    const int64_t per = std::max<int64_t>(1, (n + kMaxPoints - 1) / kMaxPoints);
+    SigGen g(p);
+    std::vector<cf> buf(16 * nfft);
+    double peak = 0;
+    int64_t inBucket = 0;
+    for (int64_t done = 0; done < n;) {
+        if (cancelled()) return nullptr;
+        const int64_t m = std::min<int64_t>((int64_t)buf.size(), n - done);
+        g.generate(buf.data(), m);
+        for (const auto& pl : g.lastPulses()) res->chainPlays.push_back(pl);
+        for (int64_t k = 0; k < m; ++k) {
+            peak = std::max(peak, (double)std::abs(buf[(size_t)k]));
+            if (++inBucket == per) {
+                res->t.push_back((double)(done + k + 1 - per) / rate);
+                res->mag.push_back(peak);
+                peak = 0;
+                inBucket = 0;
+            }
+        }
+        for (int64_t b = 0; b + nfft <= m; b += nfft) {
+            if (((done + b) / nfft) % stride) continue;
+            for (int k = 0; k < nfft; ++k) seg[k] = buf[(size_t)(b + k)] * win[k];
+            fft->forward(seg.data());
+            for (int k = 0; k < nfft; ++k) acc[k] += std::norm(seg[k]);
+            ++segs;
+        }
+        done += m;
+    }
+    res->f.resize(nfft);
+    res->db.resize(nfft);
+    const double norm = 1.0 / (std::max(1, segs) * wsum * wsum);
+    for (int j = 0; j < nfft; ++j) {
+        const int k = (j + nfft / 2) % nfft;
+        res->f[j] = p.fc + (j - nfft / 2) * rate / nfft;
+        res->db[j] = 10 * std::log10(acc[k] * norm + 1e-20);
+    }
+    res->rbw = rate / nfft;
+    return res;
+}
+}  // namespace
+
 std::shared_ptr<SigPreviewRes> computeSigPreview(const SigPreviewReq& r, const CancelFn& cancelled) {
+    if (r.p.mode == GenMode::Chain) return chainPreview(r, cancelled);
     auto res = std::make_shared<SigPreviewRes>();
     res->req = r;
     const double rate = r.p.rate;

@@ -114,6 +114,11 @@ static int runTx(const WaveformParams& p, const TxConfig& cfg, double seconds) {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
         st = tx.stats();
         if (!st.error.empty()) break;
+        if (st.finished) {
+            logProgressEnd();
+            logStatus("tx", "the chain finished after %d passes", st.chainPasses);
+            break;
+        }
         const double el = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
         if (seconds > 0 && el >= seconds) break;
         if (++tick % 5 == 0)
@@ -377,11 +382,16 @@ static void usage() {
         "      --play-rate HZ   the recording's sample rate (resampled to -r if different)\n"
         "      --play-segment START:LEN   play part of it (LEN 0 = to the end)\n"
         "      --play-gap S     silence between repeats    --play-once  don't repeat\n"
+        "      --chain FILE     play a chain saved from the window (.wvtchain.json)\n"
+        "      --chain-add PATH[@OFFSET][:N]   add a recording to the chain (repeatable), played N\n"
+        "                       times, e.g. b13.sigmf-meta@250k:3; the first sets -r and -c unless given\n"
+        "      --chain-loops N  passes through the chain (default 0 = until stopped)\n"
         "      --snr DB  --dc I:Q  --iq GAIN_DB:PHASE_DEG  --linewidth HZ   impairments\n"
         "      --gen-out PREFIX write to a file and exit (format via --record-format)\n"
         "      --gen-sample cf32|ci16|ci8|cu8   file sample format (default cf32)\n"
-        "      --gen-duration T | --gen-pulses N   file length (default 1 s; N pulses, plays or sweeps)\n"
-        "      --gen-annotate   SigMF: one annotation per pulse, play or sweep\n"
+        "      --gen-duration T | --gen-pulses N   file length (default 1 s; N pulses, plays, sweeps\n"
+        "                       or chain passes)\n"
+        "      --gen-annotate   SigMF: one annotation per pulse, play, sweep or chain item\n"
         "      --tx             TRANSMIT with a USRP until Ctrl+C (or --gen-duration)\n"
         "      --tx-gain DB     transmit gain (default 0)   --tx-args ARGS  (default type=b200)\n"
         "\n"
@@ -436,7 +446,9 @@ int main(int argc, char** argv) {
     FileGenConfig gc;
     TxConfig txc;
     bool haveGen = false, openGen = false, haveGenOut = false, haveTx = false, haveOffset = false, haveSweep = false;
-    std::string playFile;
+    std::string playFile, chainFile;
+    std::vector<std::string> chainAdds;
+    int chainLoops = -1;
     double playRate = 0;
     double genSeconds = 0;
     AudioParams ap;
@@ -673,6 +685,15 @@ int main(int argc, char** argv) {
         } else if (a == "--sweep-time") {
             if (!parseSI(next("--sweep-time"), gp.sweepPeriod)) { LOG_ERROR("main", "bad --sweep-time"); return 2; }
             haveGen = haveSweep = true;
+        } else if (a == "--chain") {
+            chainFile = next("--chain");
+            haveGen = true;
+        } else if (a == "--chain-add") {
+            chainAdds.push_back(next("--chain-add"));
+            haveGen = true;
+        } else if (a == "--chain-loops") {
+            chainLoops = atoi(next("--chain-loops"));
+            if (chainLoops < 0) { LOG_ERROR("main", "--chain-loops wants 0 (forever) or more"); return 2; }
         } else if (a == "--play") {
             playFile = next("--play");
             gp.mode = GenMode::Playback;
@@ -727,6 +748,57 @@ int main(int argc, char** argv) {
         LOG_ERROR("main", "the sweep options need --gen cw or --gen pulsed");
         return 2;
     }
+    if (!chainFile.empty() || !chainAdds.empty()) {
+        if (haveSweep || !playFile.empty()) {
+            LOG_ERROR("main", "--chain and --chain-add can't be combined with --play or a sweep");
+            return 2;
+        }
+        gp.mode = GenMode::Chain;
+        if (!chainFile.empty()) {
+            std::string err;
+            const WaveformParams before = gp;
+            if (!loadChain(chainFile, gp, err)) {
+                LOG_ERROR("main", "%s", err.c_str());
+                return 2;
+            }
+            if (ov.haveRate) gp.rate = before.rate;
+            if (ov.haveFc) gp.fc = before.fc;
+        }
+        for (const std::string& spec : chainAdds) {
+            // PATH[@OFFSET][:N]
+            std::string path = spec;
+            int reps = 1;
+            const size_t x = path.find_last_of(':');
+            if (x != std::string::npos && x + 1 < path.size() &&
+                path.find_first_not_of("0123456789", x + 1) == std::string::npos) {
+                reps = atoi(path.c_str() + x + 1);
+                path.erase(x);
+            }
+            const size_t at = path.find_last_of('@');
+            double off = 0;
+            const bool haveOff = at != std::string::npos;
+            if (haveOff) {
+                if (!parseSI(path.substr(at + 1).c_str(), off)) {
+                    LOG_ERROR("main", "--chain-add wants PATH[@OFFSET][:N], e.g. b13.sigmf-meta@250k:3");
+                    return 2;
+                }
+                path.erase(at);
+            }
+            if (gp.chain.empty()) {  // the first recording sets the rate and center unless -r / -c do
+                const FileMetaGuess g = guessMeta(expandHome(path));
+                if (!ov.haveRate && g.haveRate) gp.rate = g.rate;
+                if (!ov.haveFc && g.haveFc) gp.fc = g.fc;
+            }
+            std::string note;
+            ChainItem c = makeChainItem(path, gp, &note);
+            if (haveOff) c.offset = off;
+            c.repeats = std::max(1, reps);
+            LOG_INFO("main", "chain item %zu: %s (%s)", gp.chain.size() + 1, c.path.c_str(), note.c_str());
+            gp.chain.push_back(c);
+        }
+        if (chainLoops >= 0) gp.chainLoops = chainLoops;
+        txc.fc = gp.fc;
+    }
     if (!playFile.empty()) {
         // Plays as recorded unless -r / -c / --offset say otherwise.
         const FileMetaGuess g = guessMeta(expandHome(playFile));
@@ -755,7 +827,7 @@ int main(int argc, char** argv) {
             gc.rec.sigmf = rc.sigmf;
             gc.seconds = genSeconds > 0 ? genSeconds : 1;
             if (gc.pulses > 0 && gp.mode == GenMode::CW && !gp.sweeping()) {
-                LOG_ERROR("main", "--gen-pulses needs --gen pulsed, --play or a sweep");
+                LOG_ERROR("main", "--gen-pulses needs --gen pulsed, --play, a chain or a sweep");
                 return 2;
             }
             return runGenFile(gp, gc);
@@ -766,8 +838,10 @@ int main(int argc, char** argv) {
     }
     if (haveDevice) {
         if (ov.haveFc) dev.fc = ov.fc;
+        else if (dev.driver == "siggen" && haveGen) dev.fc = gp.fc;  // the loopback listens where the generator plays
         if (ov.haveRate) dev.rate = ov.rate;
         else if (dev.driver == "uhd") dev.rate = 10e6;
+        else if (dev.driver == "siggen" && haveGen) dev.rate = gp.rate;
     }
     // The audio channel: --chan, or the mode's default width at 0 Hz.
     ap.bw = haveChan ? chanBw : audioModeDefaultBw((AudioMode)ap.mode);

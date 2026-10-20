@@ -164,6 +164,7 @@ signal generator (-c sets the center frequency, -r the sample rate):
       --stagger S,S,..  --jitter PCT  --seed N  --burst N[:GAP]  --delay S
       --lfm up|down|tri:BW  --barker N
       --play FILE  --play-rate HZ  --play-segment START:LEN  --play-gap S  --play-once
+      --chain FILE.wvtchain.json  --chain-add PATH[@OFFSET][:N]  --chain-loops N
       --snr DB  --dc I:Q  --iq GAIN_DB:PHASE_DEG  --linewidth HZ
       --gen-out PREFIX write a file and exit (container via --record-format)
       --gen-sample cf32|ci16|ci8|cu8   --gen-duration T | --gen-pulses N   --gen-annotate
@@ -344,6 +345,7 @@ The window floats over the main window. It works in File mode and in Device mode
 | Bursts | N pulses, then extra dead time. A start delay before the first pulse |
 | In-pulse modulation | LFM up / down / triangle chirp with a set bandwidth, or Barker 2-13 phase codes |
 | Playback | a SigMF or raw IQ recording as a canned waveform: one segment, looped with a gap or played once |
+| Chain | several recordings played in turn, each with its own segment, offset, level, plays and gap; the chain loops forever or N times |
 | Impairments | white noise (SNR), DC offset, IQ gain/phase imbalance, carrier phase noise (linewidth) |
 
 The pulses are slices of one continuous carrier, so they are phase-coherent. wvt checks the
@@ -380,13 +382,34 @@ viewer. **Viewer's markers** plays only the part between the time markers of the
   start delay and one play. Changes apply immediately. A different recording starts again from
   its beginning.
 
+**Chain** plays a list of canned signals in order: files from the generator, regions exported
+from the viewer, or any SigMF or raw IQ recording. Add recordings by path, or with the **Last
+generated**, **Viewer's file** and **Viewer's markers** shortcuts. Click a row to edit it.
+
+- Each item has its own format, file rate, segment, **offset**, **level**, number of **plays** and
+  **gap after** each play. Adding a recording reads its metadata. Its offset puts it at its
+  recorded frequency, if that is inside the band. The first recording also sets the generator's
+  rate and center frequency. The level is **as recorded** by default (the samples play
+  unchanged); otherwise the recording's peak plays at the set dBFS.
+- **Loop**: *Forever* plays the chain until the output stops; *Times* plays it N times. After the
+  last pass the output is silent: a file ends there, the loopback says so, and a USRP stops
+  transmitting by itself.
+- While it plays, offset and level changes apply at once. Adding, removing or reordering items, or
+  changing a segment, starts the chain again from the first item after the current one ends.
+- All the items are loaded before the chain starts, up to 128 Mi samples in all (1 GiB as cf32),
+  each up to 32 Mi samples. The noise (SNR) refers to the loudest item.
+- **Chain file**: **Save** writes the chain, the loop count, the start delay and the generator's
+  rate and center to a `.wvtchain.json` file. Recordings in the chain file's folder (or below it)
+  are stored relative to it, so the folder can move. **Load** reads it back, and so does `--chain`.
+- The preview shows one pass with each item shaded and numbered, and its average spectrum.
+
 **Outputs** (select one with *Output* at the top of the window):
 
 - **File** writes SigMF or raw files in cf32, ci16, ci8 or cu8, with names like recordings. The
-  length is a duration. In pulsed mode, the length can also be an exact number of PRIs, and with
-  a sweep an exact number of sweep periods. The SigMF
+  length is a duration. In pulsed mode, the length can also be an exact number of PRIs, with
+  a sweep an exact number of sweep periods, and with a chain a number of passes. The SigMF
   metadata includes all generator settings (`wvt:siggen`). If you select it, the metadata also has
-  one annotation for each pulse, play or sweep. **Open in viewer** opens the result.
+  one annotation for each pulse, play, sweep or chain item. **Open in viewer** opens the result.
 - **Loopback** streams the waveform into the live spectrum and waterfall, in Device mode with the
   device *Signal generator loopback*. The live view shows the waveform as a receiver tuned to the
   center frequency shows it. Changes apply while you make them. The main window can record the
@@ -423,6 +446,8 @@ wvt --gen pulsed --pri 1m --pw 20u --sweep -2M:2M --sweep-step 500k:10m --level-
 wvt --gen cw --offset 100k -c 915M -r 1M --tx --tx-gain 10 --gen-duration 5         # transmit 5 s
 wvt --play ~/caps/b13_*.sigmf-meta --play-gap 5m --gen-out ~/caps/b13x10 --gen-pulses 10  # 10 plays
 wvt --play capture.cs16 --play-rate 2.4M -r 10M -c 915M --play-segment 1.5:0.2 --tx    # replay a burst
+wvt --chain-add ~/caps/b13.sigmf-meta:3 --chain-add ~/caps/lfm.sigmf-meta@250k --chain-loops 5 --tx  # 5 passes
+wvt --chain ~/caps/demo.wvtchain.json --gen-out ~/caps/demo --gen-pulses 10 --gen-annotate          # 10 passes
 ```
 
 ## Audio
@@ -574,11 +599,13 @@ Try `wvt out.sigmf-meta --chan 300k:150k --view 0.5:0.505`.
 | `src/sdr_rtlsdr.cpp` | RTL-SDR backend (librtlsdr) |
 | `src/sdr_uhd.cpp` | USRP backend (UHD C API) |
 | `src/sdr_sim.cpp` | Simulated device with synthetic signals |
-| `src/siggen.*` | Signal generator DSP: CW / pulsed / playback waveforms, resampler, validation, parameter bus |
+| `src/siggen.*` | Signal generator DSP: CW / pulsed / playback / chain waveforms, waveform cache, resampler, validation, chain files, parameter bus |
 | `src/siggen_out.*` | Generator outputs: file job, transmit engine, preview |
 | `src/sdr_siggen.cpp` | Loopback device that streams the generator into the live view |
 | `src/sdr_tx.h` | Transmitter interface (`sdr_uhd.cpp` implements it for UHD) |
 | `src/app_siggen.cpp` | Signal generator window |
+| `src/app_chain.cpp` | Signal generator: the Chain section and its preview |
+| `src/json.*` | Small JSON reader (chain files) |
 | `src/audio_dsp.*` | Streaming audio demodulator: channelizer, AM / FM / SSB / CW, resampler |
 | `src/audio_engine.*` | Audio sessions (file or live), drift control, WAV recording and export |
 | `src/audio_out.*` | Sound output (miniaudio) and the ring buffer to the audio callback |

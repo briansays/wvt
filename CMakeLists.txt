@@ -71,6 +71,7 @@ add_executable(wvt
   src/ui_util.cpp
   src/app_live.cpp
   src/app_siggen.cpp
+  src/app_chain.cpp
   src/live.cpp
   src/recorder.cpp
   src/sdr_device.cpp
@@ -78,6 +79,7 @@ add_executable(wvt
   src/sdr_siggen.cpp
   src/siggen.cpp
   src/siggen_out.cpp
+  src/json.cpp
   src/audio_dsp.cpp
   src/audio_engine.cpp
   src/audio_out.cpp
@@ -317,7 +319,7 @@ endif()
 add_executable(iqgen tools/iqgen.cpp)
 
 # Signal generator self-test (DSP and file output; no device needed)
-add_executable(siggen_check tools/siggen_check.cpp src/siggen.cpp src/siggen_out.cpp src/recorder.cpp
+add_executable(siggen_check tools/siggen_check.cpp src/siggen.cpp src/siggen_out.cpp src/json.cpp src/recorder.cpp
   src/sdr_device.cpp src/sdr_sim.cpp src/sdr_siggen.cpp src/iq_file.cpp src/dsp.cpp src/ui_util.cpp src/log.cpp)
 target_include_directories(siggen_check PRIVATE src)
 target_link_libraries(siggen_check PRIVATE imgui_implot Threads::Threads)

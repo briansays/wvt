@@ -63,6 +63,8 @@ public:
         double fc = 0, rate = 0, gain = 0;
         GainRange range;
         SdrTx::Stats tx;
+        bool finished = false;  // a finite chain has ended: stop the transmitter
+        int chainPasses = 0;
     };
 
     TxEngine() = default;
@@ -98,5 +100,17 @@ struct SigPreviewRes {
     std::string error;  // the recording could not be loaded (nothing else is set)
     double playSeconds = 0, fileSeconds = 0, playPeakDb = 0;
     double playOutPeakDb = 0;  // the output's peak, dBFS (above ampDb only through resampling overshoot)
+    // chain: each item as loaded (or why not), and the plays of one pass
+    struct ChainInfo {
+        double seconds = 0, fileSeconds = 0;  // the segment as played, and the whole file
+        double peakDb = 0;                    // recorded peak, dBFS
+        double outPeakDb = 0;                 // played peak, dBFS (resampling overshoot, level)
+        int64_t samples = 0;
+        std::string error;
+    };
+    std::vector<ChainInfo> chainItems;
+    std::vector<SigGen::Pulse> chainPlays;  // one pass, from its start
+    double passSeconds = 0;
+    int64_t chainSamples = 0;  // all items, loaded
 };
 std::shared_ptr<SigPreviewRes> computeSigPreview(const SigPreviewReq& r, const CancelFn& cancelled);

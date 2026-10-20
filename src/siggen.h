@@ -1,12 +1,13 @@
 #pragma once
-// Signal generator: CW, pulsed and played-back waveforms, generated as a
+// Signal generator: CW, pulsed, played-back and chained waveforms, generated as a
 // phase-continuous stream of complex float samples (full scale = 1.0).
 //
 // The carrier is a continuously running oscillator, so pulses are coherent
 // (they are gated slices of one carrier). A pulsed waveform is a pulse
 // template (edge shaping x intrapulse modulation) built once per parameter
 // change and replayed on the PRI schedule. Playback works the same way with
-// a recording (SigMF or raw IQ) as the template, shifted by the offset.
+// a recording (SigMF or raw IQ) as the template, shifted by the offset. A
+// chain plays several recordings in turn, each with its own offset and level.
 #include <atomic>
 #include <cmath>
 #include <complex>
@@ -19,7 +20,7 @@
 
 #include "iq_file.h"
 
-enum class GenMode : int { CW = 0, Pulsed, Playback };
+enum class GenMode : int { CW = 0, Pulsed, Playback, Chain };
 enum class EdgeShape : int { Rect = 0, Linear, RaisedCos, Gaussian, Count };
 enum class PriPattern : int { Fixed = 0, Stagger, Jitter, Count };
 enum class IntraMod : int { None = 0, LfmUp, LfmDown, LfmTriangle, Barker, Count };
@@ -36,6 +37,20 @@ const char* intraModName(IntraMod m);
 const char* sweepShapeName(SweepShape s);
 // Barker code lengths that exist: 2, 3, 4, 5, 7, 11, 13.
 const std::vector<int>& barkerLengths();
+
+// One recording in a chain (issue #27).
+struct ChainItem {
+    std::string path;        // data file (a .sigmf-data, or raw samples)
+    FormatParams fp;         // how to read it
+    double fileRate = 0;     // its sample rate; resampled to the output rate if different (0 = same)
+    double start = 0, len = 0;  // segment to play, s (len 0 = to the end)
+    double offset = 0;       // its baseband lands at fc + offset, Hz
+    bool keepLevel = true;   // play the samples as recorded; otherwise scale the peak to ampDb
+    double ampDb = -6;       // dBFS
+    int repeats = 1;         // plays in a row
+    double gapAfter = 0;     // silence after each play, s
+    bool operator==(const ChainItem&) const = default;
+};
 
 struct WaveformParams {
     GenMode mode = GenMode::CW;
@@ -80,6 +95,11 @@ struct WaveformParams {
     bool playLoop = true;      // repeat; otherwise play once (after startDelay)
     double playGap = 0;        // silence between repeats, s
 
+    // Chain: the items play in order, `chainLoops` times (0 = until stopped),
+    // after startDelay.
+    std::vector<ChainItem> chain;
+    int chainLoops = 0;
+
     // Impairments
     bool noise = false;
     double snrDb = 30;  // peak signal power / total noise power over the full band
@@ -100,6 +120,22 @@ struct WaveformParams {
     double sweepOffsetAt(int64_t k) const;
     double sweepLevelAt(int64_t k) const;
 };
+
+// The playback parameters that load chain item i (for loadPlayback / cachedPlayback).
+WaveformParams chainItemParams(const WaveformParams& p, size_t i);
+
+// A chain item for a recording, from its metadata (format, rate, frequency).
+// The offset puts it at its recorded frequency relative to p.fc, or at 0 when
+// that is outside the band. note: where the settings came from, and anything
+// that didn't fit.
+ChainItem makeChainItem(const std::string& path, const WaveformParams& p, std::string* note = nullptr);
+
+// Chain files (*.wvtchain.json): the items, the loop count, the start delay,
+// and the generator's rate and center frequency. Recordings in the chain
+// file's folder (or below it) are stored relative to it, so the folder can
+// move. loadChain sets chain, chainLoops, startDelay, rate and fc.
+bool saveChain(const std::string& path, const WaveformParams& p, std::string& err);
+bool loadChain(const std::string& path, WaveformParams& p, std::string& err);
 
 struct ParamCheck {
     std::vector<std::string> errors, warnings;
@@ -125,6 +161,11 @@ std::shared_ptr<const PlaybackWave> cachedPlayback(const WaveformParams& p);
 // Drops the cache, so the next load rereads the file.
 void forgetPlayback();
 constexpr int64_t kMaxPlaySamples = int64_t(1) << 25;  // 32 Mi samples (256 MB as floats)
+// The cache keeps every loaded waveform up to this many samples in all (1 GiB
+// as floats). Over it, the least recently used ones that nothing else holds go.
+constexpr int64_t kPlayCacheBudget = int64_t(1) << 27;
+int64_t playbackCacheSamples();
+void setPlaybackCacheBudget(int64_t samples);  // for tests; <= 0 restores the default
 
 // One line summary, e.g. "pulsed, PRI 1 ms, PW 10 us, LFM up 1 MHz, -6 dBFS".
 std::string describeParams(const WaveformParams& p);
@@ -154,12 +195,24 @@ public:
 
     struct Pulse {
         int64_t start, len;
+        int item = -1, rep = 0;  // chain: which item, and which of its repeats
     };
-    // Pulses (playback repeats, sweep periods) that started during the last generate() call.
+    // Pulses (playback repeats, sweep periods, chain items) that started during the last generate() call.
     const std::vector<Pulse>& lastPulses() const { return pulses_; }
+
+    // Chain: passes started so far (the one playing included), and where a finite chain ends (the
+    // sample after the last gap; -1 while it doesn't end). The output is
+    // silent from there on.
+    int chainPasses() const { return chainPass_; }
+    int64_t endSample() const { return chainEnd_ ? chainEndAt_ : -1; }
+    bool finished() const { return chainEnd_ && n_ >= chainEndAt_; }
 
 private:
     void apply(const WaveformParams& p);
+    void applyChain(const WaveformParams& old, const WaveformParams& p);
+    bool canApplyNow() const;
+    void startChainItem();
+    void setItemLevel();
     void buildTemplate();
     int64_t tmplLen() const { return tmpl_ ? (int64_t)tmpl_->size() : 0; }
     double nextPri();
@@ -177,7 +230,7 @@ private:
     int64_t n_ = 0;
     double ph_ = 0;  // carrier phase, radians
     double amp_ = 1;
-    double offset_ = 0;    // carrier offset in use (a swept pulse's own)
+    double offset_ = 0;    // carrier offset in use (a chain item's or a swept pulse's own)
     double noiseAmp_ = 1;  // the level the SNR refers to
     std::shared_ptr<const std::vector<std::complex<float>>> tmpl_;  // pulse, or the playback recording
     std::shared_ptr<const PlaybackWave> wave_;
@@ -195,6 +248,17 @@ private:
     int64_t sweepN_ = 0;   // CW: position in the sweep period
     int64_t sweepT0_ = 0;  // pulsed: the sample where the sweep period started
 
+    // chain: the item that plays at nextStart_, and the one playing now
+    std::vector<std::shared_ptr<const PlaybackWave>> waves_;
+    size_t chainIdx_ = 0;
+    int chainRep_ = 0;
+    int chainPass_ = 0;  // passes started
+    int chainDone_ = 0;  // passes whose last item has started (the schedule is past them)
+    int curItem_ = -1;
+    bool chainEnd_ = false;   // the last pass is scheduled: no more items
+    int64_t chainEndAt_ = 0;
+    double chainResume_ = 0;  // where the next item would have started (if the loop count grows)
+
     uint64_t rng_ = 0x9e3779b97f4a7c15ull;
     bool haveSpare_ = false;
     double spare_ = 0;
@@ -208,10 +272,20 @@ public:
     WaveformParams get(uint64_t* version = nullptr) const;
     uint64_t version() const { return ver_.load(std::memory_order_acquire); }
 
+    // Chain progress of the stream that follows the bus (the loopback shows it).
+    void reportChain(int passes, bool finished) {
+        chainPasses_.store(passes, std::memory_order_relaxed);
+        chainFinished_.store(finished, std::memory_order_relaxed);
+    }
+    int chainPasses() const { return chainPasses_.load(std::memory_order_relaxed); }
+    bool chainFinished() const { return chainFinished_.load(std::memory_order_relaxed); }
+
 private:
     mutable std::mutex m_;
     WaveformParams p_;
     std::atomic<uint64_t> ver_{1};
+    std::atomic<int> chainPasses_{0};
+    std::atomic<bool> chainFinished_{false};
 };
 SigGenBus& sigGenBus();
 
@@ -222,10 +296,15 @@ public:
     BusSigGen(double rate, double tuneFc);
     void generate(std::complex<float>* out, int64_t n);
     void setTuning(double fc) { gen_.setTuning(fc); }
+    // Chain progress, readable from other threads.
+    int chainPasses() const { return passes_.load(std::memory_order_relaxed); }
+    bool finished() const { return finished_.load(std::memory_order_relaxed); }
 
 private:
     WaveformParams fetch();
     double rate_;
     uint64_t ver_ = 0;
     SigGen gen_;
+    std::atomic<int> passes_{0};
+    std::atomic<bool> finished_{false};
 };
