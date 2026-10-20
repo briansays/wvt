@@ -2,8 +2,8 @@
 
 Branch: `21-apple-gpu`, from `main` at `dea9c20` (after the CUDA work, PR #20, and the
 region export, PR #22).
-Status: **steps 0–6 implemented** (2026-10-20); step 7 (macOS CI) dropped. The GUI on screen
-is still to test (§11). The numbers in §2 come from throwaway prototypes in the session
+Status: **steps 0–6 implemented** (2026-10-20), PR #25; step 7 (macOS CI) dropped. The user
+tested the GUI on screen (2026-10-20). The numbers in §2 come from throwaway prototypes in the session
 scratch folder; they are not in the repository.
 
 ## 1. Goal
@@ -271,7 +271,11 @@ user chose the hybrid (2026-10-20):
 - `-DWVT_WITH_METAL=OFF`: builds the stub ("built without GPU support").
 - The CUDA 12.8 container build still compiles with no warnings, and its self-tests pass.
 
-### GUI: still to test on screen
+### GUI
 
-The status bar `GPU Apple M5`, the GPU checkbox, `(GPU)` in live mode (`--device sim` at a high
-rate), a region export with a band, and `WVT_GPU_FORCE_FAIL=1`.
+The user tested the GUI on screen (2026-10-20). All five checks passed:
+- the status bar showed `GPU Apple M5`;
+- the GPU checkbox switched the GPU off and on;
+- live mode showed `(GPU)`;
+- a region export with a band worked;
+- `WVT_GPU_FORCE_FAIL=1` gave the `CPU` tag with the reason in the tooltip.
