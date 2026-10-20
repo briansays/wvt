@@ -23,10 +23,15 @@ enum class GenMode : int { CW = 0, Pulsed, Playback };
 enum class EdgeShape : int { Rect = 0, Linear, RaisedCos, Gaussian, Count };
 enum class PriPattern : int { Fixed = 0, Stagger, Jitter, Count };
 enum class IntraMod : int { None = 0, LfmUp, LfmDown, LfmTriangle, Barker, Count };
+// CW sweeps (issue #28). Ramp up goes From -> To, ramp down To -> From, a
+// triangle From -> To -> From; each repeats every period. Stepped (frequency
+// only) holds From, From + step, ... up to To for one dwell each.
+enum class SweepShape : int { Off = 0, RampUp, RampDown, Triangle, Stepped, Count };
 
 const char* edgeName(EdgeShape e);
 const char* priPatternName(PriPattern p);
 const char* intraModName(IntraMod m);
+const char* sweepShapeName(SweepShape s);
 // Barker code lengths that exist: 2, 3, 4, 5, 7, 11, 13.
 const std::vector<int>& barkerLengths();
 
@@ -37,7 +42,15 @@ struct WaveformParams {
     double offset = 100e3;     // carrier offset from fc, Hz
     double ampDb = -6;         // peak amplitude, dBFS
     double phaseDeg = 0;       // carrier phase at the first sample
-    double driftHzPerSec = 0;  // CW: linear frequency drift
+    double driftHzPerSec = 0;  // CW: linear frequency drift (ignored while the frequency sweeps)
+
+    // CW sweeps. Both run over one period and repeat until the output stops.
+    SweepShape fSweep = SweepShape::Off;  // replaces `offset`
+    double fFrom = -400e3, fTo = 400e3;   // offsets from fc, Hz
+    double sweepPeriod = 10e-3;           // s (a stepped sweep derives it from the step and dwell)
+    double fStep = 10e3, fDwell = 1e-3;   // stepped sweep
+    SweepShape aSweep = SweepShape::Off;  // replaces `ampDb`; no Stepped
+    double aFrom = -40, aTo = -6;         // dBFS
 
     // Pulsed. The pulse width is the whole on-time, edges included.
     double pri = 1e-3;
@@ -76,6 +89,12 @@ struct WaveformParams {
 
     double minPri() const;   // shortest PRI the pattern can produce
     double meanPri() const;  // for duty cycle / average power
+    bool sweeping() const { return mode == GenMode::CW && (fSweep != SweepShape::Off || aSweep != SweepShape::Off); }
+    int sweepSteps() const;            // stepped sweep: number of frequencies
+    int64_t sweepSamples() const;      // one sweep period, in samples (at least 2)
+    // Frequency offset (Hz) and level (dBFS) at sample k of a period, k in [0, sweepSamples()).
+    double sweepOffsetAt(int64_t k) const;
+    double sweepLevelAt(int64_t k) const;
 };
 
 struct ParamCheck {
@@ -125,11 +144,13 @@ public:
 
     void generate(std::complex<float>* out, int64_t n);
     int64_t position() const { return n_; }
+    // CW sweep: jump to sample k of the period (the preview samples a long sweep this way).
+    void seekSweep(int64_t k);
 
     struct Pulse {
         int64_t start, len;
     };
-    // Pulses (or playback repeats) that started during the last generate() call.
+    // Pulses (playback repeats, sweep periods) that started during the last generate() call.
     const std::vector<Pulse>& lastPulses() const { return pulses_; }
 
 private:
@@ -139,6 +160,7 @@ private:
     double nextPri();
     void scheduleAfter(double start);
     void carrier(std::complex<float>* out, const std::complex<float>* mod, int64_t m);
+    void sweep(std::complex<float>* out, int64_t m);
     void advanceCarrier(int64_t m);
     void impair(std::complex<float>* out, int64_t m);
     double gauss();
@@ -162,6 +184,7 @@ private:
     size_t staggerIdx_ = 0;
     uint64_t jitterRng_ = 1;
     std::vector<Pulse> pulses_;
+    int64_t sweepN_ = 0;  // position in the sweep period
 
     uint64_t rng_ = 0x9e3779b97f4a7c15ull;
     bool haveSpare_ = false;

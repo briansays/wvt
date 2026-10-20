@@ -1,6 +1,7 @@
 #include "siggen.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 
 #include "dsp.h"
@@ -63,6 +64,12 @@ std::string jsonString(const std::string& v) {
     return o + "\"";
 }
 
+std::string lower(const char* s) {
+    std::string o(s);
+    for (char& c : o) c = (char)std::tolower((unsigned char)c);
+    return o;
+}
+
 std::string baseName(const std::string& path) { return path.substr(path.find_last_of('/') + 1); }
 
 double playFileRate(const WaveformParams& p) { return p.playRate > 0 ? p.playRate : p.rate; }
@@ -72,6 +79,26 @@ bool sameSchedule(const WaveformParams& a, const WaveformParams& b) {
     return a.mode == b.mode && a.rate == b.rate && a.pri == b.pri && a.priPattern == b.priPattern &&
            a.stagger == b.stagger && a.jitterPct == b.jitterPct && a.seed == b.seed && a.burstPulses == b.burstPulses &&
            a.burstGap == b.burstGap && a.playLoop == b.playLoop && a.playGap == b.playGap;
+}
+
+// True if a and b sweep the same way (a change otherwise starts the period again).
+bool sameSweep(const WaveformParams& a, const WaveformParams& b) {
+    return a.mode == b.mode && a.rate == b.rate && a.fSweep == b.fSweep && a.fFrom == b.fFrom && a.fTo == b.fTo &&
+           a.sweepPeriod == b.sweepPeriod && a.fStep == b.fStep && a.fDwell == b.fDwell && a.aSweep == b.aSweep &&
+           a.aFrom == b.aFrom && a.aTo == b.aTo;
+}
+
+// Value of a sweep shape at sample k of a period of P samples. `step`: the
+// stepped sweep's step (Hz) and dwell (samples).
+double shapeAt(SweepShape s, double from, double to, int64_t k, int64_t P, double step, int64_t dwell) {
+    const double u = (double)k / (double)P;
+    switch (s) {
+        case SweepShape::RampUp: return from + (to - from) * u;
+        case SweepShape::RampDown: return to + (from - to) * u;
+        case SweepShape::Triangle: return 2 * k < P ? from + (to - from) * 2 * u : to - (to - from) * (2 * u - 1);
+        case SweepShape::Stepped: return from + (to >= from ? step : -step) * (double)(k / dwell);
+        default: return from;
+    }
 }
 }  // namespace
 
@@ -105,6 +132,17 @@ const char* intraModName(IntraMod m) {
     }
 }
 
+const char* sweepShapeName(SweepShape s) {
+    switch (s) {
+        case SweepShape::Off: return "Off";
+        case SweepShape::RampUp: return "Ramp up";
+        case SweepShape::RampDown: return "Ramp down";
+        case SweepShape::Triangle: return "Triangle";
+        case SweepShape::Stepped: return "Stepped";
+        default: return "?";
+    }
+}
+
 const std::vector<int>& barkerLengths() {
     static const std::vector<int> v{2, 3, 4, 5, 7, 11, 13};
     return v;
@@ -127,6 +165,26 @@ double WaveformParams::meanPri() const {
     return pri;
 }
 
+int WaveformParams::sweepSteps() const {
+    if (!(fStep > 0)) return 1;
+    return (int)std::min(1e7, std::floor(std::fabs(fTo - fFrom) / fStep + 1e-9) + 1);
+}
+
+int64_t WaveformParams::sweepSamples() const {
+    if (fSweep == SweepShape::Stepped) return (int64_t)sweepSteps() * std::max<int64_t>(1, std::llround(fDwell * rate));
+    return std::max<int64_t>(2, std::llround(sweepPeriod * rate));
+}
+
+double WaveformParams::sweepOffsetAt(int64_t k) const {
+    if (fSweep == SweepShape::Off) return offset;
+    return shapeAt(fSweep, fFrom, fTo, k, sweepSamples(), fStep, std::max<int64_t>(1, std::llround(fDwell * rate)));
+}
+
+double WaveformParams::sweepLevelAt(int64_t k) const {
+    if (aSweep == SweepShape::Off || aSweep == SweepShape::Stepped) return ampDb;
+    return shapeAt(aSweep, aFrom, aTo, k, sweepSamples(), 0, 1);
+}
+
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
@@ -139,11 +197,31 @@ ParamCheck checkParams(const WaveformParams& p) {
         return c;
     }
     const double nyq = p.rate / 2;
+    const bool fSweep = p.mode == GenMode::CW && p.fSweep != SweepShape::Off;
+    const bool aSweep = p.mode == GenMode::CW && p.aSweep != SweepShape::Off;
     if (!(p.ampDb <= 0)) err("Amplitude must be 0 dBFS or less");
-    if (!(std::fabs(p.offset) < nyq)) err("Offset must be inside the band (|offset| < " + fmtSI(nyq, "Hz") + ")");
+    if (!fSweep && !(std::fabs(p.offset) < nyq)) err("Offset must be inside the band (|offset| < " + fmtSI(nyq, "Hz") + ")");
     if (p.mode == GenMode::CW) {
-        if (p.driftHzPerSec != 0)
+        if (fSweep) {
+            if (p.driftHzPerSec != 0) warn("Drift is ignored while the frequency sweeps");
+            if (!(std::fabs(p.fFrom) < nyq && std::fabs(p.fTo) < nyq))
+                err("The sweep must stay inside the band (|from| and |to| < " + fmtSI(nyq, "Hz") + ")");
+            if (p.fFrom == p.fTo) err("The sweep needs different From and To frequencies");
+            if (p.fSweep == SweepShape::Stepped) {
+                if (!(p.fStep > 0)) err("The frequency step must be positive");
+                else if (p.sweepSteps() > 1000000) err("More than 1000000 steps: use a larger step");
+                if (!(p.fDwell * p.rate >= 1)) err("Dwell must be at least one sample (" + fmtSI(1 / p.rate, "s") + ")");
+            }
+        } else if (p.driftHzPerSec != 0) {
             warn("The tone drifts by " + fmtSI(std::fabs(p.driftHzPerSec), "Hz/s") + " and wraps around at the band edge");
+        }
+        if (aSweep) {
+            if (p.aSweep == SweepShape::Stepped) err("The level can't be stepped");
+            if (!(p.aFrom <= 0 && p.aTo <= 0)) err("Sweep levels must be 0 dBFS or less");
+            if (p.aFrom == p.aTo) err("The level sweep needs different From and To levels");
+        }
+        if ((fSweep || aSweep) && p.fSweep != SweepShape::Stepped && !(p.sweepPeriod * p.rate >= 2))
+            err("The sweep period must be at least 2 samples (" + fmtSI(2 / p.rate, "s") + ")");
     } else if (p.mode == GenMode::Playback) {
         const double fr = playFileRate(p);
         if (p.playPath.empty()) err("Choose a recording to play");
@@ -194,7 +272,7 @@ ParamCheck checkParams(const WaveformParams& p) {
     if (p.linewidth < 0) err("Linewidth can't be negative");
 
     if (c.ok()) {
-        const double amp = std::pow(10.0, p.ampDb / 20);
+        const double amp = std::pow(10.0, (aSweep ? std::max(p.aFrom, p.aTo) : p.ampDb) / 20);
         double peak = amp * std::max(1.0, std::pow(10.0, p.iqGainDb / 20)) + std::max(std::fabs(p.dcI), std::fabs(p.dcQ));
         if (p.noise) peak += 3 * amp * std::sqrt(std::pow(10.0, -p.snrDb / 10) / 2);
         if (peak > 1) warn("Peaks exceed full scale: integer file formats and the USRP will clip");
@@ -206,7 +284,13 @@ std::string describeParams(const WaveformParams& p) {
     char amp[32];
     snprintf(amp, sizeof amp, "%.1f dBFS", p.ampDb);
     std::string s;
-    if (p.mode == GenMode::CW) {
+    if (p.mode == GenMode::CW && p.fSweep == SweepShape::Stepped) {
+        s = "CW stepped " + fmtSI(p.fFrom, "Hz") + " to " + fmtSI(p.fTo, "Hz") + " by " + fmtSI(p.fStep, "Hz") + ", " +
+            fmtSI(p.fDwell, "s") + " dwell (" + std::to_string(p.sweepSteps()) + " steps)";
+    } else if (p.mode == GenMode::CW && p.fSweep != SweepShape::Off) {
+        s = "CW sweep " + fmtSI(p.fFrom, "Hz") + " to " + fmtSI(p.fTo, "Hz") + ", " + lower(sweepShapeName(p.fSweep)) + " " +
+            fmtSI(p.sweepPeriod, "s");
+    } else if (p.mode == GenMode::CW) {
         s = "CW, offset " + fmtSI(p.offset, "Hz");
         if (p.driftHzPerSec != 0) s += ", drift " + fmtSI(p.driftHzPerSec, "Hz/s");
     } else if (p.mode == GenMode::Playback) {
@@ -238,7 +322,13 @@ std::string describeParams(const WaveformParams& p) {
         else if (p.intra != IntraMod::None) s += ", " + std::string(intraModName(p.intra)) + " " + fmtSI(p.chirpBw, "Hz");
         s += ", offset " + fmtSI(p.offset, "Hz");
     }
-    s += ", " + std::string(amp);
+    if (p.mode == GenMode::CW && p.aSweep != SweepShape::Off) {
+        snprintf(amp, sizeof amp, "%.1f to %.1f dBFS", p.aFrom, p.aTo);
+        s += ", level " + std::string(amp) + " " + lower(sweepShapeName(p.aSweep));
+        if (p.fSweep == SweepShape::Off) s += " " + fmtSI(p.sweepPeriod, "s");
+    } else {
+        s += ", " + std::string(amp);
+    }
     if (p.noise) s += ", SNR " + num(p.snrDb) + " dB";
     return s;
 }
@@ -253,6 +343,18 @@ std::string paramsJson(const WaveformParams& p) {
     add("phase_deg", num(p.phaseDeg));
     if (p.mode == GenMode::CW) {
         add("drift_hz_per_s", num(p.driftHzPerSec));
+        if (p.sweeping()) {
+            auto name = [&](SweepShape v) { return str(lower(sweepShapeName(v)).c_str()); };
+            std::string w = "{\"period_s\": " + num((double)p.sweepSamples() / p.rate);
+            if (p.fSweep != SweepShape::Off) {
+                w += ", \"frequency\": " + name(p.fSweep) + ", \"from_hz\": " + num(p.fFrom) + ", \"to_hz\": " + num(p.fTo);
+                if (p.fSweep == SweepShape::Stepped)
+                    w += ", \"step_hz\": " + num(p.fStep) + ", \"dwell_s\": " + num(p.fDwell);
+            }
+            if (p.aSweep != SweepShape::Off)
+                w += ", \"level\": " + name(p.aSweep) + ", \"from_dbfs\": " + num(p.aFrom) + ", \"to_dbfs\": " + num(p.aTo);
+            add("sweep", w + "}");
+        }
     } else if (p.mode == GenMode::Playback) {
         add("source_file", jsonString(p.playPath));
         std::string fmt = formatName(p.playFp.fmt);
@@ -322,6 +424,9 @@ void SigGen::apply(const WaveformParams& p) {
     ph_ += (p.phaseDeg - old.phaseDeg) * M_PI / 180;
     if (p.seed != old.seed) jitterRng_ = 0x9e3779b97f4a7c15ull ^ ((uint64_t)p.seed * 0xbf58476d1ce4e5b9ull);
     if (p.mode == GenMode::CW) {
+        // A sweep setting change starts the period again (the phase stays continuous).
+        if (!sameSweep(old, p)) sweepN_ = 0;
+        if (p.aSweep != SweepShape::Off) amp_ = std::pow(10.0, std::max(p.aFrom, p.aTo) / 20);  // noise follows the peak
         tmpl_.reset();
         wave_.reset();
         err_.clear();
@@ -459,6 +564,71 @@ void SigGen::carrier(std::complex<float>* out, const std::complex<float>* mod, i
     }
 }
 
+// The CW sweep: within a piece where the frequency and the level (in dB) are
+// linear in time, a rotator whose step itself rotates gives the exact
+// quadratic phase. The pieces end at the period, a triangle's turn and each step.
+void SigGen::sweep(std::complex<float>* out, int64_t m) {
+    const double rate = p_.rate;
+    const double base = std::isnan(tuneFc_) ? 0 : p_.fc - tuneFc_;
+    const double sigma = p_.linewidth > 0 ? std::sqrt(kTwoPi * p_.linewidth / rate) : 0;
+    const bool fs = p_.fSweep != SweepShape::Off, as = p_.aSweep != SweepShape::Off;
+    const int64_t P = p_.sweepSamples();
+    const int64_t mid = (P + 1) / 2;
+    const bool tri = p_.fSweep == SweepShape::Triangle || p_.aSweep == SweepShape::Triangle;
+    const int64_t dwell = p_.fSweep == SweepShape::Stepped ? std::max<int64_t>(1, std::llround(p_.fDwell * rate)) : 0;
+    for (int64_t k = 0; k < m;) {
+        if (sweepN_ >= P) sweepN_ = 0;
+        if (sweepN_ == 0) pulses_.push_back({n_ + k, P});
+        int64_t end = P;
+        if (tri && sweepN_ < mid) end = mid;
+        if (dwell) end = std::min(end, (sweepN_ / dwell + 1) * dwell);
+        const int64_t b = std::min({(int64_t)256, m - k, end - sweepN_});
+        // Frequency (Hz) and level (dB) at the first sample, and their change per sample.
+        double f0, df, a0, da;
+        if (fs) {
+            f0 = p_.sweepOffsetAt(sweepN_);
+            df = b > 1 ? p_.sweepOffsetAt(sweepN_ + 1) - f0 : 0;
+        } else {
+            f0 = p_.offset + p_.driftHzPerSec * (double)(n_ + k) / rate;
+            df = p_.driftHzPerSec / rate;
+        }
+        f0 += base;
+        a0 = as ? p_.sweepLevelAt(sweepN_) : p_.ampDb;
+        da = as && b > 1 ? p_.sweepLevelAt(sweepN_ + 1) - a0 : 0;
+        // A receiver tuned away from the signal doesn't see it (rather than an alias).
+        const bool inBand = std::fabs(f0) < rate / 2 && std::fabs(f0 + df * (double)(b - 1)) < rate / 2;
+        const double amp = inBand ? std::pow(10.0, a0 / 20) : 0;
+        const double r = std::pow(10.0, da / 20);
+        const double inc = kTwoPi * f0 / rate, dinc = kTwoPi * df / rate;
+        if (sigma == 0) {
+            std::complex<double> z = std::polar(amp, ph_);
+            std::complex<double> w = std::polar(r, inc);
+            const std::complex<double> dw = std::polar(1.0, dinc);
+            for (int64_t j = 0; j < b; ++j) {
+                out[k + j] = std::complex<float>(z);
+                z *= w;
+                w *= dw;
+            }
+            ph_ += inc * (double)b + dinc * (double)b * (double)(b - 1) / 2;
+        } else {
+            double a = amp;
+            for (int64_t j = 0; j < b; ++j) {
+                out[k + j] = std::polar((float)a, (float)ph_);
+                ph_ += inc + dinc * (double)j + sigma * gauss();
+                a *= r;
+            }
+        }
+        ph_ = std::remainder(ph_, kTwoPi);
+        sweepN_ += b;
+        k += b;
+    }
+}
+
+void SigGen::seekSweep(int64_t k) {
+    const int64_t P = p_.sweepSamples();
+    sweepN_ = ((k % P) + P) % P;
+}
+
 void SigGen::advanceCarrier(int64_t m) {
     const double rate = p_.rate;
     const double f0 = p_.offset + (std::isnan(tuneFc_) ? 0 : p_.fc - tuneFc_);
@@ -497,7 +667,8 @@ void SigGen::generate(std::complex<float>* out, int64_t n) {
     int64_t i = 0;
     while (i < n) {
         if (p_.mode == GenMode::CW) {
-            carrier(out + i, nullptr, n - i);
+            if (p_.sweeping()) sweep(out + i, n - i);
+            else carrier(out + i, nullptr, n - i);
             n_ += n - i;
             i = n;
             break;

@@ -359,6 +359,10 @@ static void usage() {
         "      --offset HZ      carrier offset from the center (default 100k)\n"
         "      --amp DBFS       peak amplitude (default -6)\n"
         "      --drift HZ       CW frequency drift per second\n"
+        "      --sweep FROM:TO  CW frequency sweep, offsets from the center (e.g. -400k:400k)\n"
+        "      --sweep-shape up|down|tri   --sweep-step HZ:DWELL (stepped)   --sweep-time S (period)\n"
+        "      --level-sweep FROM:TO   CW level sweep in dBFS over the same period\n"
+        "      --level-shape up|down|tri   (sweeps repeat until stopped)\n"
         "      --pri S | --prf HZ   pulse repetition interval / frequency\n"
         "      --pw S           pulse width, edges included\n"
         "      --edge rect|linear|cos|gauss   --rise S  --fall S\n"
@@ -375,8 +379,8 @@ static void usage() {
         "      --snr DB  --dc I:Q  --iq GAIN_DB:PHASE_DEG  --linewidth HZ   impairments\n"
         "      --gen-out PREFIX write to a file and exit (format via --record-format)\n"
         "      --gen-sample cf32|ci16|ci8|cu8   file sample format (default cf32)\n"
-        "      --gen-duration T | --gen-pulses N   file length (default 1 s; N pulses or plays)\n"
-        "      --gen-annotate   SigMF: one annotation per pulse or play\n"
+        "      --gen-duration T | --gen-pulses N   file length (default 1 s; N pulses, plays or sweeps)\n"
+        "      --gen-annotate   SigMF: one annotation per pulse, play or sweep\n"
         "      --tx             TRANSMIT with a USRP until Ctrl+C (or --gen-duration)\n"
         "      --tx-gain DB     transmit gain (default 0)   --tx-args ARGS  (default type=b200)\n"
         "\n"
@@ -430,7 +434,7 @@ int main(int argc, char** argv) {
     WaveformParams gp;
     FileGenConfig gc;
     TxConfig txc;
-    bool haveGen = false, openGen = false, haveGenOut = false, haveTx = false, haveOffset = false;
+    bool haveGen = false, openGen = false, haveGenOut = false, haveTx = false, haveOffset = false, haveSweep = false;
     std::string playFile;
     double playRate = 0;
     double genSeconds = 0;
@@ -641,6 +645,33 @@ int main(int argc, char** argv) {
             if (a == "--dc") { gp.dcI = x; gp.dcQ = y; }
             else { gp.iqGainDb = x; gp.iqPhaseDeg = y; }
             haveGen = true;
+        } else if (a == "--sweep" || a == "--level-sweep" || a == "--sweep-step") {
+            double x, y;
+            if (!parsePair(next(a.c_str()), x, y)) { LOG_ERROR("main", "%s wants A:B", a.c_str()); return 2; }
+            if (a == "--sweep") {
+                gp.fFrom = x;
+                gp.fTo = y;
+                if (gp.fSweep == SweepShape::Off) gp.fSweep = SweepShape::RampUp;
+            } else if (a == "--sweep-step") {
+                gp.fStep = x;
+                gp.fDwell = y;
+                gp.fSweep = SweepShape::Stepped;
+            } else {
+                gp.aFrom = x;
+                gp.aTo = y;
+                if (gp.aSweep == SweepShape::Off) gp.aSweep = SweepShape::RampUp;
+            }
+            haveGen = haveSweep = true;
+        } else if (a == "--sweep-shape" || a == "--level-shape") {
+            std::string v = next(a.c_str());
+            const SweepShape sh = v == "up" ? SweepShape::RampUp : v == "down" ? SweepShape::RampDown
+                                : v == "tri" ? SweepShape::Triangle : SweepShape::Off;
+            if (sh == SweepShape::Off) { LOG_ERROR("main", "%s wants up, down or tri", a.c_str()); return 2; }
+            (a == "--sweep-shape" ? gp.fSweep : gp.aSweep) = sh;
+            haveGen = haveSweep = true;
+        } else if (a == "--sweep-time") {
+            if (!parseSI(next("--sweep-time"), gp.sweepPeriod)) { LOG_ERROR("main", "bad --sweep-time"); return 2; }
+            haveGen = haveSweep = true;
         } else if (a == "--play") {
             playFile = next("--play");
             gp.mode = GenMode::Playback;
@@ -691,6 +722,10 @@ int main(int argc, char** argv) {
     scale = std::clamp(scale, 0.5f, 4.f);
     if (ov.haveFc) gp.fc = txc.fc = ov.fc;
     if (ov.haveRate) gp.rate = ov.rate;
+    if (haveSweep && gp.mode != GenMode::CW) {
+        LOG_ERROR("main", "the sweep options need --gen cw");
+        return 2;
+    }
     if (!playFile.empty()) {
         // Plays as recorded unless -r / -c / --offset say otherwise.
         const FileMetaGuess g = guessMeta(expandHome(playFile));
@@ -718,8 +753,8 @@ int main(int argc, char** argv) {
         if (haveGenOut) {
             gc.rec.sigmf = rc.sigmf;
             gc.seconds = genSeconds > 0 ? genSeconds : 1;
-            if (gc.pulses > 0 && gp.mode == GenMode::CW) {
-                LOG_ERROR("main", "--gen-pulses needs --gen pulsed or --play");
+            if (gc.pulses > 0 && gp.mode == GenMode::CW && !gp.sweeping()) {
+                LOG_ERROR("main", "--gen-pulses needs --gen pulsed, --play or a sweep");
                 return 2;
             }
             return runGenFile(gp, gc);
