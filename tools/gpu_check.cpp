@@ -100,6 +100,43 @@ bool writeTestFile(const std::string& path, int64_t n, double fs, SampleFormat f
     return fclose(f) == 0;
 }
 
+// --- CPU FFT ----------------------------------------------------------------
+// FFT::forward (vDSP on macOS, radix-2 elsewhere) against a direct DFT in
+// double, and a tone in the right bin at N 65536.
+void testFft() {
+    printf("CPU FFT\n");
+    for (int n : {8, 256, 1024, 4096}) {
+        std::vector<cf> x(n);
+        uint32_t r = 12345;
+        for (auto& v : x) {
+            r = r * 1664525u + 1013904223u;
+            const float a = (r >> 8) / 16777216.f - 0.5f;
+            r = r * 1664525u + 1013904223u;
+            v = cf(a, (r >> 8) / 16777216.f - 0.5f);
+        }
+        std::vector<cf> y = x;
+        getFFT(n)->forward(y.data());
+        double err = 0, peak = 0;
+        for (int k = 0; k < n; ++k) {
+            std::complex<double> acc = 0;
+            for (int i = 0; i < n; ++i) acc += std::complex<double>(x[i]) * std::polar(1.0, -2 * M_PI * (double)k * i / n);
+            err = std::max(err, std::abs(acc - std::complex<double>(y[k])));
+            peak = std::max(peak, std::abs(acc));
+        }
+        char b[96];
+        snprintf(b, sizeof b, "N %d matches a direct DFT (max error %.1e of the peak)", n, err / peak);
+        check(err <= 1e-5 * peak, b);
+    }
+    const int n = 65536, bin = 12345;
+    std::vector<cf> x(n);
+    for (int i = 0; i < n; ++i) x[i] = std::polar(1.f, (float)(2 * M_PI * (double)bin * i / n));
+    getFFT(n)->forward(x.data());
+    int best = 0;
+    for (int k = 1; k < n; ++k)
+        if (std::norm(x[k]) > std::norm(x[best])) best = k;
+    check(best == bin && std::fabs(std::abs(x[bin]) / n - 1.0) < 1e-4, "N 65536: a tone lands in its bin with amplitude N");
+}
+
 // --- GPU setup --------------------------------------------------------------
 // Option parsing and the init rules. Without a usable GPU, on must fail with
 // a reason, and auto and off must succeed on the CPU.
@@ -118,7 +155,7 @@ void testSetup() {
     err.clear();
     check(gpuInit(GpuMode::Auto, -1, err), "auto always starts");
     const GpuInfo info = gpuInfo();
-    printf("  build: %s; GPU: %s\n", info.built ? "CUDA" : "no CUDA",
+    printf("  build: %s; GPU: %s\n", info.built ? info.backend.c_str() : "no GPU backend",
            info.available ? (info.name + ", " + info.version).c_str() : ("none, " + info.reason).c_str());
     check(info.available || !info.reason.empty(), "auto without a GPU gives the reason");
     check(gpuEnabled() == info.available, "auto: enabled when a GPU is usable");
@@ -136,6 +173,14 @@ void testSetup() {
     check(!gpuListDevices().empty(), "the device list has a line");
     // Leave it as the benchmark wants it.
     gpuInit(GpuMode::Auto, -1, err);
+}
+
+// Why a GPU comparison does not run.
+std::string skipReason() {
+    const GpuInfo& g = gpuInfo();
+    if (!g.available) return g.reason;
+    if (!gpuEnabled()) return "the GPU is switched off";
+    return "the " + g.backend + " backend does not run this job";
 }
 
 // --- GPU waterfall against the CPU --------------------------------------------
@@ -196,7 +241,7 @@ void testSpectrogram(const std::string& dir) {
         SpecJob j;
         std::vector<float> lin(1);
         check(gpuSpectrogram(j, lin.data(), never) == GpuStatus::Unavailable, "no GPU: gpuSpectrogram is unavailable");
-        printf("  GPU against CPU comparison skipped: %s\n", gpuInfo().reason.c_str());
+        printf("  GPU against CPU comparison skipped: %s\n", skipReason().c_str());
         return;
     }
     struct FileCase {
@@ -271,11 +316,12 @@ void testSpectrogram(const std::string& dir) {
         j.hop = (double)m / j.rows;
         compareJob("ci16 rows of 300 FFTs of 65536", j, makeWindow(WindowType::BlackmanHarris, 65536));
 
-        // The whole engine path: same image as the CPU, flagged as GPU.
+        // The whole engine path: same image as the CPU, flagged as GPU. The view is
+        // above every backend's minimum for the GPU (about 48 M samples of FFT input).
         WaterfallReq r;
         r.src = Source{file, j.fp, fs, 0};
         r.s0 = 1000;
-        r.s1 = 5'000'000;
+        r.s1 = 24'000'000;
         r.nfft = 2048;
         auto g = computeWaterfall(r, never);
         gpuSetEnabled(false);
@@ -344,7 +390,7 @@ void testLive() {
         std::vector<float> win(1024, 1.f), pw(1024);
         check(live.run(raw.data(), FormatParams{}, 1024, 1, win.data(), pw.data()) == GpuStatus::Unavailable,
               "no GPU: the live spectrum is unavailable");
-        printf("  GPU against CPU comparison skipped: %s\n", gpuInfo().reason.c_str());
+        printf("  GPU against CPU comparison skipped: %s\n", skipReason().c_str());
         return;
     }
     struct Case {
@@ -405,7 +451,7 @@ void testChannel(const std::string& dir) {
         ChanJob j;
         std::vector<float> y(2);
         check(gpuChannelize(j, y.data(), never) == GpuStatus::Unavailable, "no GPU: the channel filter is unavailable");
-        printf("  GPU against CPU comparison skipped: %s\n", gpuInfo().reason.c_str());
+        printf("  GPU against CPU comparison skipped: %s\n", skipReason().c_str());
         return;
     }
     const double fs = 20e6;
@@ -497,7 +543,9 @@ void testChannel(const std::string& dir) {
 // Zoom 1 = the span where one FFT per row at 50 % overlap covers the view.
 void benchWaterfall(const Source& src, int64_t nSamples) {
     const bool gpu = gpuSpectrogramUsable();
-    printf("\nfile waterfall (1024 rows, Blackman-Harris, 50 %% overlap, budget CPU 256 MS%s)\n", gpu ? ", GPU 2 GS" : "");
+    const GpuLimits gl = gpuLimits();
+    printf("\nfile waterfall (1024 rows, Blackman-Harris, 50 %% overlap, budget CPU 256 MS%s)\n",
+           gpu ? (", GPU " + fmtSI(gl.specBudget, "S", 3) + ", GPU from " + fmtSI(gl.specMinInput, "S", 3)).c_str() : "");
     printf("  %-7s %-6s %-10s %-6s %-9s %-11s", "N", "zoom", "span", "FFTs", "FFT sees", "CPU time");
     printf(gpu ? "%-6s %-9s %-11s %s\n" : "\n", "FFTs", "FFT sees", "GPU time", "speed-up");
     CancelFn never = [] { return false; };
@@ -520,8 +568,9 @@ void benchWaterfall(const Source& src, int64_t nSamples) {
                    fmtSI((double)span, "S", 3).c_str(), res->fftsPerRow, 100 * res->coverage, ms);
             if (gpu) {
                 const double gms = timeIt(2, [&] { gres = computeWaterfall(r, never); });
-                if (!gres || !gres->gpu) check(false, "GPU waterfall N " + std::to_string(n));
-                if (gres) printf("%-6d %7.1f %%  %8.1f ms  %5.1fx", gres->fftsPerRow, 100 * gres->coverage, gms, ms / gms);
+                if (!gres) check(false, "GPU waterfall N " + std::to_string(n));
+                if (gres) printf("%-6d %7.1f %%  %8.1f ms  %5.1fx%s", gres->fftsPerRow, 100 * gres->coverage, gms, ms / gms,
+                                 gres->gpu ? "" : "  (CPU: below the GPU minimum)");
             }
             printf("%s\n", clipped ? "  (clipped to the file)" : "");
         }
@@ -646,6 +695,7 @@ int main(int argc, char** argv) {
         dir = tmp = tmpl;
     }
 
+    testFft();
     testSetup();
     testSpectrogram(dir);
     testLive();

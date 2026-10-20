@@ -62,22 +62,35 @@ wvt uses the UHD C API, so you do not need Boost headers to build it.
 
 ### Optional: GPU acceleration
 
-On Linux with an NVIDIA GPU, wvt can compute the file waterfall, the live spectrum and the
-channel filter of the demodulator plots on the GPU. This lets wide views keep "FFT sees 100 %", and lets the live spectrum analyze every
-sample at USRP rates. The results look the same as on the CPU.
+wvt can compute the file waterfall, the live spectrum and the channel filter (of the
+demodulator plots and the region export) on the GPU: with CUDA on an NVIDIA GPU under Linux, or
+with Metal on a Mac. This lets wide views keep "FFT sees 100 %", and lets the live spectrum
+analyze every sample at USRP rates. The results look the same as on the CPU.
 
+**NVIDIA (CUDA), Linux**
 - **Build:** the CUDA toolkit 12.0 or later (12.8 or later for RTX 50-series cards), with
   CMake 3.18 or later. CMake finds `nvcc` and reports
-  `wvt: CUDA support enabled (CUDA 12.x, archs ..., static cuFFT)`. Not available on macOS.
+  `wvt: CUDA support enabled (CUDA 12.x, archs ..., static cuFFT)`.
 - **Run:** an NVIDIA driver and a GPU with compute capability 7.5 or later (GeForce RTX 20xx
   and newer) and at least 1 GB of free memory. A CUDA build also runs on computers without
   a GPU or driver: it then uses the CPU, and the log says why.
+
+**Apple GPU (Metal), macOS**
+- **Build:** nothing to install: the Command Line Tools are enough (no Xcode). CMake reports
+  `wvt: Metal support enabled`. The kernels compile when wvt first uses the GPU (about 0.2 s).
+- **Run:** macOS 14 or later; older versions use the CPU. The GPU reads the memory-mapped file
+  in place (unified memory). FFTs up to 4096 points run in one pass in the GPU's on-chip
+  memory; larger ones use MPSGraph.
+- On a Mac the CPU path uses Apple's Accelerate FFT (vDSP), so the CPU is also fast. On an M5
+  the GPU gives about 1.6× for the waterfall at N ≤ 4096, 2.5–3.4× for a live row, and up
+  to 6× for the channel filter with many taps. Small jobs stay on the CPU.
 
 | CMake option | Meaning |
 |---|---|
 | `-DWVT_WITH_CUDA=AUTO\|ON\|OFF` | `AUTO` (default) builds the GPU code when the toolkit is found; `ON` fails without it |
 | `-DWVT_CUDA_STATIC=ON\|OFF` | `ON` (default) links cuFFT into the binary (about 270 MB, needs only the driver); `OFF` makes a small binary that needs the CUDA libraries at run time |
 | `-DCMAKE_CUDA_ARCHITECTURES=89` | Build for these GPUs only (smaller and faster to build). The default covers RTX 20xx–50xx, A100 and H100 |
+| `-DWVT_WITH_METAL=AUTO\|ON\|OFF` | macOS: `AUTO` (default) builds the Metal backend; `OFF` builds without it |
 
 At run time, `--gpu auto|on|off` (or `WVT_GPU`) chooses: `auto` uses a usable GPU, `on` stops
 if there is none, `off` never touches the driver. `--list-devices` lists the GPUs, and
@@ -121,8 +134,8 @@ wvt [options] [file]
       --scale S        UI scale (or env WVT_SCALE), useful on HiDPI
       --geometry WxH   initial window size
       --screenshot F   render once, write a PPM to F, exit (for automation)
-      --gpu auto|on|off  NVIDIA GPU processing (default auto, or env WVT_GPU)
-      --gpu-device N   use CUDA device N
+      --gpu auto|on|off  GPU processing, CUDA or Metal (default auto, or env WVT_GPU)
+      --gpu-device N   use GPU N (see --list-devices)
 
 live devices (-c and -r set the tuning):
       --device DEV     rtlsdr[:INDEX|SERIAL] | uhd[:ARGS] | sim
@@ -458,7 +471,7 @@ between blocks, so the audio is continuous. `build/audio_check` tests each mode 
 | **Scrollbar** | Scrolls the view through the file (drag the thumb, click the track to move a page, or use the wheel) |
 | **Left** | Waterfall settings (FFT size, window, overlap, averaging, rows/cols, dB range/auto, colormap) above the spectrum of the current view, the waterfall, and its color bar |
 | **Right** | Channel settings, then scrollable I/Q, AM, FM and PM plots, each with its own settings and a readout of measurements |
-| **Status bar** | Values under the cursor (t, sample #, f, dB, AM/FM/PM), marker ΔT, 1/ΔT and ΔF, `GPU <model>` or `CPU` (CUDA builds), renderer, and a busy indicator |
+| **Status bar** | Values under the cursor (t, sample #, f, dB, AM/FM/PM), marker ΔT, 1/ΔT and ΔF, `GPU <model>` or `CPU` (builds with CUDA or Metal), renderer, and a busy indicator |
 
 ### Linked views
 - Every time axis shares one range: the waterfall's vertical axis and the horizontal axis of each right-hand plot.
@@ -521,10 +534,11 @@ Try `wvt out.sigmf-meta --chan 300k:150k --view 0.5:0.505`.
 | `src/sw_renderer.*` | Software rasterizer for ImGui draw data |
 | `src/app.*` | UI: toolbar, linked plots, parameter panels |
 | `src/engine.*` | Worker threads, and the waterfall, channelizer/demodulator and overview computations |
-| `src/dsp.*` | FFT, windows, FIR design, parallel-for, smoothing |
+| `src/dsp.*` | FFT (Accelerate vDSP on macOS), windows, FIR design, parallel-for, smoothing |
 | `src/gpu.h`, `src/gpu_common.cpp` | GPU interface, `--gpu` rules, fallback to the CPU |
 | `src/gpu_cuda.cu` | CUDA backend: device setup, waterfall and live spectrum kernels with cuFFT |
-| `src/gpu_stub.cpp`, `src/gpu_backend.h` | Backend for builds without CUDA; the backend interface |
+| `src/gpu_metal.mm` | Metal backend (macOS): device setup, one-pass FFT kernels, MPSGraph FFT, channel filter |
+| `src/gpu_stub.cpp`, `src/gpu_backend.h` | Backend for builds without a GPU backend; the backend interface |
 | `src/iq_file.*` | mmap reader for all sample formats, plus SigMF and filename detection |
 | `src/ui_util.*` | SI-unit inputs and formatters, scrollbar widget, style |
 | `src/app_live.cpp` | Live mode UI: device and recording toolbar, live spectrum and scrolling waterfall |

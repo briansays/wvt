@@ -6,18 +6,23 @@
 
 using cf = std::complex<float>;
 
-// In-place iterative radix-2 complex FFT. Immutable after construction, so a
-// single instance can be shared by many threads.
+// In-place complex FFT (forward, unscaled) of a power-of-two size. Immutable
+// after construction, so a single instance can be shared by many threads. On
+// macOS it uses Accelerate (vDSP); elsewhere an iterative radix-2 FFT.
 class FFT {
 public:
     explicit FFT(int n);
+    ~FFT();
+    FFT(const FFT&) = delete;
+    FFT& operator=(const FFT&) = delete;
     int size() const { return n_; }
     void forward(cf* data) const;
 
 private:
-    int n_;
+    int n_, log2n_ = 0;
     std::vector<cf> tw_;
     std::vector<int> rev_;
+    void* setup_ = nullptr;  // vDSP FFTSetup (macOS)
 };
 std::shared_ptr<const FFT> getFFT(int n);  // cached by size
 

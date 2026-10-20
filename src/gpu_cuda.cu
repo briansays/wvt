@@ -106,9 +106,13 @@ bool usable(int d, const cudaDeviceProp& p, std::string& reason) {
 }  // namespace
 
 bool gpuBackendBuilt() { return true; }
+const char* gpuBackendName() { return "CUDA"; }
+bool gpuBackendImplements(GpuJob) { return true; }
+GpuLimits gpuBackendLimits() { return GpuLimits{}; }  // the defaults are the CUDA values
 
 void gpuBackendProbe(int device, GpuInfo& info) {
     info.built = true;
+    info.backend = "CUDA";
     info.available = false;
     const int n = deviceCount(info.reason);
     if (n == 0) return;

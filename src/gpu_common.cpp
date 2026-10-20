@@ -86,6 +86,7 @@ bool gpuInit(GpuMode mode, int device, std::string& err) {
     if (mode == GpuMode::Off) {
         // Off does not touch the driver at all.
         g_info.built = gpuBackendBuilt();
+        g_info.backend = gpuBackendName();
         g_info.reason = "switched off (--gpu off or WVT_GPU=off)";
         LOG_INFO("gpu", "GPU not used: %s", g_info.reason.c_str());
         return true;
@@ -100,7 +101,8 @@ bool gpuInit(GpuMode mode, int device, std::string& err) {
         return true;
     }
     g_enabled = true;
-    LOG_INFO("gpu", "using GPU %d: %s, %s", g_info.device, g_info.name.c_str(), g_info.version.c_str());
+    LOG_INFO("gpu", "using %s GPU %d: %s, %s", g_info.backend.c_str(), g_info.device, g_info.name.c_str(),
+             g_info.version.c_str());
     return true;
 }
 
@@ -115,7 +117,9 @@ void gpuSetEnabled(bool on) {
 
 std::vector<std::string> gpuListDevices() { return gpuBackendList(); }
 
-bool gpuSpectrogramUsable() { return gpuEnabled() && !g_spec.broken; }
+GpuLimits gpuLimits() { return gpuBackendLimits(); }
+
+bool gpuSpectrogramUsable() { return gpuEnabled() && !g_spec.broken && gpuBackendImplements(GpuJob::Spectrogram); }
 
 GpuStatus gpuSpectrogram(const SpecJob& job, float* lin, const std::function<bool()>& cancelled) {
     if (!gpuSpectrogramUsable()) return GpuStatus::Unavailable;
@@ -134,7 +138,7 @@ std::string gpuFallbackNotes() {
     return s;
 }
 
-bool gpuChannelUsable() { return gpuEnabled() && !g_chan.broken; }
+bool gpuChannelUsable() { return gpuEnabled() && !g_chan.broken && gpuBackendImplements(GpuJob::Channel); }
 
 GpuStatus gpuChannelize(const ChanJob& job, float* y, const std::function<bool()>& cancelled) {
     if (!gpuChannelUsable()) return GpuStatus::Unavailable;
@@ -145,7 +149,7 @@ GpuStatus gpuChannelize(const ChanJob& job, float* y, const std::function<bool()
     return st;
 }
 
-bool gpuLiveUsable() { return gpuEnabled() && !g_live.broken; }
+bool gpuLiveUsable() { return gpuEnabled() && !g_live.broken && gpuBackendImplements(GpuJob::Live); }
 
 GpuLiveSpectrum::GpuLiveSpectrum() = default;
 GpuLiveSpectrum::~GpuLiveSpectrum() { gpuBackendLiveDestroy(impl_); }
