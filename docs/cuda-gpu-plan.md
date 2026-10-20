@@ -1,7 +1,7 @@
 # Plan: CUDA GPU acceleration (issue #3)
 
 Branch: `3-cuda-gpu`, from `main` at `29dca41` (after the logging merge, PR #15).
-Status: **steps 0–2 and 4–8 implemented** (2026-10-19). The CPU-only build is tested on
+Status: **steps 0–8 implemented** (2026-10-19). The CPU-only build is tested on
 macOS. The CUDA build is compiled and tested in CUDA 12.6 and 12.8 containers with no GPU.
 **The GPU code has not run on a GPU yet** (see §9).
 
@@ -447,3 +447,25 @@ self-tests pass, the GPU comparisons are skipped there.
 
 **Still to do on the GPU computer:** `gpu_check` and the channel filter rows of
 `gpu_check --bench`.
+
+### Step 3: CI
+
+`.github/workflows/build.yml`, on every push and pull request (a newer push to the same
+branch cancels the running one):
+
+| Job | What it does |
+|---|---|
+| Linux (CPU, RTL-SDR, UHD) | Ubuntu 24.04 with `librtlsdr-dev` and `libuhd-dev`, `WVT_WITH_CUDA=OFF`. Builds, runs the 5 self-tests, `--list-devices`, and a headless WAV export with `--segment`. |
+| Linux CUDA 12.0 (compile only) | `nvidia/cuda:12.0.1-devel-ubuntu22.04` (CMake 3.22): the minimum CUDA version. |
+| Linux CUDA 12.8 (compile only) | `nvidia/cuda:12.8.1-devel-ubuntu24.04`: adds sm_120. |
+
+The CUDA jobs build with `-DWVT_WITH_CUDA=ON` and run the self-tests with no GPU, so they
+also check the "CUDA build on a computer without a GPU" rule; `--gpu on` must fail.
+
+Found while adding it: CMake before 3.25 does not know nvcc's C++20 flag, so the CUDA 12.0
+build on Ubuntu 22.04 failed to configure. `CMakeLists.txt` now defines
+`CMAKE_CUDA20_STANDARD_COMPILE_OPTION` when CMake lacks it.
+
+Checked before pushing: the CPU job's steps in an `ubuntu:24.04` container (RTL-SDR and UHD
+on, no warnings, all pass), and both CUDA images (no warnings, all pass). The containers
+were arm64; the GitHub runners are x86-64.

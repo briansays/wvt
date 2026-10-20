@@ -1,0 +1,73 @@
+# Builds wvt on every push and pull request (issue #3, step 3 of
+# docs/cuda-gpu-plan.md). GitHub's runners have no GPU: the CUDA jobs only
+# check that the GPU code compiles and that a CUDA build runs on the CPU.
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-cpu:
+    name: Linux (CPU, RTL-SDR, UHD)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libx11-dev libgl1-mesa-dev librtlsdr-dev libuhd-dev
+      - name: Configure
+        run: cmake -S . -B build -DWVT_WITH_RTLSDR=ON -DWVT_WITH_UHD=ON -DWVT_WITH_CUDA=OFF
+      - name: Build
+        run: cmake --build build -j "$(nproc)"
+      - name: Self-tests
+        run: |
+          for t in siggen_check audio_check log_check segment_check gpu_check; do
+            echo "::group::$t"
+            ./build/$t
+            echo "::endgroup::"
+          done
+      - name: Command line
+        run: |
+          ./build/wvt --help > /dev/null
+          ./build/wvt --list-devices
+          ./build/iqgen /tmp/t.sigmf-data --fmt ci16
+          ./build/wvt /tmp/t.sigmf-meta --chan 300k:150k --audio nfm --audio-out /tmp/t.wav --segment 0.5:1.5
+
+  linux-cuda:
+    name: Linux CUDA ${{ matrix.cuda }} (compile only)
+    runs-on: ubuntu-24.04
+    container: nvidia/cuda:${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cuda: "12.0"  # the minimum (CMake 3.22)
+            image: 12.0.1-devel-ubuntu22.04
+          - cuda: "12.8"  # adds RTX 50 (sm_120)
+            image: 12.8.1-devel-ubuntu24.04
+    steps:
+      - name: Install packages
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y cmake g++ make git libx11-dev libgl-dev
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DWVT_WITH_CUDA=ON -DWVT_WITH_RTLSDR=OFF -DWVT_WITH_UHD=OFF
+      - name: Build
+        run: cmake --build build -j "$(nproc)"
+      - name: Self-tests (no GPU, so the CUDA build must run on the CPU)
+        run: |
+          for t in siggen_check audio_check log_check segment_check gpu_check; do
+            echo "::group::$t"
+            ./build/$t
+            echo "::endgroup::"
+          done
+          ./build/wvt --list-devices
+          if ./build/wvt --no-log-file --gpu on; then echo "--gpu on should fail without a GPU"; exit 1; fi
