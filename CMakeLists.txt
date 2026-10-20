@@ -80,6 +80,7 @@ add_executable(wvt
   src/wav_writer.cpp
   src/app_audio.cpp
   src/log.cpp
+  src/extract.cpp
   ${FONT_CPP})
 target_include_directories(wvt PRIVATE src ${PLATFORM_INCLUDES})
 target_link_libraries(wvt PRIVATE imgui_implot ${PLATFORM_LIBS} Threads::Threads)
@@ -287,6 +288,13 @@ add_executable(segment_check tools/segment_check.cpp src/engine.cpp src/dsp.cpp 
   src/log.cpp)
 target_include_directories(segment_check PRIVATE src)
 target_link_libraries(segment_check PRIVATE wvt_gpu imgui_implot Threads::Threads)
+
+# Region export self-test (copies, band filter, metadata, checks, cancel)
+add_executable(extract_check tools/extract_check.cpp src/extract.cpp src/recorder.cpp src/engine.cpp src/dsp.cpp
+  src/iq_file.cpp src/ui_util.cpp src/log.cpp)
+target_include_directories(extract_check PRIVATE src)
+target_link_libraries(extract_check PRIVATE wvt_gpu imgui_implot Threads::Threads)
+target_compile_options(extract_check PRIVATE -Wall -Wextra -Wno-unused-parameter)
 
 # GPU self-test and benchmark (CPU times; GPU vs CPU once a GPU backend exists)
 add_executable(gpu_check tools/gpu_check.cpp src/engine.cpp src/dsp.cpp src/iq_file.cpp src/ui_util.cpp src/log.cpp)

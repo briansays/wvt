@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "app.h"
+#include "extract.h"
 #include "gpu.h"
 #include "imgui.h"
 #include "implot.h"
@@ -196,6 +197,75 @@ static int runAudioExport(const std::string& path, const CliOverrides& ov, bool 
     return 0;
 }
 
+// Exports a time range (and band) of a file to a new file (issue #18).
+static int runExtract(const std::string& path, const CliOverrides& ov, double seg0, double seg1, bool haveRange, double t0,
+                      double t1, bool haveBand, double fLo, double fHi, bool ci16, bool sigmf, bool overwrite,
+                      const std::string& out) {
+    FileMetaGuess g = guessMeta(path);
+    std::string err;
+    auto f = IqFile::open(g.dataPath, err);
+    if (!f) {
+        LOG_ERROR("extract", "%s", err.c_str());
+        return 1;
+    }
+    ExtractConfig c;
+    Source& src = c.src;
+    src.file = f;
+    if (g.haveFmt) { src.fp.fmt = g.fmt; src.fp.bigEndian = g.bigEndian; }
+    if (g.haveRate) src.fs = g.rate;
+    if (g.haveFc) src.fc = g.fc;
+    if (ov.haveFmt) { src.fp.fmt = ov.fmt; src.fp.bigEndian = ov.bigEndian; }
+    if (ov.haveRate) src.fs = ov.rate;
+    if (ov.haveFc) src.fc = ov.fc;
+    src.fp.headerBytes = ov.header >= 0 ? ov.header : 0;
+    src.fp.swapIQ = ov.swapIQ;
+    if (!g.haveRate && !ov.haveRate) LOG_WARN("extract", "sample rate unknown, assuming %s (use -r)", fmtSI(src.fs, "S/s", 4).c_str());
+    const int64_t n = f->numSamples(src.fp);
+    SegmentRange seg = segmentRange(seg0, seg1, src.fs, n);
+    if (!seg.err.empty()) {
+        LOG_ERROR("extract", "%s", seg.err.c_str());
+        return 2;
+    }
+    if (!seg.warn.empty()) LOG_WARN("extract", "%s", seg.warn.c_str());
+    c.limit0 = seg.s0;
+    c.limit1 = seg.s1;
+    c.s0 = haveRange ? (int64_t)std::llround(t0 * src.fs) : seg.s0;
+    c.s1 = haveRange ? (int64_t)std::llround(t1 * src.fs) : seg.s1;
+    c.fullBand = !haveBand;
+    c.fLo = fLo;
+    c.fHi = fHi;
+    c.ci16 = ci16;
+    c.sigmf = sigmf;
+    c.overwrite = overwrite;
+    c.sourceStart = g.startTime;
+    c.path = out;
+    ExtractJob job;
+    if (!job.start(c, err)) {
+        LOG_ERROR("extract", "%s", err.c_str());
+        return 2;
+    }
+    signal(SIGINT, [](int) { g_interrupted = 1; });
+    int tick = 0;
+    while (job.status().active) {
+        if (g_interrupted) job.cancel();
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        if (++tick % 25 == 0) logProgress("extract", "%.0f %%", job.status().progress * 100);
+    }
+    logProgressEnd();
+    const auto st = job.status();
+    if (st.cancelled) {
+        LOG_ERROR("extract", "export cancelled; the output was deleted");
+        return 1;
+    }
+    if (!st.error.empty()) {
+        LOG_ERROR("extract", "export failed: %s", st.error.c_str());
+        return 1;
+    }
+    logStatus("extract", "wrote %s (%lld samples, %s)", st.dataPath.c_str(), (long long)st.samples,
+              fmtSI((double)st.bytes, "B", 4).c_str());
+    return 0;
+}
+
 // Records the demodulated audio of a live stream to WAV until Ctrl+C or the duration ends.
 static int runAudioLive(const StreamConfig& dev, const AudioParams& ap, const std::string& out, double seconds) {
     LiveEngine live(nullptr);
@@ -310,6 +380,14 @@ static void usage() {
         "      --tx             TRANSMIT with a USRP until Ctrl+C (or --gen-duration)\n"
         "      --tx-gain DB     transmit gain (default 0)   --tx-args ARGS  (default type=b200)\n"
         "\n"
+        "export part of a file (the --segment limits it; --record-format sigmf|raw):\n"
+        "      --extract-out PATH    write it to PATH (.sigmf-data / .sigmf-meta, or raw) and exit\n"
+        "      --extract T0:T1       time range in seconds (default: the whole segment)\n"
+        "      --extract-band LO:HI  only this band (absolute Hz), mixed to 0 Hz, filtered and\n"
+        "                            decimated; without it the samples are copied unchanged\n"
+        "      --extract-format cf32|ci16   band output format (default cf32)\n"
+        "      --extract-overwrite   replace existing output files\n"
+        "\n"
         "audio (the channel comes from --chan OFFSET:BW; without it: 0 Hz, the mode's width):\n"
         "      --audio am|nfm|wfm|usb|lsb|cw   open the audio window and play\n"
         "      --audio-out FILE.wav  demodulate to WAV and exit: the file (or --view range),\n"
@@ -335,6 +413,9 @@ int main(int argc, char** argv) {
     std::string path, shotPath;
     bool software = false;
     bool haveChan = false, haveView = false, haveSeg = false;
+    std::string extractOut;
+    bool haveExtract = false, haveExtractBand = false, extractCi16 = false, extractOverwrite = false;
+    double extract0 = 0, extract1 = 0, extractLo = 0, extractHi = 0;
     double chanOff = 0, chanBw = 0, view0 = 0, view1 = 0, seg0 = -1, seg1 = -1;
     auto parsePair = [](const char* s, double& a, double& b) {
         std::string str(s);
@@ -410,6 +491,18 @@ int main(int argc, char** argv) {
             if (seg0 >= 0 && seg1 >= 0 && seg1 <= seg0) { LOG_ERROR("main", "--segment end must be after its start"); return 2; }
             haveSeg = true;
         }
+        else if (a == "--extract-out") extractOut = next("--extract-out");
+        else if (a == "--extract") {
+            if (!parsePair(next("--extract"), extract0, extract1)) { LOG_ERROR("main", "--extract wants T0:T1"); return 2; }
+            haveExtract = true;
+        } else if (a == "--extract-band") {
+            if (!parsePair(next("--extract-band"), extractLo, extractHi)) { LOG_ERROR("main", "--extract-band wants LO:HI"); return 2; }
+            haveExtractBand = true;
+        } else if (a == "--extract-format") {
+            std::string v = next("--extract-format");
+            if (v != "cf32" && v != "ci16") { LOG_ERROR("main", "--extract-format wants cf32 or ci16"); return 2; }
+            extractCi16 = v == "ci16";
+        } else if (a == "--extract-overwrite") extractOverwrite = true;
         else if (a == "--software") software = true;
         else if (a == "--gpu") {
             const char* v = next("--gpu");
@@ -641,6 +734,18 @@ int main(int argc, char** argv) {
     ap.bw = haveChan ? chanBw : audioModeDefaultBw((AudioMode)ap.mode);
     ap.offset = haveChan ? chanOff : 0;
     if (ap.mode == (int)AudioMode::WFM) ap.deemph = (int)Deemphasis::Us75;
+    if (!extractOut.empty()) {
+        if (path.empty()) {
+            LOG_ERROR("main", "--extract-out needs a file");
+            return 2;
+        }
+        return runExtract(path, ov, seg0, seg1, haveExtract, extract0, extract1, haveExtractBand, extractLo, extractHi,
+                          extractCi16, rc.sigmf, extractOverwrite, extractOut);
+    }
+    if (haveExtract || haveExtractBand) {
+        LOG_ERROR("main", "--extract and --extract-band need --extract-out");
+        return 2;
+    }
     if (!audioOut.empty()) {
         if (haveDevice) return runAudioLive(dev, ap, audioOut, rc.maxSeconds);
         if (path.empty()) {
