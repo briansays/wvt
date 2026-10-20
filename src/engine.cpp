@@ -7,8 +7,6 @@
 #include "ui_util.h"
 
 static constexpr float kEps = 1e-20f;
-// Channel filter jobs below this many multiply-adds stay on the CPU.
-static constexpr double kGpuMinChanMacs = 2e7;
 
 // ---------------------------------------------------------------------------
 // Waterfall
@@ -64,7 +62,7 @@ std::shared_ptr<WaterfallRes> computeWaterfall(const WaterfallReq& r, const Canc
     // between FFTs would strobe (show in some rows and not others). A budget caps
     // the work for very wide views; past it, coverage drops below 100%. The GPU
     // gets a larger budget.
-    constexpr double kMaxInputSamples = 256e6, kGpuMaxInputSamples = 2e9;
+    constexpr double kMaxInputSamples = 256e6;
     const int minAvg = std::clamp(r.avgPerRow, 1, 64);
     const int needed = (int)std::min(1e9, std::ceil(hop / hopUser));
     auto avgFor = [&](double maxInput) {
@@ -97,8 +95,9 @@ std::shared_ptr<WaterfallRes> computeWaterfall(const WaterfallReq& r, const Canc
     job.norm = (float)(1.0 / (wsum * wsum));
 
     bool done = false;
-    if (gpuSpectrogramUsable()) {
-        job.avg = avgFor(kGpuMaxInputSamples);
+    const GpuLimits gl = gpuLimits();
+    if (gpuSpectrogramUsable() && (double)rows * n * avgFor(gl.specBudget) >= gl.specMinInput) {
+        job.avg = avgFor(gl.specBudget);
         const GpuStatus st = gpuSpectrogram(job, linSum.data(), cancelled);
         if (st == GpuStatus::Cancelled) return nullptr;
         done = res->gpu = st == GpuStatus::Ok;
@@ -240,7 +239,7 @@ bool processRange(const DemodReq& r, const ChanDesign& cd, const std::vector<flo
         job.taps = N;
         // The GPU pays off only on large jobs (a few ms of CPU work).
         bool done = false;
-        if (threaded && (double)M * N >= kGpuMinChanMacs && gpuChannelUsable()) {
+        if (threaded && (double)M * N >= gpuLimits().chanMinMacs && gpuChannelUsable()) {
             const GpuStatus st = gpuChannelize(job, reinterpret_cast<float*>(y.data()), cancelled);
             if (st == GpuStatus::Cancelled) return false;
             done = st == GpuStatus::Ok;

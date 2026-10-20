@@ -108,6 +108,7 @@ bool usable(int d, const cudaDeviceProp& p, std::string& reason) {
 bool gpuBackendBuilt() { return true; }
 const char* gpuBackendName() { return "CUDA"; }
 bool gpuBackendImplements(GpuJob) { return true; }
+GpuLimits gpuBackendLimits() { return GpuLimits{}; }  // the defaults are the CUDA values
 
 void gpuBackendProbe(int device, GpuInfo& info) {
     info.built = true;

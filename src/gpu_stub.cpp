@@ -4,6 +4,7 @@
 bool gpuBackendBuilt() { return false; }
 const char* gpuBackendName() { return ""; }
 bool gpuBackendImplements(GpuJob) { return false; }
+GpuLimits gpuBackendLimits() { return GpuLimits{}; }
 
 void gpuBackendProbe(int, GpuInfo& info) {
     info.built = false;

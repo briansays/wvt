@@ -175,6 +175,14 @@ void testSetup() {
     gpuInit(GpuMode::Auto, -1, err);
 }
 
+// Why a GPU comparison does not run.
+std::string skipReason() {
+    const GpuInfo& g = gpuInfo();
+    if (!g.available) return g.reason;
+    if (!gpuEnabled()) return "the GPU is switched off";
+    return "the " + g.backend + " backend does not run this job";
+}
+
 // --- GPU waterfall against the CPU --------------------------------------------
 // Largest dB difference on bins more than 20 dB above the median (the noise
 // floor). Bins that are zero on the CPU must be zero on the GPU.
@@ -233,7 +241,7 @@ void testSpectrogram(const std::string& dir) {
         SpecJob j;
         std::vector<float> lin(1);
         check(gpuSpectrogram(j, lin.data(), never) == GpuStatus::Unavailable, "no GPU: gpuSpectrogram is unavailable");
-        printf("  GPU against CPU comparison skipped: %s\n", gpuInfo().reason.c_str());
+        printf("  GPU against CPU comparison skipped: %s\n", skipReason().c_str());
         return;
     }
     struct FileCase {
@@ -308,11 +316,12 @@ void testSpectrogram(const std::string& dir) {
         j.hop = (double)m / j.rows;
         compareJob("ci16 rows of 300 FFTs of 65536", j, makeWindow(WindowType::BlackmanHarris, 65536));
 
-        // The whole engine path: same image as the CPU, flagged as GPU.
+        // The whole engine path: same image as the CPU, flagged as GPU. The view is
+        // above every backend's minimum for the GPU (about 48 M samples of FFT input).
         WaterfallReq r;
         r.src = Source{file, j.fp, fs, 0};
         r.s0 = 1000;
-        r.s1 = 5'000'000;
+        r.s1 = 24'000'000;
         r.nfft = 2048;
         auto g = computeWaterfall(r, never);
         gpuSetEnabled(false);
@@ -381,7 +390,7 @@ void testLive() {
         std::vector<float> win(1024, 1.f), pw(1024);
         check(live.run(raw.data(), FormatParams{}, 1024, 1, win.data(), pw.data()) == GpuStatus::Unavailable,
               "no GPU: the live spectrum is unavailable");
-        printf("  GPU against CPU comparison skipped: %s\n", gpuInfo().reason.c_str());
+        printf("  GPU against CPU comparison skipped: %s\n", skipReason().c_str());
         return;
     }
     struct Case {
@@ -442,7 +451,7 @@ void testChannel(const std::string& dir) {
         ChanJob j;
         std::vector<float> y(2);
         check(gpuChannelize(j, y.data(), never) == GpuStatus::Unavailable, "no GPU: the channel filter is unavailable");
-        printf("  GPU against CPU comparison skipped: %s\n", gpuInfo().reason.c_str());
+        printf("  GPU against CPU comparison skipped: %s\n", skipReason().c_str());
         return;
     }
     const double fs = 20e6;
@@ -534,7 +543,9 @@ void testChannel(const std::string& dir) {
 // Zoom 1 = the span where one FFT per row at 50 % overlap covers the view.
 void benchWaterfall(const Source& src, int64_t nSamples) {
     const bool gpu = gpuSpectrogramUsable();
-    printf("\nfile waterfall (1024 rows, Blackman-Harris, 50 %% overlap, budget CPU 256 MS%s)\n", gpu ? ", GPU 2 GS" : "");
+    const GpuLimits gl = gpuLimits();
+    printf("\nfile waterfall (1024 rows, Blackman-Harris, 50 %% overlap, budget CPU 256 MS%s)\n",
+           gpu ? (", GPU " + fmtSI(gl.specBudget, "S", 3) + ", GPU from " + fmtSI(gl.specMinInput, "S", 3)).c_str() : "");
     printf("  %-7s %-6s %-10s %-6s %-9s %-11s", "N", "zoom", "span", "FFTs", "FFT sees", "CPU time");
     printf(gpu ? "%-6s %-9s %-11s %s\n" : "\n", "FFTs", "FFT sees", "GPU time", "speed-up");
     CancelFn never = [] { return false; };
@@ -557,8 +568,9 @@ void benchWaterfall(const Source& src, int64_t nSamples) {
                    fmtSI((double)span, "S", 3).c_str(), res->fftsPerRow, 100 * res->coverage, ms);
             if (gpu) {
                 const double gms = timeIt(2, [&] { gres = computeWaterfall(r, never); });
-                if (!gres || !gres->gpu) check(false, "GPU waterfall N " + std::to_string(n));
-                if (gres) printf("%-6d %7.1f %%  %8.1f ms  %5.1fx", gres->fftsPerRow, 100 * gres->coverage, gms, ms / gms);
+                if (!gres) check(false, "GPU waterfall N " + std::to_string(n));
+                if (gres) printf("%-6d %7.1f %%  %8.1f ms  %5.1fx%s", gres->fftsPerRow, 100 * gres->coverage, gms, ms / gms,
+                                 gres->gpu ? "" : "  (CPU: below the GPU minimum)");
             }
             printf("%s\n", clipped ? "  (clipped to the file)" : "");
         }

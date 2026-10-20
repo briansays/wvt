@@ -21,6 +21,7 @@ std::vector<std::string> gpuBackendList();
 // The jobs this backend runs; the others use the CPU.
 enum class GpuJob { Spectrogram, Live, Channel };
 bool gpuBackendImplements(GpuJob job);
+GpuLimits gpuBackendLimits();
 
 // The jobs, on the device chosen by gpuInit. On Failed, err says why and oom
 // is true when the GPU ran out of memory.

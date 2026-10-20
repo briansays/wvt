@@ -13,7 +13,7 @@ constexpr float kEps = 1e-20f;
 constexpr int kMaxPendingRows = 4096;  // if the UI stops polling, keep only the newest
 // Auto averaging analyzes at most this many samples per second (bounds CPU
 // use). The GPU takes more (issue #3).
-constexpr double kMaxAnalyzeRate = 20e6, kGpuMaxAnalyzeRate = 100e6;
+constexpr double kMaxAnalyzeRate = 20e6;
 }  // namespace
 
 LiveEngine::LiveEngine(std::function<void()> wake) : wake_(std::move(wake)) {}
@@ -201,11 +201,19 @@ void LiveEngine::spectrumLoop() {
         // Wait for at least one FFT's worth of new samples.
         if (w - lastEnd < n) continue;
         // Auto: average FFTs over all samples since the previous row.
-        const bool tryGpu = gpuLiveUsable();
-        const double maxRate = tryGpu ? kGpuMaxAnalyzeRate : kMaxAnalyzeRate;
-        const int64_t maxFrames = std::max<int64_t>(1, (int64_t)(maxRate / p.rowsPerSec / n));
-        int64_t frames = p.avg > 0 ? std::min(p.avg, 64) : std::clamp<int64_t>((w - lastEnd) / n, 1, maxFrames);
-        frames = std::min(frames, (w - freshFrom_.load()) / n);  // nothing from before a retune
+        // Auto averaging covers every new sample, up to the CPU's or the GPU's rate.
+        const GpuLimits gl = gpuLimits();
+        auto framesFor = [&](double maxRate) {
+            const int64_t maxFrames = std::max<int64_t>(1, (int64_t)(maxRate / p.rowsPerSec / n));
+            const int64_t f = p.avg > 0 ? std::min(p.avg, 64) : std::clamp<int64_t>((w - lastEnd) / n, 1, maxFrames);
+            return std::min(f, (w - freshFrom_.load()) / n);  // nothing from before a retune
+        };
+        bool tryGpu = gpuLiveUsable();
+        int64_t frames = framesFor(tryGpu ? gl.liveMaxRate : kMaxAnalyzeRate);
+        if (tryGpu && (double)frames * n < gl.liveMinInput) {
+            tryGpu = false;  // a small row is faster on the CPU
+            frames = framesFor(kMaxAnalyzeRate);
+        }
         if (frames < 1) continue;
         const int avg = (int)frames;
         const int64_t need = (int64_t)n * avg;

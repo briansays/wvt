@@ -117,6 +117,8 @@ void gpuSetEnabled(bool on) {
 
 std::vector<std::string> gpuListDevices() { return gpuBackendList(); }
 
+GpuLimits gpuLimits() { return gpuBackendLimits(); }
+
 bool gpuSpectrogramUsable() { return gpuEnabled() && !g_spec.broken && gpuBackendImplements(GpuJob::Spectrogram); }
 
 GpuStatus gpuSpectrogram(const SpecJob& job, float* lin, const std::function<bool()>& cancelled) {

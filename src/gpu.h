@@ -110,6 +110,17 @@ bool gpuChannelUsable();  // gpuChannelize would try the GPU
 // after an error: ...". Empty when nothing failed.
 std::string gpuFallbackNotes();
 
+// Work limits of the backend in use, from its benchmarks. Jobs below the
+// minimums are faster on the CPU (the GPU has a fixed cost per call).
+struct GpuLimits {
+    double specBudget = 2e9;    // waterfall: FFT input samples per view (the CPU has 256e6)
+    double specMinInput = 0;    // waterfall: smaller views stay on the CPU
+    double liveMaxRate = 100e6; // live auto averaging, samples/s (the CPU has 20e6)
+    double liveMinInput = 0;    // live: smaller rows stay on the CPU
+    double chanMinMacs = 2e7;   // channel filter: smaller jobs (multiply-adds) stay on the CPU
+};
+GpuLimits gpuLimits();
+
 // One line per CUDA device for --list-devices, or one line that says why
 // there are none.
 std::vector<std::string> gpuListDevices();
