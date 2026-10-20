@@ -360,7 +360,6 @@ void App::waterfallExportInput(bool& openMenu) {
         const ImU32 col = ImGui::GetColorU32(kColRegion);
         dl->AddLine(ImVec2(lo.x, pm.y), ImVec2(lo.x + sz.x, pm.y), col);
         dl->AddLine(ImVec2(pm.x, lo.y), ImVec2(pm.x, lo.y + sz.y), col);
-        if (!exDragging_) dl->AddText(ImVec2(lo.x + 8, lo.y + 6), col, "Drag a box to export; Esc cancels");
         if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
             exDragging_ = true;
             exDragT_ = m.y;

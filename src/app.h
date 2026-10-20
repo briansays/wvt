@@ -76,7 +76,8 @@ private:
     // plot helpers
     bool beginTimePlot(const char* id, const char* ylabel, float h, bool autoY, ImPlotFormatter yfmt = nullptr,
                        void* yud = nullptr, bool legend = false);
-    void endTimePlot(const char* overlay = nullptr);
+    void endTimePlot();
+    void plotHeader(const char* name, bool* show, const ImVec4& col, const char* readout);
     void drawChannelOverlay(bool vertical);
     void drawFreqMarkers();
     void drawTimeMarkersVertical();

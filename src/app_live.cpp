@@ -584,9 +584,9 @@ void App::drawLiveLeft() {
     ImGui::SetItemTooltip("Label frequency axes relative to the center frequency");
 
     ImVec2 avail = ImGui::GetContentRegionAvail();
-    const float cbW = ImGui::GetFontSize() * 4.5f;
+    const float cbW = colorbarWidth();
     const float plotW = avail.x - cbW - ImGui::GetStyle().ItemSpacing.x;
-    float specH = std::max(80.f, avail.y * specFrac_);
+    float specH = std::max(ImGui::GetFontSize() * 7, avail.y * specFrac_);
     float wfH = std::max(80.f, avail.y - specH - 6);
 
     // --- spectrum ---
@@ -678,7 +678,7 @@ void App::drawLiveLeft() {
         ImPlot::EndPlot();
     }
     ImGui::SameLine();
-    ImPlot::ColormapScale("##lcbar", dbMin_, dbMax_, ImVec2(cbW, wfH - 6), "%g dB", 0, cmap_);
+    colorbar("##lcbar", dbMin_, dbMax_, wfH - 6, cmap_);
 }
 
 // ---------------------------------------------------------------------------

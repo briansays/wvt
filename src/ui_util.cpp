@@ -190,8 +190,9 @@ void SetupStyle(float scale) {
     c[ImGuiCol_ButtonHovered] = ImVec4(0.26f, 0.38f, 0.52f, 1.f);
     s.ScaleAllSizes(scale);
     ImPlotStyle& ps = ImPlot::GetStyle();
-    ps.PlotPadding = ImVec2(18 * scale, 6 * scale);
-    ps.LabelPadding = ImVec2(4, 2);
+    // Room on the right for half of the last tick label, and around the plot area.
+    ps.PlotPadding = ImVec2(24 * scale, 10 * scale);
+    ps.LabelPadding = ImVec2(5 * scale, 3 * scale);
     ps.FitPadding = ImVec2(0, 0.08f);
     ps.LineWeight = 1.2f;
     ps.Colors[ImPlotCol_PlotBg] = ImVec4(0.05f, 0.05f, 0.06f, 1.f);
@@ -201,8 +202,8 @@ void tooltipAlways(const char* text) {
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("%s", text);
 }
 
-bool beginForm(const char* id, float labelEm) {
-    if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingStretchProp)) return false;
+bool beginForm(const char* id, float labelEm, float widthEm) {
+    if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingStretchProp, ImVec2(ImGui::GetFontSize() * widthEm, 0))) return false;
     ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * labelEm);
     ImGui::TableSetupColumn("field", ImGuiTableColumnFlags_WidthStretch);
     return true;
@@ -247,6 +248,21 @@ bool settingsButton(const char* popupId, const char* tip) {
     dl->AddCircleFilled(c, r * 0.35f, col, 12);
     if (clicked) ImGui::OpenPopup(popupId);
     return clicked;
+}
+
+namespace {
+float colorbarPadX() { return ImGui::GetFontSize() * 0.3f; }
+}  // namespace
+
+float colorbarWidth() {
+    // ImPlot's bar is 20 px wide; the rest is the tick labels and the padding.
+    return 20 + ImPlot::GetStyle().LabelPadding.x + ImGui::CalcTextSize("-888 dB").x + 2 * colorbarPadX() + 2;
+}
+
+void colorbar(const char* id, float dbMin, float dbMax, float height, int cmap) {
+    ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(colorbarPadX(), ImPlot::GetStyle().PlotPadding.y));
+    ImPlot::ColormapScale(id, dbMin, dbMax, ImVec2(colorbarWidth(), height), "%g dB", 0, cmap);
+    ImPlot::PopStyleVar();
 }
 
 void groupSeparator() {

@@ -1,6 +1,7 @@
 #include "app.h"
 
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <cstring>
 
@@ -764,8 +765,8 @@ void App::drawLeft() {
     }
 
     ImVec2 avail = ImGui::GetContentRegionAvail();
-    const float cbW = ImGui::GetFontSize() * 4.5f;
-    float specH = std::max(80.f, avail.y * specFrac_);
+    const float cbW = colorbarWidth();
+    float specH = std::max(ImGui::GetFontSize() * 7, avail.y * specFrac_);
     float wfH = std::max(80.f, avail.y - specH - 6);
 
     // --- spectrum ---
@@ -861,7 +862,7 @@ void App::drawLeft() {
     if (openWfMenu) ImGui::OpenPopup("##wfmenu");
     drawWaterfallMenu();
     ImGui::SameLine();
-    ImPlot::ColormapScale("##cbar", dbMin_, dbMax_, ImVec2(cbW, wfH - 6), "%g dB", 0, cmap_);
+    colorbar("##cbar", dbMin_, dbMax_, wfH - 6, cmap_);
 }
 
 // ---------------------------------------------------------------------------
@@ -869,7 +870,8 @@ void App::drawLeft() {
 // ---------------------------------------------------------------------------
 bool App::beginTimePlot(const char* id, const char* ylabel, float h, bool autoY, ImPlotFormatter yfmt, void* yud,
                         bool legend) {
-    ImPlotFlags flags = ImPlotFlags_NoTitle;
+    // No ImPlot menu: a right-click opens the plot's options (endTimePlot).
+    ImPlotFlags flags = ImPlotFlags_NoTitle | ImPlotFlags_NoMenus;
     if (!legend) flags |= ImPlotFlags_NoLegend;
     if (!ImPlot::BeginPlot(id, ImVec2(-1, h), flags)) return false;
     ImPlot::SetupAxis(ImAxis_X1, nullptr, ImPlotAxisFlags_NoLabel);
@@ -881,44 +883,56 @@ bool App::beginTimePlot(const char* id, const char* ylabel, float h, bool autoY,
     ImPlot::SetupAxisZoomConstraints(ImAxis_X1, 4.0 / std::max(1.0, fs_), len + 2 * pad);
     ImPlot::SetupAxis(ImAxis_Y1, ylabel, autoY ? (ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_RangeFit) : 0);
     if (yfmt) ImPlot::SetupAxisFormat(ImAxis_Y1, yfmt, yud);
-    if (legend) ImPlot::SetupLegend(ImPlotLocation_NorthEast, ImPlotLegendFlags_Horizontal);
+    // The legend sits above the plot area, so it never covers the traces.
+    if (legend) ImPlot::SetupLegend(ImPlotLocation_North, ImPlotLegendFlags_Horizontal | ImPlotLegendFlags_Outside);
     return true;
 }
 
-void App::endTimePlot(const char* overlay) {
+void App::endTimePlot() {
     drawTimeMarkersVertical();
     drawExportRegion(false);
     drawPlayhead(true);
-    if (overlay && *overlay) {
-        // measurement readout in the plot's top-left corner
-        ImDrawList* dl = ImPlot::GetPlotDrawList();
-        ImVec2 p = ImPlot::GetPlotPos();
-        p.x += 6;
-        p.y += 4;
-        ImVec2 sz = ImGui::CalcTextSize(overlay);
-        ImPlot::PushPlotClipRect();
-        dl->AddRectFilled(ImVec2(p.x - 3, p.y - 1), ImVec2(p.x + sz.x + 3, p.y + sz.y + 1), IM_COL32(10, 10, 12, 190), 3);
-        dl->AddText(p, IM_COL32(220, 220, 220, 255), overlay);
-        ImPlot::PopPlotClipRect();
-    }
     if (std::isfinite(hoverT_)) {
         ImPlot::SetNextLineStyle(kColHover);
         ImPlot::PlotInfLines("##ht", &hoverT_, 1, ImPlotItemFlags_NoFit);
     }
+    bool openMenu = false;
     if (ImPlot::IsPlotHovered()) {
         nextHoverT_ = ImPlot::GetPlotMousePos().x;
         if (ImGui::GetIO().KeyShift && ImGui::IsMouseClicked(0)) playFrom(nextHoverT_);
+        // A right-click without a drag (a right-drag is the box zoom).
+        const ImGuiIO& io = ImGui::GetIO();
+        openMenu = ImGui::IsMouseReleased(ImGuiMouseButton_Right) &&
+                   io.MouseDragMaxDistanceSqr[ImGuiMouseButton_Right] < io.MouseDragThreshold * io.MouseDragThreshold;
     }
     ImPlot::EndPlot();
+    if (openMenu) ImGui::OpenPopup("##opts");
+}
+
+// A time plot's header: the show checkbox in the plot's colour, the options
+// button and the measurement readout (which wraps to the next line when the
+// row is full). The options popup ("##opts") is drawn by the caller.
+void App::plotHeader(const char* name, bool* show, const ImVec4& col, const char* readout) {
+    flowBegin();
+    flow(ImGui::GetFrameHeight() * 6);
+    ImGui::PushStyleColor(ImGuiCol_Text, col);
+    ImGui::Checkbox(name, show);
+    ImGui::PopStyleColor();
+    ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+    settingsButton("##opts", "Options for this plot (or right-click the plot)");
+    if (*show && readout && *readout) {
+        flow(ImGui::CalcTextSize(readout).x);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextDisabled("%s", readout);
+    }
 }
 
 void App::drawRight() {
-    const ImGuiStyle& st = ImGui::GetStyle();
-    // --- channel selection row ---
+    // --- channel: the main settings on the row, the rest in the options popup ---
     flowBegin();
     flow(ImGui::GetFrameHeight() * 5);
     ImGui::Checkbox("Channel", &demod_.chanEnable);
-    ImGui::SetItemTooltip("Shift, low-pass filter and decimate a channel before demodulating.\n"
+    ImGui::SetItemTooltip("Shift, low-pass filter and decimate a channel before demodulating (C).\n"
                           "Drag the cyan lines in the waterfall/spectrum, or Ctrl+Click there to tune.");
     ImGui::BeginDisabled(!demod_.chanEnable);
     label("Offset", fieldW(13));
@@ -927,13 +941,7 @@ void App::drawRight() {
     label("BW", fieldW(11));
     if (InputSI("##cbw", &demod_.chanBw, "Hz", fieldW(11))) demod_.chanBw = std::clamp(demod_.chanBw, 1.0, fs_);
     ImGui::SetItemTooltip("Channel filter bandwidth (two-sided)");
-    label("Taps", stepW(5));
-    if (ImGui::InputInt("##taps", &demod_.taps, 2, 32)) demod_.taps = std::clamp(demod_.taps, 0, 16383);
-    ImGui::SetItemTooltip("FIR length, 0 = auto");
-    label("Decim", stepW(5));
-    if (ImGui::InputInt("##dec", &demod_.decim)) demod_.decim = std::clamp(demod_.decim, 0, 100000);
-    ImGui::SetItemTooltip("Decimation factor, 0 = auto (output rate ~ 2x BW)");
-    flow(ImGui::CalcTextSize("To peak").x + st.FramePadding.x * 2);
+    flow(ImGui::CalcTextSize("To peak").x + ImGui::GetStyle().FramePadding.x * 2 + ImGui::GetFrameHeight() * 1.5f);
     if (ImGui::Button("To peak") && wf_ && !wf_->specF.empty()) {
         // strongest spectral peak within the visible frequency range
         int best = -1;
@@ -944,23 +952,32 @@ void App::drawRight() {
     }
     ImGui::SetItemTooltip("Center the channel on the strongest peak in the visible spectrum");
     ImGui::EndDisabled();
-    flow(ImGui::GetFrameHeight() * 1.5f + ImGui::CalcTextSize("Squelch").x + stepW(6));
-    ImGui::Checkbox("Squelch", &demod_.squelch);
-    ImGui::SetItemTooltip("Blank FM/PM where the signal power is below the threshold");
-    ImGui::SameLine(0, st.ItemInnerSpacing.x);
-    ImGui::SetNextItemWidth(stepW(6));
-    ImGui::BeginDisabled(!demod_.squelch);
-    ImGui::InputDouble("##sq", &demod_.squelchDb, 1, 10, "%.0f dB");
-    ImGui::EndDisabled();
-    label("Max pts", fieldW(10));
-    long long md = demod_.maxDense;
-    if (ImGui::InputScalar("##maxd", ImGuiDataType_S64, &md, nullptr, nullptr, "%lld",
-                           ImGuiInputTextFlags_EnterReturnsTrue))
-        demod_.maxDense = std::clamp<long long>(md, 10000, 200000000);
-    ImGui::SetItemTooltip("Maximum demodulated samples processed at full resolution.\nWider views are sampled sparsely.");
-    label("Plot H", fieldW(7));
-    if (ImGui::InputFloat("##ph", &plotH_, 0, 0, "%.0f")) plotH_ = std::clamp(plotH_, 0.f, 2000.f);
-    ImGui::SetItemTooltip("Plot height in pixels, 0 = fit the window");
+    ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+    settingsButton("##chanopts", "Filter taps, decimation, squelch, the point budget and the plot height");
+    if (ImGui::BeginPopup("##chanopts")) {
+        if (beginForm("##chanform", 5.5f, 20)) {
+            row("Taps", "FIR length, 0 = auto");
+            if (ImGui::InputInt("##taps", &demod_.taps, 2, 32)) demod_.taps = std::clamp(demod_.taps, 0, 16383);
+            row("Decim", "Decimation factor, 0 = auto (output rate ~ 2x BW)");
+            if (ImGui::InputInt("##dec", &demod_.decim)) demod_.decim = std::clamp(demod_.decim, 0, 100000);
+            row("Squelch", "Blank FM/PM where the signal power is below the level");
+            ImGui::Checkbox("##sqon", &demod_.squelch);
+            ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            ImGui::BeginDisabled(!demod_.squelch);
+            ImGui::InputDouble("##sq", &demod_.squelchDb, 1, 10, "%.0f dB");
+            ImGui::EndDisabled();
+            row("Max pts", "Maximum demodulated samples processed at full resolution.\nWider views are sampled sparsely.");
+            long long md = demod_.maxDense;
+            if (ImGui::InputScalar("##maxd", ImGuiDataType_S64, &md, nullptr, nullptr, "%lld",
+                                   ImGuiInputTextFlags_EnterReturnsTrue))
+                demod_.maxDense = std::clamp<long long>(md, 10000, 200000000);
+            row("Plot height", "Height of each plot in pixels, 0 = fit the window");
+            if (ImGui::InputFloat("##ph", &plotH_, 0, 0, "%.0f")) plotH_ = std::clamp(plotH_, 0.f, 2000.f);
+            ImGui::EndTable();
+        }
+        ImGui::EndPopup();
+    }
     if (dm_) {
         char info[200];
         snprintf(info, sizeof info, "out %s | D=%d | taps=%d | %s pts", fmtSI(dm_->outRate, "Sps", 4).c_str(),
@@ -971,39 +988,35 @@ void App::drawRight() {
         if (dm_->sparse) {
             ImGui::SameLine();
             ImGui::TextColored(kColWarn, "SPARSE");
-            ImGui::SetItemTooltip("View exceeds 'Max pts': showing short demodulated blocks per pixel.\nZoom in (or raise Max pts) for full resolution.");
+            ImGui::SetItemTooltip("View exceeds 'Max pts': showing short demodulated blocks per pixel.\nZoom in (or raise Max pts in the channel options) for full resolution.");
         }
     }
     ImGui::Separator();
 
     // --- scrollable plot stack ---
     ImGui::BeginChild("##plots", ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_AlwaysVerticalScrollbar);
+    const ImGuiStyle& st = ImGui::GetStyle();
+    const float gap = ImGui::GetFontSize() * 0.4f;
     int nVis = (int)showIQ_ + showAM_ + showFM_ + showPM_;
-    const float hdrH = ImGui::GetFrameHeightWithSpacing() * (ImGui::GetContentRegionAvail().x < fieldW(80) ? 2.f : 1.f);
+    // A header is one row, or two when the readout wraps.
+    const float hdrH = ImGui::GetFrameHeightWithSpacing() * (ImGui::GetContentRegionAvail().x < fieldW(70) ? 2.f : 1.f) + gap;
     float availH = ImGui::GetContentRegionAvail().y;
-    float h = plotH_ > 0 ? plotH_ : std::max(140.f, (availH - 4 * hdrH) / std::max(1, nVis) - st.ItemSpacing.y);
+    float h = plotH_ > 0 ? plotH_
+                         : std::max(ImGui::GetFontSize() * 9, (availH - 4 * hdrH) / std::max(1, nVis) - st.ItemSpacing.y);
 
     static const char* amModes[] = {"Linear", "dB", "Normalized (m)"};
     static const char* pmModes[] = {"Wrapped", "Unwrapped", "Unwrapped, detrended"};
-
-    auto header = [&](const char* name, bool* show, const ImVec4& col) {
-        flowBegin();
-        flow(ImGui::GetFrameHeight() * 6);
-        ImGui::PushStyleColor(ImGuiCol_Text, col);
-        ImGui::Checkbox(name, show);
-        ImGui::PopStyleColor();
+    auto autoY = [&](int i) {
+        row("Auto Y", "Fit the Y axis to the data in view");
+        ImGui::Checkbox("##autoy", &autoY_[i]);
     };
     char buf[256];
 
     // I/Q
     ImGui::PushID("iq");
-    header("I / Q", &showIQ_, kColI);
-    flow(ImGui::GetFrameHeight() * 5);
-    ImGui::Checkbox("Auto Y", &autoY_[0]);
     buf[0] = 0;
-    if (dm_) {
-        snprintf(buf, sizeof buf, "power  mean %.1f dBFS   min %.1f   max %.1f", dm_->sPwr.mean, dm_->sPwr.min, dm_->sPwr.max);
-    }
+    if (dm_) snprintf(buf, sizeof buf, "power  mean %.1f dBFS   min %.1f   max %.1f", dm_->sPwr.mean, dm_->sPwr.min, dm_->sPwr.max);
+    plotHeader("I / Q", &showIQ_, kColI, buf);
     if (showIQ_ && beginTimePlot("##iqplot", "amplitude", h, autoY_[0], nullptr, nullptr, true)) {
         if (dm_) {
             ImPlot::SetNextLineStyle(kColI);
@@ -1011,85 +1024,103 @@ void App::drawRight() {
             ImPlot::SetNextLineStyle(kColQ);
             ImPlot::PlotLine("Q", dm_->q.t.data(), dm_->q.y.data(), (int)dm_->q.t.size());
         }
-        endTimePlot(buf);
+        endTimePlot();
+    }
+    if (ImGui::BeginPopup("##opts")) {
+        if (beginForm("##iqform", 5.5f, 14)) {
+            autoY(0);
+            ImGui::EndTable();
+        }
+        ImGui::EndPopup();
     }
     ImGui::PopID();
+    ImGui::Dummy(ImVec2(0, gap));
 
     // AM
     ImGui::PushID("am");
-    header("AM", &showAM_, kColAM);
-    label("Mode", fieldW(13));
-    ImGui::Combo("##amm", &demod_.amMode, amModes, 3);
-    label("Smooth", stepW(5));
-    if (ImGui::InputInt("##ams", &demod_.amSmooth)) demod_.amSmooth = std::clamp(demod_.amSmooth, 1, 100000);
-    ImGui::SetItemTooltip("Moving-average length in output samples");
-    flow(ImGui::GetFrameHeight() * 5);
-    ImGui::Checkbox("Auto Y", &autoY_[1]);
     buf[0] = 0;
-    if (dm_) {
+    if (dm_)
         snprintf(buf, sizeof buf, "mod index m = %.3f   mean %.4g   min %.4g   max %.4g", dm_->amIndex, dm_->sAm.mean,
                  dm_->sAm.min, dm_->sAm.max);
-    }
+    plotHeader("AM", &showAM_, kColAM, buf);
     static const char* amLabels[] = {"envelope", "envelope (dB)", "m(t)"};
     if (showAM_ && beginTimePlot("##amplot", amLabels[std::clamp(demod_.amMode, 0, 2)], h, autoY_[1])) {
         if (dm_) {
             ImPlot::SetNextLineStyle(kColAM);
             ImPlot::PlotLine("AM", dm_->am.t.data(), dm_->am.y.data(), (int)dm_->am.t.size());
         }
-        endTimePlot(buf);
+        endTimePlot();
+    }
+    if (ImGui::BeginPopup("##opts")) {
+        if (beginForm("##amform", 5.5f, 18)) {
+            row("Mode");
+            ImGui::Combo("##amm", &demod_.amMode, amModes, 3);
+            row("Smooth", "Moving-average length in output samples");
+            if (ImGui::InputInt("##ams", &demod_.amSmooth)) demod_.amSmooth = std::clamp(demod_.amSmooth, 1, 100000);
+            autoY(1);
+            ImGui::EndTable();
+        }
+        ImGui::EndPopup();
     }
     ImGui::PopID();
+    ImGui::Dummy(ImVec2(0, gap));
 
     // FM
     ImGui::PushID("fm");
-    header("FM", &showFM_, kColFM);
-    label("Smooth", stepW(5));
-    if (ImGui::InputInt("##fms", &demod_.fmSmooth)) demod_.fmSmooth = std::clamp(demod_.fmSmooth, 1, 100000);
-    ImGui::SetItemTooltip("Moving-average length in output samples (post-discriminator low-pass)");
-    flow(ImGui::GetFrameHeight() * 8);
-    ImGui::Checkbox("Rel. to channel", &demod_.fmRelative);
-    ImGui::SetItemTooltip("Show frequency relative to the channel center instead of the capture center");
-    ImGui::SameLine();
-    ImGui::Checkbox("Auto Y", &autoY_[2]);
     buf[0] = 0;
     if (dm_) {
         double pk = std::max(std::fabs(dm_->sFm.max - dm_->sFm.mean), std::fabs(dm_->sFm.min - dm_->sFm.mean));
         snprintf(buf, sizeof buf, "mean %s   pk dev %s   rms dev %s", fmtSI(dm_->sFm.mean, "Hz", 5).c_str(),
                  fmtSI(pk, "Hz", 4).c_str(), fmtSI(dm_->sFm.rms, "Hz", 4).c_str());
     }
+    plotHeader("FM", &showFM_, kColFM, buf);
     static char hzUnit[] = "Hz";
     if (showFM_ && beginTimePlot("##fmplot", "inst. freq", h, autoY_[2], formatValueSI, hzUnit)) {
         if (dm_) {
             ImPlot::SetNextLineStyle(kColFM);
             ImPlot::PlotLine("FM", dm_->fm.t.data(), dm_->fm.y.data(), (int)dm_->fm.t.size());
         }
-        endTimePlot(buf);
+        endTimePlot();
+    }
+    if (ImGui::BeginPopup("##opts")) {
+        if (beginForm("##fmform", 7.5f, 18)) {
+            row("Smooth", "Moving-average length in output samples (post-discriminator low-pass)");
+            if (ImGui::InputInt("##fms", &demod_.fmSmooth)) demod_.fmSmooth = std::clamp(demod_.fmSmooth, 1, 100000);
+            row("Rel. to channel", "Show frequency relative to the channel center instead of the capture center");
+            ImGui::Checkbox("##fmrel", &demod_.fmRelative);
+            autoY(2);
+            ImGui::EndTable();
+        }
+        ImGui::EndPopup();
     }
     ImGui::PopID();
+    ImGui::Dummy(ImVec2(0, gap));
 
     // PM
     ImGui::PushID("pm");
-    header("PM", &showPM_, kColPM);
-    label("Mode", fieldW(18));
-    ImGui::Combo("##pmm", &demod_.pmMode, pmModes, 3);
-    ImGui::SetItemTooltip("Detrended removes the best-fit line, i.e. any residual carrier offset");
-    label("Smooth", stepW(5));
-    if (ImGui::InputInt("##pms", &demod_.pmSmooth)) demod_.pmSmooth = std::clamp(demod_.pmSmooth, 1, 100000);
-    flow(ImGui::GetFrameHeight() * 9);
-    ImGui::Checkbox("Degrees", &demod_.pmDegrees);
-    ImGui::SameLine();
-    ImGui::Checkbox("Auto Y", &autoY_[3]);
     const char* pu = demod_.pmDegrees ? "deg" : "rad";
     buf[0] = 0;
-    if (dm_) {
-        snprintf(buf, sizeof buf, "pk-pk %.4g %s   rms %.4g %s", dm_->sPm.max - dm_->sPm.min, pu, dm_->sPm.rms, pu);
-    }
+    if (dm_) snprintf(buf, sizeof buf, "pk-pk %.4g %s   rms %.4g %s", dm_->sPm.max - dm_->sPm.min, pu, dm_->sPm.rms, pu);
+    plotHeader("PM", &showPM_, kColPM, buf);
     if (showPM_ && beginTimePlot("##pmplot", demod_.pmDegrees ? "phase (deg)" : "phase (rad)", h, autoY_[3])) {
         if (dm_) {
             ImPlot::SetNextLineStyle(kColPM);
             ImPlot::PlotLine("PM", dm_->pm.t.data(), dm_->pm.y.data(), (int)dm_->pm.t.size());
         }
-        endTimePlot(buf);
+        endTimePlot();
+    }
+    if (ImGui::BeginPopup("##opts")) {
+        if (beginForm("##pmform", 5.5f, 20)) {
+            row("Mode", "Detrended removes the best-fit line, i.e. any residual carrier offset");
+            ImGui::Combo("##pmm", &demod_.pmMode, pmModes, 3);
+            row("Smooth", "Moving-average length in output samples");
+            if (ImGui::InputInt("##pms", &demod_.pmSmooth)) demod_.pmSmooth = std::clamp(demod_.pmSmooth, 1, 100000);
+            row("Degrees", "Show the phase in degrees instead of radians");
+            ImGui::Checkbox("##pmdeg", &demod_.pmDegrees);
+            autoY(3);
+            ImGui::EndTable();
+        }
+        ImGui::EndPopup();
     }
     ImGui::PopID();
     ImGui::EndChild();
@@ -1119,6 +1150,7 @@ void App::drawStatusBar() {
     } else {
         s = status_;
     }
+    if (exSelecting_) s = "Drag a box on the waterfall to export it; Esc cancels   | " + s;
     if (tMarkers_) {
         double dt = std::fabs(tm2_ - tm1_);
         s += "   | dT=" + fmtSI(dt, "s", 6) + " (1/dT=" + fmtSI(dt > 0 ? 1 / dt : 0, "Hz", 5) + ", " +
