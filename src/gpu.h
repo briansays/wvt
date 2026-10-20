@@ -22,6 +22,7 @@ struct GpuInfo {
     bool available = false;  // a usable GPU was found
     int device = -1;
     std::string name;     // "NVIDIA GeForce RTX 4070 (compute 8.9, 12.0 GB)"
+    std::string model;    // "GeForce RTX 4070" (for the status bar)
     std::string version;  // "CUDA runtime 12.4, driver 12.6"
     std::string reason;   // why not available: "built without CUDA", "no NVIDIA driver", ...
 };
@@ -83,6 +84,10 @@ private:
     GpuLiveImpl* impl_ = nullptr;
 };
 bool gpuLiveUsable();  // GpuLiveSpectrum::run would try the GPU
+
+// One line per path that fell back to the CPU, e.g. "waterfall: uses the CPU
+// after an error: ...". Empty when nothing failed.
+std::string gpuFallbackNotes();
 
 // One line per CUDA device for --list-devices, or one line that says why
 // there are none.

@@ -4,11 +4,13 @@
 #include <atomic>
 #include <cctype>
 #include <cstdlib>
+#include <mutex>
 
 #include "gpu_backend.h"
 #include "log.h"
 
 namespace {
+std::mutex g_noteMutex;
 GpuInfo g_info = [] {
     GpuInfo i;
     i.reason = "not initialized";
@@ -18,11 +20,15 @@ std::atomic<bool> g_enabled{false};
 // One per GPU path: after a failure (not out of memory) the path uses the
 // CPU until the next gpuInit.
 struct PathState {
+    explicit PathState(const char* n) : name(n) {}
     const char* name;
     std::atomic<bool> broken{false}, oomLogged{false};
+    std::string note;  // for gpuFallbackNotes, under g_noteMutex
     void reset() {
         broken = false;
         oomLogged = false;
+        std::lock_guard<std::mutex> lk(g_noteMutex);
+        note.clear();
     }
 };
 PathState g_spec{"waterfall"}, g_live{"live spectrum"};
@@ -36,6 +42,10 @@ bool forcedFail(std::string& err) {
 
 // Logs a failed call and applies the fallback rule.
 void noteFailure(PathState& p, const std::string& err, bool oom) {
+    {
+        std::lock_guard<std::mutex> lk(g_noteMutex);
+        if (!p.broken) p.note = std::string(p.name) + (oom ? ": the GPU ran out of memory; large jobs use the CPU (" : ": uses the CPU after an error (") + err + ")";
+    }
     if (oom) {
         // Smaller jobs may still fit, so the path stays on.
         if (!p.oomLogged.exchange(true))
@@ -113,6 +123,14 @@ GpuStatus gpuSpectrogram(const SpecJob& job, float* lin, const std::function<boo
     const GpuStatus st = forcedFail(err) ? GpuStatus::Failed : gpuBackendSpectrogram(job, lin, cancelled, err, oom);
     if (st == GpuStatus::Failed) noteFailure(g_spec, err, oom);
     return st;
+}
+
+std::string gpuFallbackNotes() {
+    std::lock_guard<std::mutex> lk(g_noteMutex);
+    std::string s;
+    for (const PathState* p : {&g_spec, &g_live})
+        if (!p->note.empty()) s += (s.empty() ? "" : "\n") + p->note;
+    return s;
 }
 
 bool gpuLiveUsable() { return gpuEnabled() && !g_live.broken; }

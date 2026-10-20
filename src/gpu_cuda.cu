@@ -147,6 +147,8 @@ void gpuBackendProbe(int device, GpuInfo& info) {
         info.available = true;
         info.device = d;
         info.name = describe(props[d]);
+        info.model = props[d].name;
+        if (info.model.rfind("NVIDIA ", 0) == 0) info.model.erase(0, 7);
         info.version = "CUDA runtime " + versionText(runtime) + ", driver " + versionText(driver);
         info.reason.clear();
         return;

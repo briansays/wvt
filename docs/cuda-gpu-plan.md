@@ -1,7 +1,7 @@
 # Plan: CUDA GPU acceleration (issue #3)
 
 Branch: `3-cuda-gpu`, from `main` at `29dca41` (after the logging merge, PR #15).
-Status: **steps 0–2, 4 and 5 implemented** (2026-10-19). The CPU-only build is tested on
+Status: **steps 0–2 and 4–6 implemented** (2026-10-19). The CPU-only build is tested on
 macOS. The CUDA build is compiled and tested in CUDA 12.6 and 12.8 containers with no GPU.
 **The GPU code has not run on a GPU yet** (see §9).
 
@@ -385,3 +385,33 @@ skipped: "no NVIDIA driver").
 **Still to do on the GPU computer:** `gpu_check` and `gpu_check --bench`; then the GUI with
 a USRP at 40 MS/s or more (acceptance §7 item 5: "FFT sees" stays at 100 % at 30 rows/s,
 no dropped samples).
+
+### Step 6: UI
+
+| File | Change |
+|---|---|
+| `src/app.cpp` | `gpuTag`: the status bar shows `GPU <model>` or `CPU` before the renderer, by where the shown waterfall was computed (`WaterfallRes::gpu`). Its tooltip has the device, the CUDA and driver versions, "switched off", and the fallback notes. `drawGpuCheckbox`: **GPU** after **Peak**; it calls `gpuSetEnabled` and invalidates the waterfall worker, so the view is computed again. `drawStatusRight` draws the right side of both status bars. |
+| `src/app_live.cpp` | The live status bar: `FFT sees 100% (GPU)` and the same tag (from `Stats::gpu`). The GPU checkbox after **Cols**; the live loop checks it on each row. |
+| `src/gpu.h`, `src/gpu_common.cpp`, `src/gpu_cuda.cu` | `GpuInfo::model` (the name without "NVIDIA "), `gpuFallbackNotes()` (one line per path that fell back, with the error). |
+
+Differences from the plan:
+
+- **Builds without CUDA show nothing new**: no tag, no checkbox. This keeps the
+  "macOS builds do not change" rule (§1). A CUDA build always shows the tag: `CPU` when no
+  GPU can be used, with the reason in the tooltip. The checkbox appears only when a GPU can
+  be used.
+- The tag uses the short model name ("GPU GeForce RTX 4070"); the full name is in the tooltip.
+
+Checks:
+
+- macOS: no warnings, the self-tests pass. The X display could not be opened from this
+  session, so the Mac GUI was not looked at; by the code, a build without CUDA draws the
+  same status bar as before.
+- CUDA 12.8 container with Xvfb and `--software`, no driver: the screenshots show
+  `CPU | software | 39 fps` (file) and `FFT sees 99% | CPU | software | 56 fps` (live
+  `--device sim`). No GPU checkbox, as expected.
+
+**Still to do on the GPU computer:** the tag shows `GPU <model>`; turning the checkbox off
+and on computes the view again on the other side (the log has "GPU processing off / on");
+the live status shows `(GPU)`; with `WVT_GPU_FORCE_FAIL=1` the tag shows `CPU` and its
+tooltip has the fallback note.
