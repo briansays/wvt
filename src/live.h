@@ -45,6 +45,7 @@ public:
         double fc = 0, rate = 0;
         SampleFormat fmt = SampleFormat::CI16;
         double analyzed = 1;   // fraction of samples that went into FFTs
+        bool gpu = false;      // the last row was computed on the GPU
         double rowPeriod = 0;  // measured seconds between rows
         int64_t received = 0;  // samples received from the device
         int64_t dropped = 0;   // known lost samples (device overflows)
@@ -95,5 +96,6 @@ private:
     uint64_t gen_ = 1;
     LiveRows pending_;
     double analyzed_ = 1, rowPeriod_ = 0;
+    std::atomic<bool> onGpu_{false};
     std::atomic<int64_t> freshFrom_{0};  // rows use only samples from here on (set on retune)
 };

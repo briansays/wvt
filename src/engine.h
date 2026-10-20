@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "dsp.h"
+#include "gpu.h"
 #include "iq_file.h"
 #include "log.h"
 
@@ -152,9 +153,12 @@ struct WaterfallRes {
     float p5 = -100, p50 = -80, p999 = 0;          // percentiles for auto-range
     int fftsPerRow = 1;
     double coverage = 1;  // fraction of the view's samples inside an FFT (< 1 only past the work budget)
+    bool gpu = false;     // computed on the GPU
 };
 
 std::shared_ptr<WaterfallRes> computeWaterfall(const WaterfallReq& r, const CancelFn& cancelled);
+// The waterfall's inner loop on the CPU threads. False when cancelled.
+bool spectrogramCpu(const SpecJob& job, float* lin, const CancelFn& cancelled);
 
 // ---------------------------------------------------------------------------
 // Channelizer + AM / FM / PM demodulation
@@ -230,6 +234,9 @@ struct ChanDesign {
     int decim = 1, taps = 0;
 };
 ChanDesign chanDesign(const DemodReq& r);
+// The channel filter (mix + FIR + decimate) on the CPU threads, or inline
+// when threaded is false. False when cancelled.
+bool channelizeCpu(const ChanJob& job, cf* y, const CancelFn& cancelled, bool threaded = true);
 
 // ---------------------------------------------------------------------------
 // Time segment of a file (issue #16)

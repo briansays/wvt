@@ -60,6 +60,34 @@ To make a backend necessary (CMake fails if the library is missing) or to leave 
 
 wvt uses the UHD C API, so you do not need Boost headers to build it.
 
+### Optional: GPU acceleration
+
+On Linux with an NVIDIA GPU, wvt can compute the file waterfall, the live spectrum and the
+channel filter of the demodulator plots on the GPU. This lets wide views keep "FFT sees 100 %", and lets the live spectrum analyze every
+sample at USRP rates. The results look the same as on the CPU.
+
+- **Build:** the CUDA toolkit 12.0 or later (12.8 or later for RTX 50-series cards), with
+  CMake 3.18 or later. CMake finds `nvcc` and reports
+  `wvt: CUDA support enabled (CUDA 12.x, archs ..., static cuFFT)`. Not available on macOS.
+- **Run:** an NVIDIA driver and a GPU with compute capability 7.5 or later (GeForce RTX 20xx
+  and newer) and at least 1 GB of free memory. A CUDA build also runs on computers without
+  a GPU or driver: it then uses the CPU, and the log says why.
+
+| CMake option | Meaning |
+|---|---|
+| `-DWVT_WITH_CUDA=AUTO\|ON\|OFF` | `AUTO` (default) builds the GPU code when the toolkit is found; `ON` fails without it |
+| `-DWVT_CUDA_STATIC=ON\|OFF` | `ON` (default) links cuFFT into the binary (about 270 MB, needs only the driver); `OFF` makes a small binary that needs the CUDA libraries at run time |
+| `-DCMAKE_CUDA_ARCHITECTURES=89` | Build for these GPUs only (smaller and faster to build). The default covers RTX 20xx–50xx, A100 and H100 |
+
+At run time, `--gpu auto|on|off` (or `WVT_GPU`) chooses: `auto` uses a usable GPU, `on` stops
+if there is none, `off` never touches the driver. `--list-devices` lists the GPUs, and
+`--gpu-device N` picks one. In the window, the status bar shows `GPU <model>` or `CPU`, and
+the **GPU** checkbox in the waterfall and live settings switches the GPU off and on.
+
+If a GPU error occurs, that part of wvt goes back to the CPU for the rest of the session, and
+the log and the status-bar tooltip say why. `build/gpu_check` compares the GPU results with
+the CPU, and `build/gpu_check --bench` times them.
+
 ### Device setup
 
 **RTL-SDR v3 on Linux**
@@ -93,6 +121,8 @@ wvt [options] [file]
       --scale S        UI scale (or env WVT_SCALE), useful on HiDPI
       --geometry WxH   initial window size
       --screenshot F   render once, write a PPM to F, exit (for automation)
+      --gpu auto|on|off  NVIDIA GPU processing (default auto, or env WVT_GPU)
+      --gpu-device N   use CUDA device N
 
 live devices (-c and -r set the tuning):
       --device DEV     rtlsdr[:INDEX|SERIAL] | uhd[:ARGS] | sim
@@ -102,7 +132,7 @@ live devices (-c and -r set the tuning):
       --bias-tee       RTL-SDR: power an LNA / active antenna over the coax
       --direct-sampling I|Q  RTL-SDR: HF direct sampling (v3: Q)
       --ppm N          RTL-SDR frequency correction
-      --list-devices   print attached devices and exit
+      --list-devices   print attached devices and GPUs, and exit
 
 recording (needs --device):
       --record PREFIX  record to PREFIX_<date>_<time>_<fc>_<rate>.<ext>
@@ -194,7 +224,7 @@ wvt --device sim -c 100M -r 2.4M                         # built-in simulator, n
   device option restarts the stream.
 - The **waterfall** scrolls with the newest row at the top. Its vertical axis shows seconds ago.
   *Rows/s* sets the scroll speed, and *History* sets how many rows wvt keeps. *Avg* `auto` averages
-  all samples received since the previous row, up to 20 MS/s. The status bar shows the fraction of
+  all samples received since the previous row, up to 20 MS/s (100 MS/s on the GPU). The status bar shows the fraction of
   the samples that the FFT sees. Lower *Avg* to see short bursts more sharply.
 - The **spectrum** shows a running average and a peak hold. *Spec avg* sets the time constant of
   the average, in rows. *reset* restarts the peak hold.
@@ -383,7 +413,7 @@ between blocks, so the audio is continuous. `build/audio_check` tests each mode 
 | **Scrollbar** | Scrolls the view through the file (drag the thumb, click the track to move a page, or use the wheel) |
 | **Left** | Waterfall settings (FFT size, window, overlap, averaging, rows/cols, dB range/auto, colormap) above the spectrum of the current view, the waterfall, and its color bar |
 | **Right** | Channel settings, then scrollable I/Q, AM, FM and PM plots, each with its own settings and a readout of measurements |
-| **Status bar** | Values under the cursor (t, sample #, f, dB, AM/FM/PM), marker ΔT, 1/ΔT and ΔF, renderer, and a busy indicator |
+| **Status bar** | Values under the cursor (t, sample #, f, dB, AM/FM/PM), marker ΔT, 1/ΔT and ΔF, `GPU <model>` or `CPU` (CUDA builds), renderer, and a busy indicator |
 
 ### Linked views
 - Every time axis shares one range: the waterfall's vertical axis and the horizontal axis of each right-hand plot.
@@ -411,8 +441,8 @@ between blocks, so the audio is continuous. `build/audio_check` tests each mode 
 
 ## Signal processing
 
-- **Waterfall:** windowed FFTs with fftshift, in dBFS. The view fits in a maximum of *Rows* rows. When a row covers more time than one FFT, the row averages enough FFTs to cover its full time slice. Thus short pulses cannot fall between FFTs. *Avg* sets the minimum number of FFTs for each row. Above 256 M samples of FFT input, wvt uses a sample of each slice. The settings row then shows the percentage of the view that the FFTs see. wvt max-pools adjacent bins to *Cols* columns, so narrow signals stay visible. The spectrum plot shows the average and the peak hold of the rows in the view.
-- **Channel** (optional): mixes the chosen offset down to 0 Hz, applies a windowed-sinc FIR low-pass (Blackman), then decimates. Auto settings: decimation = ⌊Fs / 2·BW⌋ and taps ≈ 12·Fs / BW. The mixer phase is a function of the absolute sample number, so the results do not move when you pan.
+- **Waterfall:** windowed FFTs with fftshift, in dBFS. The view fits in a maximum of *Rows* rows. When a row covers more time than one FFT, the row averages enough FFTs to cover its full time slice. Thus short pulses cannot fall between FFTs. *Avg* sets the minimum number of FFTs for each row. Above 256 M samples of FFT input (2 G on the GPU), wvt uses a sample of each slice. The settings row then shows the percentage of the view that the FFTs see. wvt max-pools adjacent bins to *Cols* columns, so narrow signals stay visible. The spectrum plot shows the average and the peak hold of the rows in the view.
+- **Channel** (optional): mixes the chosen offset down to 0 Hz, applies a windowed-sinc FIR low-pass (Blackman), then decimates. Auto settings: decimation = ⌊Fs / 2·BW⌋ and taps ≈ 12·Fs / BW. With a GPU, large full-resolution views run the mixer and filter there. The mixer phase is a function of the absolute sample number, so the results do not move when you pan.
 - **AM:** |x|, as linear, dB, or normalized m(t) = |x| / mean − 1. Modulation index m = (max − min) / (max + min).
 - **FM:** instantaneous frequency arg(x[n]·x*[n−1])·Fs / 2π, either absolute (offset from the capture center) or relative to the channel center. The readout shows mean, peak deviation and rms deviation.
 - **PM:** phase, either wrapped, unwrapped, or unwrapped with the best-fit line removed (this removes any remaining carrier offset). Radians or degrees.
@@ -446,6 +476,9 @@ Try `wvt out.sigmf-meta --chan 300k:150k --view 0.5:0.505`.
 | `src/app.*` | UI: toolbar, linked plots, parameter panels |
 | `src/engine.*` | Worker threads, and the waterfall, channelizer/demodulator and overview computations |
 | `src/dsp.*` | FFT, windows, FIR design, parallel-for, smoothing |
+| `src/gpu.h`, `src/gpu_common.cpp` | GPU interface, `--gpu` rules, fallback to the CPU |
+| `src/gpu_cuda.cu` | CUDA backend: device setup, waterfall and live spectrum kernels with cuFFT |
+| `src/gpu_stub.cpp`, `src/gpu_backend.h` | Backend for builds without CUDA; the backend interface |
 | `src/iq_file.*` | mmap reader for all sample formats, plus SigMF and filename detection |
 | `src/ui_util.*` | SI-unit inputs and formatters, scrollbar widget, style |
 | `src/app_live.cpp` | Live mode UI: device and recording toolbar, live spectrum and scrolling waterfall |
@@ -470,3 +503,4 @@ Try `wvt out.sigmf-meta --chan 300k:150k --view 0.5:0.505`.
 | `tools/siggen_check.cpp` | Self-test for the generator (`build/siggen_check`, no hardware needed) |
 | `tools/audio_check.cpp` | Self-test for the audio demodulator (`build/audio_check`, no hardware needed) |
 | `tools/segment_check.cpp` | Self-test for the time segment rules (`build/segment_check`) |
+| `tools/gpu_check.cpp` | GPU self-test (GPU against CPU) and benchmark (`build/gpu_check [--bench]`) |

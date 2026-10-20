@@ -744,6 +744,7 @@ void App::drawLeft() {
     flow(ImGui::GetFrameHeight() * 4);
     ImGui::Checkbox("Peak", &showPeak_);
     ImGui::SetItemTooltip("Show peak-hold trace in the spectrum");
+    drawGpuCheckbox();
     if (wf_ && wf_->coverage < 0.999) {
         char cov[32];
         snprintf(cov, sizeof cov, "FFT sees %.0f%%", 100 * wf_->coverage);
@@ -1109,12 +1110,64 @@ void App::drawStatusBar() {
     if (fMarkers_) s += "   | dF=" + fmtSI(std::fabs(fm2_ - fm1_), "Hz", 6);
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(s.c_str());
-    const char* mode = win_.usingGL() ? "GLX" : "software";
-    char right[96];
-    snprintf(right, sizeof right, "%s%s | %.0f fps", workersBusy() ? "computing...  " : "", mode, ImGui::GetIO().Framerate);
-    float rw = ImGui::CalcTextSize(right).x;
+    char rest[64];
+    snprintf(rest, sizeof rest, "%s | %.0f fps", win_.usingGL() ? "GLX" : "software", ImGui::GetIO().Framerate);
+    drawStatusRight(workersBusy() ? "computing...  " : "", rest, false);
+}
+
+// "GPU <model>" or "CPU": where the waterfall (file) or the live spectrum
+// was computed. Empty in a build without CUDA, so those builds look as before.
+std::string App::gpuTag(bool live) const {
+    const GpuInfo& g = gpuInfo();
+    if (!g.built) return "";
+    bool used;
+    if (live) used = live_ && live_->running() ? liveStats_.gpu : gpuLiveUsable();
+    else used = wf_ ? wf_->gpu : gpuSpectrogramUsable();
+    return used ? "GPU " + g.model : "CPU";
+}
+
+// Right-aligned status text: lead, the GPU tag (with its tooltip), rest.
+void App::drawStatusRight(const std::string& lead, const std::string& rest, bool live) {
+    const std::string tag = gpuTag(live);
+    const std::string all = lead + (tag.empty() ? "" : tag + " | ") + rest;
+    const float rw = ImGui::CalcTextSize(all.c_str()).x;
     ImGui::SameLine(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - rw));
-    ImGui::TextDisabled("%s", right);
+    if (!lead.empty()) {
+        ImGui::TextDisabled("%s", lead.c_str());
+        ImGui::SameLine(0, 0);
+    }
+    if (!tag.empty()) {
+        ImGui::TextDisabled("%s", tag.c_str());
+        const GpuInfo& g = gpuInfo();
+        std::string tip;
+        if (!g.available) {
+            tip = "Processing on the CPU: no GPU can be used (" + g.reason + ")";
+        } else {
+            tip = g.name + "\n" + g.version;
+            if (!gpuEnabled()) tip += "\nSwitched off with the GPU checkbox: the CPU does the work.";
+            else if (tag == "CPU") tip += std::string("\nThis ") + (live ? "spectrum" : "view") + " was computed on the CPU.";
+            const std::string notes = gpuFallbackNotes();
+            if (!notes.empty()) tip += "\n" + notes;
+        }
+        ImGui::SetItemTooltip("%s", tip.c_str());
+        ImGui::SameLine(0, 0);
+        ImGui::TextDisabled(" | ");
+        ImGui::SameLine(0, 0);
+    }
+    ImGui::TextDisabled("%s", rest.c_str());
+}
+
+void App::drawGpuCheckbox() {
+    if (!gpuInfo().available) return;
+    flow(ImGui::GetFrameHeight() * 3);
+    bool on = gpuEnabled();
+    if (ImGui::Checkbox("GPU", &on)) {
+        gpuSetEnabled(on);
+        wfWorker_->invalidate();  // compute the view again on the new side
+    }
+    ImGui::SetItemTooltip("Compute the waterfall and the live spectrum on the %s.\n"
+                          "Off: use the CPU (to compare, or after a driver problem).",
+                          gpuInfo().model.c_str());
 }
 
 void App::handleShortcuts() {

@@ -62,6 +62,10 @@ private:
     void drawRight();
     void drawStatusBar();
     void handleShortcuts();
+    // GPU (issue #3): only in a CUDA build
+    void drawGpuCheckbox();
+    std::string gpuTag(bool live) const;
+    void drawStatusRight(const std::string& lead, const std::string& rest, bool live);
 
     // plot helpers
     bool beginTimePlot(const char* id, const char* ylabel, float h, bool autoY, ImPlotFormatter yfmt = nullptr,

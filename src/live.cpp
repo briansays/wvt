@@ -4,14 +4,16 @@
 #include <chrono>
 #include <cmath>
 
+#include "gpu.h"
 #include "log.h"
 #include "ui_util.h"
 
 namespace {
 constexpr float kEps = 1e-20f;
 constexpr int kMaxPendingRows = 4096;  // if the UI stops polling, keep only the newest
-// Auto averaging analyzes at most this many samples per second (bounds CPU use).
-constexpr double kMaxAnalyzeRate = 20e6;
+// Auto averaging analyzes at most this many samples per second (bounds CPU
+// use). The GPU takes more (issue #3).
+constexpr double kMaxAnalyzeRate = 20e6, kGpuMaxAnalyzeRate = 100e6;
 }  // namespace
 
 LiveEngine::LiveEngine(std::function<void()> wake) : wake_(std::move(wake)) {}
@@ -134,6 +136,7 @@ LiveEngine::Stats LiveEngine::stats() const {
     s.gapEvents = ring_->deviceGapEvents();
     std::lock_guard<std::mutex> lk(m_);
     s.analyzed = analyzed_;
+    s.gpu = onGpu_;
     s.rowPeriod = rowPeriod_;
     return s;
 }
@@ -169,6 +172,7 @@ void LiveEngine::spectrumLoop() {
     int64_t gapsLogged = ring_->deviceGapEvents(), lostLogged = ring_->droppedDevice();
     auto lastGapLog = clock::now() - std::chrono::seconds(5);
     bool fatalLogged = false;
+    GpuLiveSpectrum gpu;  // used while gpuLiveUsable()
 
     while (!quit_) {
         {
@@ -197,7 +201,9 @@ void LiveEngine::spectrumLoop() {
         // Wait for at least one FFT's worth of new samples.
         if (w - lastEnd < n) continue;
         // Auto: average FFTs over all samples since the previous row.
-        const int64_t maxFrames = std::max<int64_t>(1, (int64_t)(kMaxAnalyzeRate / p.rowsPerSec / n));
+        const bool tryGpu = gpuLiveUsable();
+        const double maxRate = tryGpu ? kGpuMaxAnalyzeRate : kMaxAnalyzeRate;
+        const int64_t maxFrames = std::max<int64_t>(1, (int64_t)(maxRate / p.rowsPerSec / n));
         int64_t frames = p.avg > 0 ? std::min(p.avg, 64) : std::clamp<int64_t>((w - lastEnd) / n, 1, maxFrames);
         frames = std::min(frames, (w - freshFrom_.load()) / n);  // nothing from before a retune
         if (frames < 1) continue;
@@ -206,8 +212,6 @@ void LiveEngine::spectrumLoop() {
 
         raw.resize((size_t)need * bps);
         if (!ring_->read(w - need, need, raw.data())) continue;
-        buf.resize(need);
-        decodeSamples(fp, raw.data(), need, buf.data());
 
         if (winFor != n || winType != p.window) {
             win = makeWindow((WindowType)p.window, n);
@@ -217,15 +221,23 @@ void LiveEngine::spectrumLoop() {
         double wsum = 0;
         for (float v : win) wsum += v;
         const float norm = (float)(1.0 / (wsum * wsum)) / avg;
-        auto fft = getFFT(n);
-        pw.assign(n, 0.f);
-        seg.resize(n);
-        for (int a = 0; a < avg; ++a) {
-            const cf* s = &buf[(size_t)a * n];
-            for (int i = 0; i < n; ++i) seg[i] = s[i] * win[i];
-            fft->forward(seg.data());
-            for (int i = 0; i < n; ++i) pw[i] += std::norm(seg[(i + n / 2) & (n - 1)]);  // fftshift
+        pw.resize(n);
+        const bool onGpu = tryGpu && gpu.run(raw.data(), fp, n, avg, win.data(), pw.data()) == GpuStatus::Ok;
+        if (!onGpu) {
+            // After a GPU failure this one row may be larger than the CPU cap; the next uses the CPU cap.
+            buf.resize(need);
+            decodeSamples(fp, raw.data(), need, buf.data());
+            auto fft = getFFT(n);
+            pw.assign(n, 0.f);
+            seg.resize(n);
+            for (int a = 0; a < avg; ++a) {
+                const cf* s = &buf[(size_t)a * n];
+                for (int i = 0; i < n; ++i) seg[i] = s[i] * win[i];
+                fft->forward(seg.data());
+                for (int i = 0; i < n; ++i) pw[i] += std::norm(seg[(i + n / 2) & (n - 1)]);  // fftshift
+            }
         }
+        onGpu_ = onGpu;
 
         const int cols = std::min(n, std::max(16, p.maxCols));
         const int perCol = n / cols;

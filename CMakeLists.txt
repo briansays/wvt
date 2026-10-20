@@ -158,6 +158,83 @@ if(NOT WVT_WITH_UHD STREQUAL "OFF")
 endif()
 
 # ---------------------------------------------------------------------------
+# Optional NVIDIA GPU acceleration (issue #3). AUTO builds the CUDA backend
+# when the CUDA toolkit (12.0 or later, with cuFFT) is found, ON requires it.
+# A CUDA build still runs on computers without a GPU: wvt checks at start.
+# Override the GPU targets with -DCMAKE_CUDA_ARCHITECTURES=...
+# ---------------------------------------------------------------------------
+set(WVT_WITH_CUDA AUTO CACHE STRING "Build the CUDA GPU backend (AUTO, ON, OFF)")
+set_property(CACHE WVT_WITH_CUDA PROPERTY STRINGS AUTO ON OFF)
+option(WVT_CUDA_STATIC "Link the CUDA runtime and cuFFT statically (runs with only the NVIDIA driver)" ON)
+if(DEFINED CMAKE_CUDA_ARCHITECTURES)
+  set(WVT_CUDA_ARCHS_GIVEN TRUE)
+endif()
+set(WVT_CUDA_OK FALSE)
+set(WVT_CUDA_WHY "")
+if(WVT_WITH_CUDA STREQUAL "OFF")
+  set(WVT_CUDA_WHY "WVT_WITH_CUDA=OFF")
+elseif(APPLE)
+  set(WVT_CUDA_WHY "CUDA is not available on macOS")
+elseif(CMAKE_VERSION VERSION_LESS 3.18)
+  set(WVT_CUDA_WHY "needs CMake 3.18 or later")
+else()
+  include(CheckLanguage)
+  check_language(CUDA)
+  if(NOT CMAKE_CUDA_COMPILER)
+    set(WVT_CUDA_WHY "CUDA toolkit (nvcc) not found")
+  else()
+    enable_language(CUDA)
+    find_package(CUDAToolkit)
+    if(CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 12.0)
+      set(WVT_CUDA_WHY "CUDA ${CMAKE_CUDA_COMPILER_VERSION} is older than 12.0")
+    elseif(NOT TARGET CUDA::cufft)
+      set(WVT_CUDA_WHY "cuFFT not found")
+    else()
+      set(WVT_CUDA_OK TRUE)
+    endif()
+  endif()
+endif()
+
+add_library(wvt_gpu STATIC src/gpu_common.cpp)
+target_include_directories(wvt_gpu PUBLIC src)
+target_compile_options(wvt_gpu PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wno-unused-parameter>)
+if(WVT_CUDA_OK)
+  target_sources(wvt_gpu PRIVATE src/gpu_cuda.cu)
+  if(NOT WVT_CUDA_ARCHS_GIVEN)
+    # Desktop RTX 20xx to 40xx and data-center A100 / H100, plus PTX for newer GPUs.
+    set(WVT_ARCHS 75-real 80-real 86-real 89-real 90)
+    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8)
+      set(WVT_ARCHS 75-real 80-real 86-real 89-real 90-real 120)  # RTX 50xx
+    endif()
+    set_target_properties(wvt_gpu PROPERTIES CUDA_ARCHITECTURES "${WVT_ARCHS}")
+  endif()
+  get_target_property(WVT_ARCHS_USED wvt_gpu CUDA_ARCHITECTURES)
+  if(NOT CMAKE_CUDA20_STANDARD_COMPILE_OPTION)
+    # CMake before 3.25 (Ubuntu 22.04 has 3.22) does not know nvcc's C++20 flag.
+    set(CMAKE_CUDA20_STANDARD_COMPILE_OPTION "-std=c++20")
+    set(CMAKE_CUDA20_EXTENSION_COMPILE_OPTION "-std=c++20")
+  endif()
+  set_target_properties(wvt_gpu PROPERTIES CUDA_STANDARD 20 CUDA_STANDARD_REQUIRED ON)
+  if(WVT_CUDA_STATIC)
+    target_link_libraries(wvt_gpu PUBLIC CUDA::cudart_static CUDA::cufft_static)
+    # Static cuFFT has relocatable device code: the library needs a device-link step.
+    set_target_properties(wvt_gpu PROPERTIES CUDA_SEPARABLE_COMPILATION ON CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+    set(WVT_CUDA_LINK static)
+  else()
+    target_link_libraries(wvt_gpu PUBLIC CUDA::cudart CUDA::cufft)
+    set(WVT_CUDA_LINK shared)
+  endif()
+  message(STATUS "wvt: CUDA support enabled (CUDA ${CMAKE_CUDA_COMPILER_VERSION}, archs ${WVT_ARCHS_USED}, ${WVT_CUDA_LINK} cuFFT)")
+else()
+  target_sources(wvt_gpu PRIVATE src/gpu_stub.cpp)
+  if(WVT_WITH_CUDA STREQUAL "ON")
+    message(FATAL_ERROR "WVT_WITH_CUDA=ON but CUDA cannot be built: ${WVT_CUDA_WHY}")
+  endif()
+  message(STATUS "wvt: CUDA support disabled (${WVT_CUDA_WHY})")
+endif()
+target_link_libraries(wvt PRIVATE wvt_gpu)
+
+# ---------------------------------------------------------------------------
 # Audio output through the bundled miniaudio. It needs no extra packages:
 # Linux backends (PipeWire, PulseAudio, ALSA) load at run time; macOS links
 # CoreAudio. OFF builds without playback (WAV export still works).
@@ -209,4 +286,10 @@ target_link_libraries(log_check PRIVATE Threads::Threads)
 add_executable(segment_check tools/segment_check.cpp src/engine.cpp src/dsp.cpp src/iq_file.cpp src/ui_util.cpp
   src/log.cpp)
 target_include_directories(segment_check PRIVATE src)
-target_link_libraries(segment_check PRIVATE imgui_implot Threads::Threads)
+target_link_libraries(segment_check PRIVATE wvt_gpu imgui_implot Threads::Threads)
+
+# GPU self-test and benchmark (CPU times; GPU vs CPU once a GPU backend exists)
+add_executable(gpu_check tools/gpu_check.cpp src/engine.cpp src/dsp.cpp src/iq_file.cpp src/ui_util.cpp src/log.cpp)
+target_include_directories(gpu_check PRIVATE src)
+target_link_libraries(gpu_check PRIVATE wvt_gpu imgui_implot Threads::Threads)
+target_compile_options(gpu_check PRIVATE -Wall -Wextra -Wno-unused-parameter)

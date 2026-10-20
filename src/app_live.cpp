@@ -546,7 +546,7 @@ void App::drawLiveLeft() {
     }
     label("Avg", fieldW(8));
     ImGui::SliderInt("##lavg", &liveParams_.avg, 0, 64, liveParams_.avg == 0 ? "auto" : "%d");
-    ImGui::SetItemTooltip("FFTs averaged into each waterfall row.\nauto: all samples since the previous row (up to 20 MS/s),\nso nothing is missed at RTL-SDR rates. Lower values show short bursts more sharply.");
+    ImGui::SetItemTooltip("FFTs averaged into each waterfall row.\nauto: all samples since the previous row (up to 20 MS/s,\nor 100 MS/s on the GPU), so nothing is missed at RTL-SDR rates. Lower values show short bursts more sharply.");
     label("Rows/s", stepW(4));
     if (ImGui::InputDouble("##lrps", &liveParams_.rowsPerSec, 5, 10, "%.0f"))
         liveParams_.rowsPerSec = std::clamp(liveParams_.rowsPerSec, 1.0, 100.0);
@@ -558,6 +558,7 @@ void App::drawLiveLeft() {
     if (ImGui::InputInt("##lcols", &liveParams_.maxCols, 256, 1024))
         liveParams_.maxCols = std::clamp(liveParams_.maxCols, 64, 8192);
     ImGui::SetItemTooltip("Maximum waterfall columns; FFT bins beyond this are max-pooled");
+    drawGpuCheckbox();
     label("Spec avg", stepW(4));
     if (ImGui::InputInt("##lsavg", &specAvgRows_)) specAvgRows_ = std::clamp(specAvgRows_, 1, 200);
     ImGui::SetItemTooltip("Spectrum averaging time constant, in rows");
@@ -712,7 +713,7 @@ void App::drawLiveStatusBar() {
         const auto& t = liveStats_;
         right = t.description + " | " + fmtSI(t.rate, "S/s", 4) + " @ " + fmtSI(t.fc, "Hz", 9);
         char b[64];
-        snprintf(b, sizeof b, " | FFT sees %.0f%%", std::min(1.0, t.analyzed) * 100);
+        snprintf(b, sizeof b, " | FFT sees %.0f%%%s", std::min(1.0, t.analyzed) * 100, t.gpu ? " (GPU)" : "");
         right += b;
         if (t.gapEvents > 0)
             right += " | overflows " + std::to_string(t.gapEvents) +
@@ -723,11 +724,8 @@ void App::drawLiveStatusBar() {
         right = "not streaming";
     }
     char fps[64];
-    snprintf(fps, sizeof fps, " | %s | %.0f fps", win_.usingGL() ? "GLX" : "software", ImGui::GetIO().Framerate);
-    right += fps;
-    float rw = ImGui::CalcTextSize(right.c_str()).x;
-    ImGui::SameLine(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - rw));
-    ImGui::TextDisabled("%s", right.c_str());
+    snprintf(fps, sizeof fps, "%s | %.0f fps", win_.usingGL() ? "GLX" : "software", ImGui::GetIO().Framerate);
+    drawStatusRight(right + " | ", fps, true);
 }
 
 void App::handleLiveShortcuts() {

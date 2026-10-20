@@ -37,6 +37,7 @@ public:
     const std::string& path() const { return path_; }
     uint64_t sizeBytes() const { return size_; }
     int64_t numSamples(const FormatParams& fp) const;
+    const uint8_t* data() const { return data_; }  // the raw mapped bytes (GPU upload)
 
     // Reads `count` complex samples starting at sample `start`, normalized to
     // roughly [-1, 1]. Samples outside the file are zero-filled.
