@@ -826,7 +826,7 @@ int main(int argc, char** argv) {
             auto now = std::chrono::steady_clock::now();
             bool active = app.busy() || app.audioBusy() || now - lastActivity < std::chrono::milliseconds(600) ||
                           !shotPath.empty();
-            if (!win.pumpEvents(active ? 1.0 / 60.0 : 0.5)) break;
+            if (!win.pumpEvents(active ? 1.0 / 60.0 : 0.5) || app.quitRequested()) break;
             // Any input (or worker wake-up) keeps the loop running at frame rate for a moment.
             if (io.MouseDelta.x != 0 || io.MouseDelta.y != 0 || io.MouseWheel != 0 || ImGui::IsAnyItemActive() ||
                 io.InputQueueCharacters.Size > 0 || ImGui::IsAnyMouseDown())

@@ -29,8 +29,11 @@ const ImVec4 kColHover(1.f, 1.f, 1.f, 0.45f);
 const ImVec4 kColWarn(1.f, 0.8f, 0.3f, 1.f);
 
 float fieldW(float chars) { return ImGui::GetFontSize() * chars * 0.55f + ImGui::GetStyle().FramePadding.x * 2; }
-// width for inputs with +/- step buttons
-float stepW(float chars) { return fieldW(chars) + 2 * (ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x); }
+// The colour scale's dB min and max fields, Auto and the options button
+float dbGroupW() {
+    const ImGuiStyle& st = ImGui::GetStyle();
+    return fieldW(5) * 2 + ImGui::GetFrameHeight() * 2 + st.ItemInnerSpacing.x * 5 + ImGui::CalcTextSize("Auto").x;
+}
 }  // namespace
 
 App::App(X11Window& win) : win_(win) {
@@ -235,6 +238,17 @@ void App::pan(double frac) {
     setView(tmin_ + frac * span, tmax_ + frac * span);
 }
 
+void App::showAll() {
+    if (!liveMode_) setView(tBegin(), tEnd());
+    fmin_ = fc_ - fs_ / 2;
+    fmax_ = fc_ + fs_ / 2;
+}
+
+void App::toggleExport() {
+    exOpen_ = !exOpen_;
+    if (exOpen_ && exT1_ <= exT0_) exportFrom(0);
+}
+
 void App::zoom(double factor) {
     double c = 0.5 * (tmin_ + tmax_), h = 0.5 * (tmax_ - tmin_) * factor;
     setView(c - h, c + h);
@@ -365,8 +379,9 @@ void App::frame() {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6, 6));
     ImGui::Begin("##main", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
-                     ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoScrollbar);
+                     ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_MenuBar);
     ImGui::PopStyleVar();
+    drawMenuBar();
 
     nextHoverT_ = NAN;
     nextHoverF_ = NAN;
@@ -409,12 +424,11 @@ void App::frame() {
     drawStatusBar();
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_G)) sgOpen_ = !sgOpen_;
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_D)) auOpen_ = !auOpen_;
-    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_E) && !liveMode_ && file_) {
-        exOpen_ = !exOpen_;
-        if (exOpen_ && exT1_ <= exT0_) exportFrom(0);
-    }
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_E) && !liveMode_ && file_) toggleExport();
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Q)) quit_ = true;
     handleShortcuts();
     ImGui::End();
+    drawHelpWindows();
     drawSigGenWindow();
     drawAudioWindow();
     drawExportWindow();
@@ -430,22 +444,60 @@ void App::frame() {
 // ---------------------------------------------------------------------------
 void App::drawToolbar() {
     const ImGuiStyle& st = ImGui::GetStyle();
-    // --- Row 1: file & format -------------------------------------------------
+    // --- Row 1: the file -------------------------------------------------------
     flowBegin();
-    drawSourceSelector();
-    drawSigGenButton();
-    drawAudioButton();
-    drawExportButton();
     if (liveMode_) {
         drawDeviceToolbar();
         return;
     }
-    label("File", fieldW(46));
+    label("File", fieldW(40));
+    if (focusPath_) {
+        ImGui::SetKeyboardFocusHere();
+        focusPath_ = false;
+    }
     if (ImGui::InputText("##path", pathBuf_, sizeof pathBuf_, ImGuiInputTextFlags_EnterReturnsTrue))
         openFile(pathBuf_);
-    ImGui::SameLine();
+    ImGui::SameLine(0, st.ItemInnerSpacing.x);
     if (ImGui::Button("Open")) openFile(pathBuf_);
     ImGui::SetItemTooltip("Open the path typed in the File box (Enter also works).\nSigMF .sigmf-meta/.sigmf-data, gqrx names and common extensions are auto-detected.");
+
+    // The sample format and its rarely changed details, in one drop-down.
+    std::string fmtSummary = formatName(fp_.fmt);
+    fmtSummary = fmtSummary.substr(0, fmtSummary.find(' '));
+    if (fp_.bigEndian) fmtSummary += " BE";
+    if (fp_.swapIQ) fmtSummary += " swap";
+    if (fp_.headerBytes > 0) fmtSummary += " +" + std::to_string(fp_.headerBytes) + " B";
+    label("Format", fieldW(14));
+    if (ImGui::BeginCombo("##fmt", fmtSummary.c_str(), ImGuiComboFlags_HeightLargest)) {
+        for (int i = 0; i < (int)SampleFormat::Count; ++i)
+            if (ImGui::Selectable(formatName((SampleFormat)i), (int)fp_.fmt == i)) {
+                fp_.fmt = (SampleFormat)i;
+                onSourceChanged(false);
+            }
+        ImGui::Separator();
+        if (ImGui::Checkbox("Swap I/Q", &fp_.swapIQ)) onSourceChanged(false);
+        ImGui::SetItemTooltip("Swap I and Q (spectral inversion)");
+        if (ImGui::Checkbox("Big endian", &fp_.bigEndian)) onSourceChanged(false);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("Header bytes");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(fieldW(8));
+        long long hb = fp_.headerBytes;
+        if (ImGui::InputScalar("##hdr", ImGuiDataType_S64, &hb)) {
+            fp_.headerBytes = std::max<long long>(0, hb);
+            onSourceChanged(false);
+        }
+        ImGui::SetItemTooltip("Bytes to skip at the start of the file");
+        ImGui::EndCombo();
+    }
+    ImGui::SetItemTooltip("Sample format, byte order, I/Q swap and header bytes.\nSigMF and gqrx files set these by themselves.");
+    label("Sample rate", fieldW(13));
+    double fs = fs_;
+    if (InputSI("##fs", &fs, "Sps", fieldW(13))) setFs(fs);
+    ImGui::SetItemTooltip("Accepts SI suffixes, e.g. 2.4M, 250k, 20e6");
+    label("Center freq", fieldW(15));
+    double fc = fc_;
+    if (InputSI("##fc", &fc, "Hz", fieldW(15))) setFc(fc);
 
     const float segW = fieldW(9);
     label("Segment", segW * 2 + st.ItemInnerSpacing.x);
@@ -459,34 +511,6 @@ void App::drawToolbar() {
     segEdit |= InputSI("##seg1", &seg1, "s", segW);
     ImGui::SetItemTooltip("To: %s", segTip);
     if (segEdit) setSegment(seg0, seg1);
-
-    label("Format", fieldW(26));
-    if (ImGui::BeginCombo("##fmt", formatName(fp_.fmt))) {
-        for (int i = 0; i < (int)SampleFormat::Count; ++i)
-            if (ImGui::Selectable(formatName((SampleFormat)i), (int)fp_.fmt == i)) {
-                fp_.fmt = (SampleFormat)i;
-                onSourceChanged(false);
-            }
-        ImGui::EndCombo();
-    }
-    label("Sample rate", fieldW(13));
-    double fs = fs_;
-    if (InputSI("##fs", &fs, "Sps", fieldW(13))) setFs(fs);
-    ImGui::SetItemTooltip("Accepts SI suffixes, e.g. 2.4M, 250k, 20e6");
-    label("Center freq", fieldW(15));
-    double fc = fc_;
-    if (InputSI("##fc", &fc, "Hz", fieldW(15))) setFc(fc);
-    label("Header bytes", fieldW(8));
-    long long hb = fp_.headerBytes;
-    if (ImGui::InputScalar("##hdr", ImGuiDataType_S64, &hb)) {
-        fp_.headerBytes = std::max<long long>(0, hb);
-        onSourceChanged(false);
-    }
-    flow(ImGui::GetFrameHeight() * 9);
-    if (ImGui::Checkbox("Swap I/Q", &fp_.swapIQ)) onSourceChanged(false);
-    ImGui::SetItemTooltip("Swap I and Q (spectral inversion)");
-    ImGui::SameLine();
-    if (ImGui::Checkbox("Big endian", &fp_.bigEndian)) onSourceChanged(false);
     if (file_) {
         std::string info = fmtSI((double)nSamples_, "S", 4) + " | " + fmtSI(dur_, "s", 5) + " | " +
                            fmtSI((double)file_->sizeBytes(), "B", 4);
@@ -497,7 +521,6 @@ void App::drawToolbar() {
     }
 
     // --- Row 2: navigation ----------------------------------------------------
-    ImGui::Spacing();
     flowBegin();
     flow(ImGui::GetFrameHeight() * 10);
     double span = tmax_ - tmin_;
@@ -525,11 +548,7 @@ void App::drawToolbar() {
     if (ImGui::Button(" - ")) zoom(2.0);
     ImGui::SetItemTooltip("Zoom out 2x (-)");
     ImGui::SameLine(0, 2);
-    if (ImGui::Button("All")) {
-        setView(tBegin(), tEnd());
-        fmin_ = fc_ - fs_ / 2;
-        fmax_ = fc_ + fs_ / 2;
-    }
+    if (ImGui::Button("All")) showAll();
     ImGui::SetItemTooltip("Show the whole file (or segment) and full bandwidth (A)");
 
     label("Span", fieldW(8));
@@ -553,27 +572,26 @@ void App::drawToolbar() {
     label("Start", fieldW(11));
     double startEdit = tmin_;
     if (InputSI("##start", &startEdit, "s", fieldW(11))) setView(startEdit, startEdit + span);
-    label("Sample", fieldW(12));
-    long long smp = (long long)std::llround(tmin_ * fs_);
-    if (ImGui::InputScalar("##smp", ImGuiDataType_S64, &smp, nullptr, nullptr, "%lld",
-                           ImGuiInputTextFlags_EnterReturnsTrue))
-        setView(smp / fs_, smp / fs_ + span);
-    ImGui::SetItemTooltip("First sample index in view (press Enter to jump)");
+    ImGui::SetItemTooltip("Start of the view: sample %lld", (long long)std::llround(tmin_ * fs_));
 
-    // bookmarks
-    flow(fieldW(14) + ImGui::GetFrameHeight() * 3);
-    if (ImGui::Button("Bookmark")) {
-        char name[64];
-        snprintf(name, sizeof name, "B%zu @ %s", bookmarks_.size() + 1, fmtSI(tmin_, "s", 5).c_str());
-        bookmarks_.push_back({name, tmin_, tmax_});
-        bookmarkSel_ = (int)bookmarks_.size() - 1;
-    }
-    ImGui::SetItemTooltip("Save the current time view (B)");
-    ImGui::SameLine(0, 2);
-    ImGui::SetNextItemWidth(fieldW(14));
+    // Go to: a sample index, and the bookmarks
+    flow(fieldW(16));
+    ImGui::SetNextItemWidth(fieldW(16));
     const char* bmPreview = bookmarkSel_ >= 0 && bookmarkSel_ < (int)bookmarks_.size()
-                                ? bookmarks_[bookmarkSel_].name.c_str() : "(go to)";
-    if (ImGui::BeginCombo("##bm", bmPreview)) {
+                                ? bookmarks_[bookmarkSel_].name.c_str() : "Go to / bookmarks";
+    if (ImGui::BeginCombo("##goto", bmPreview, ImGuiComboFlags_HeightLarge)) {
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("Sample");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(fieldW(12));
+        long long smp = (long long)std::llround(tmin_ * fs_);
+        if (ImGui::InputScalar("##smp", ImGuiDataType_S64, &smp, nullptr, nullptr, "%lld",
+                               ImGuiInputTextFlags_EnterReturnsTrue))
+            setView(smp / fs_, smp / fs_ + span);
+        ImGui::SetItemTooltip("First sample index of the view (press Enter to jump)");
+        ImGui::Separator();
+        if (ImGui::Selectable("Add bookmark (B)")) addBookmark();
+        ImGui::SetItemTooltip("Save the current time view");
         for (int i = 0; i < (int)bookmarks_.size(); ++i)
             if (ImGui::Selectable(bookmarks_[i].name.c_str(), i == bookmarkSel_)) {
                 bookmarkSel_ = i;
@@ -582,23 +600,22 @@ void App::drawToolbar() {
         ImGui::EndCombo();
     }
 
-    flow(ImGui::GetFrameHeight() * 14);
-    ImGui::Checkbox("Time markers", &tMarkers_);
-    ImGui::SetItemTooltip("Two draggable time cursors shown on every plot (T)");
-    ImGui::SameLine();
-    ImGui::Checkbox("Freq markers", &fMarkers_);
-    ImGui::SetItemTooltip("Two draggable frequency cursors on spectrum/waterfall (F)");
-    ImGui::SameLine();
-    ImGui::Checkbox("Rel. freq", &relFreq_);
-    ImGui::SetItemTooltip("Label frequency axes relative to the center frequency");
-
     // --- Row 3: overview + scrollbar -----------------------------------------
+    // The overview is left out when the window is short (and from View).
     ImGui::Spacing();
-    drawOverview(ImGui::GetFontSize() * 3.2f);
+    if (showOverview_ && ImGui::GetMainViewport()->WorkSize.y >= ImGui::GetFontSize() * 42)
+        drawOverview(ImGui::GetFontSize() * 3.2f);
     double start = tmin_ - tBegin();
     if (ScrollbarH("##hscroll", tEnd() - tBegin(), start, tmax_ - tmin_, ImGui::GetContentRegionAvail().x,
                    ImGui::GetStyle().ScrollbarSize + 2))
         setView(tBegin() + start, tBegin() + start + (tmax_ - tmin_));
+}
+
+void App::addBookmark() {
+    char name[64];
+    snprintf(name, sizeof name, "B%zu @ %s", bookmarks_.size() + 1, fmtSI(tmin_, "s", 5).c_str());
+    bookmarks_.push_back({name, tmin_, tmax_});
+    bookmarkSel_ = (int)bookmarks_.size() - 1;
 }
 
 void App::drawOverview(float h) {
@@ -695,7 +712,7 @@ void App::drawTimeMarkersHorizontal() {
 }
 
 void App::drawLeft() {
-    // --- waterfall parameters ---
+    // --- waterfall parameters: the main ones on the row, the rest in the options popup ---
     flowBegin();
     label("FFT", fieldW(7));
     char nf[16];
@@ -714,46 +731,48 @@ void App::drawLeft() {
             if (ImGui::Selectable(windowName((WindowType)i), i == window_)) window_ = i;
         ImGui::EndCombo();
     }
-    label("Overlap %", stepW(6));
-    if (ImGui::InputDouble("##ovl", &overlapPct_, 5, 25, "%.0f")) overlapPct_ = std::clamp(overlapPct_, 0.0, 95.0);
-    ImGui::SetItemTooltip("FFT overlap. When the view holds more rows than 'Rows', each row averages\n"
-                          "several FFTs at this spacing, so no sample falls between FFTs.");
-    label("Avg", stepW(4));
-    if (ImGui::InputInt("##avg", &avg_)) avg_ = std::clamp(avg_, 1, 64);
-    if (wf_ && wf_->fftsPerRow > avg_)
-        ImGui::SetItemTooltip("Minimum FFTs averaged per waterfall row (smooths noise).\n"
-                              "Now %d: zoomed out, each row averages enough FFTs to cover its whole time slice.",
-                              wf_->fftsPerRow);
-    else
-        ImGui::SetItemTooltip("Minimum FFTs averaged per waterfall row (smooths noise).\n"
-                              "Zoomed out, each row averages enough FFTs to cover its whole time slice.");
-    label("Rows", stepW(5));
-    if (ImGui::InputInt("##rows", &maxRows_, 128, 512)) maxRows_ = std::clamp(maxRows_, 16, 8192);
-    ImGui::SetItemTooltip("Maximum waterfall rows (time resolution of the image)");
-    label("Cols", stepW(5));
-    if (ImGui::InputInt("##cols", &maxCols_, 256, 1024)) maxCols_ = std::clamp(maxCols_, 64, 8192);
-    ImGui::SetItemTooltip("Maximum image columns; FFT bins beyond this are max-pooled");
-    label("dB min", stepW(5));
-    if (ImGui::InputFloat("##dbmin", &dbMin_, 1, 10, "%.0f")) { autoDb_ = false; needRecolor_ = true; }
-    label("dB max", stepW(5));
-    if (ImGui::InputFloat("##dbmax", &dbMax_, 1, 10, "%.0f")) { autoDb_ = false; needRecolor_ = true; }
-    flow(ImGui::GetFrameHeight() * 3);
+    label("dB", dbGroupW());
+    ImGui::SetNextItemWidth(fieldW(5));
+    if (ImGui::InputFloat("##dbmin", &dbMin_, 0, 0, "%.0f")) { autoDb_ = false; needRecolor_ = true; }
+    ImGui::SetItemTooltip("Bottom of the colour scale (dB)");
+    ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+    ImGui::SetNextItemWidth(fieldW(5));
+    if (ImGui::InputFloat("##dbmax", &dbMax_, 0, 0, "%.0f")) { autoDb_ = false; needRecolor_ = true; }
+    ImGui::SetItemTooltip("Top of the colour scale (dB)");
+    ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
     if (ImGui::Checkbox("Auto", &autoDb_) && autoDb_ && wf_) {
         dbMin_ = std::floor(wf_->p5 - 3);
         dbMax_ = std::ceil(std::max(wf_->p999 + 3, dbMin_ + 20.f));
         needRecolor_ = true;
     }
     ImGui::SetItemTooltip("Auto-range the color scale to the data in view");
-    label("Colormap", fieldW(10));
-    if (ImGui::BeginCombo("##cmap", ImPlot::GetColormapName(cmap_))) {
-        for (int i = 0; i < ImPlot::GetColormapCount(); ++i)
-            if (ImGui::Selectable(ImPlot::GetColormapName(i), i == cmap_)) cmap_ = i;
-        ImGui::EndCombo();
+    ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+    settingsButton("##wfopts", "Overlap, averaging, image size, colormap and peak hold");
+    if (ImGui::BeginPopup("##wfopts")) {
+        if (beginForm("##wfform", 6.5f, 20)) {
+            row("Overlap %", "FFT overlap. When the view holds more rows than 'Rows', each row averages\n"
+                             "several FFTs at this spacing, so no sample falls between FFTs.");
+            if (ImGui::InputDouble("##ovl", &overlapPct_, 5, 25, "%.0f")) overlapPct_ = std::clamp(overlapPct_, 0.0, 95.0);
+            row("Avg", "Minimum FFTs averaged per waterfall row (smooths noise).\n"
+                       "Zoomed out, each row averages enough FFTs to cover its whole time slice.");
+            if (ImGui::InputInt("##avg", &avg_)) avg_ = std::clamp(avg_, 1, 64);
+            if (wf_ && wf_->fftsPerRow > avg_) ImGui::SetItemTooltip("Now %d per row", wf_->fftsPerRow);
+            row("Rows", "Maximum waterfall rows (time resolution of the image)");
+            if (ImGui::InputInt("##rows", &maxRows_, 128, 512)) maxRows_ = std::clamp(maxRows_, 16, 8192);
+            row("Cols", "Maximum image columns; FFT bins beyond this are max-pooled");
+            if (ImGui::InputInt("##cols", &maxCols_, 256, 1024)) maxCols_ = std::clamp(maxCols_, 64, 8192);
+            row("Colormap");
+            if (ImGui::BeginCombo("##cmap", ImPlot::GetColormapName(cmap_))) {
+                for (int i = 0; i < ImPlot::GetColormapCount(); ++i)
+                    if (ImGui::Selectable(ImPlot::GetColormapName(i), i == cmap_)) cmap_ = i;
+                ImGui::EndCombo();
+            }
+            row("Peak hold", "Show the peak-hold trace in the spectrum");
+            ImGui::Checkbox("##peak", &showPeak_);
+            ImGui::EndTable();
+        }
+        ImGui::EndPopup();
     }
-    flow(ImGui::GetFrameHeight() * 4);
-    ImGui::Checkbox("Peak", &showPeak_);
-    ImGui::SetItemTooltip("Show peak-hold trace in the spectrum");
-    drawGpuCheckbox();
     if (wf_ && wf_->coverage < 0.999) {
         char cov[32];
         snprintf(cov, sizeof cov, "FFT sees %.0f%%", 100 * wf_->coverage);
@@ -1157,11 +1176,12 @@ void App::drawStatusBar() {
              std::to_string((long long)std::llround(dt * fs_)) + " samples)";
     }
     if (fMarkers_) s += "   | dF=" + fmtSI(std::fabs(fm2_ - fm1_), "Hz", 6);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(s.c_str());
     char rest[64];
     snprintf(rest, sizeof rest, "%s | %.0f fps", win_.usingGL() ? "GLX" : "software", ImGui::GetIO().Framerate);
-    drawStatusRight(workersBusy() ? "computing...  " : "", rest, false);
+    const std::string lead = workersBusy() ? "computing...  " : "";
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(elideMiddle(s, statusLeftW(lead, rest, false)).c_str());
+    drawStatusRight(lead, rest, false);
 }
 
 // "GPU <model>" or "CPU": where the waterfall (file) or the live spectrum
@@ -1173,6 +1193,13 @@ std::string App::gpuTag(bool live) const {
     if (live) used = live_ && live_->running() ? liveStats_.gpu : gpuLiveUsable();
     else used = wf_ ? wf_->gpu : gpuSpectrogramUsable();
     return used ? "GPU " + g.model : "CPU";
+}
+
+// Room left of the right-aligned status text.
+float App::statusLeftW(const std::string& lead, const std::string& rest, bool live) const {
+    const std::string tag = gpuTag(live);
+    const std::string all = lead + (tag.empty() ? "" : tag + " | ") + rest;
+    return ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(all.c_str()).x - ImGui::GetFontSize();
 }
 
 // Right-aligned status text: lead, the GPU tag (with its tooltip), rest.
@@ -1206,19 +1233,6 @@ void App::drawStatusRight(const std::string& lead, const std::string& rest, bool
     ImGui::TextDisabled("%s", rest.c_str());
 }
 
-void App::drawGpuCheckbox() {
-    if (!gpuInfo().available) return;
-    flow(ImGui::GetFrameHeight() * 3);
-    bool on = gpuEnabled();
-    if (ImGui::Checkbox("GPU", &on)) {
-        gpuSetEnabled(on);
-        wfWorker_->invalidate();  // compute the view again on the new side
-    }
-    ImGui::SetItemTooltip("Compute the waterfall and the live spectrum on the %s.\n"
-                          "Off: use the CPU (to compare, or after a driver problem).",
-                          gpuInfo().model.c_str());
-}
-
 void App::handleShortcuts() {
     ImGuiIO& io = ImGui::GetIO();
     if (io.WantTextInput || io.KeyCtrl) return;
@@ -1234,19 +1248,10 @@ void App::handleShortcuts() {
     if (ImGui::IsKeyPressed(ImGuiKey_End, false)) setView(tEnd() - (tmax_ - tmin_), tEnd());
     if (ImGui::IsKeyPressed(ImGuiKey_Equal) || ImGui::IsKeyPressed(ImGuiKey_KeypadAdd)) zoom(0.5);
     if (ImGui::IsKeyPressed(ImGuiKey_Minus) || ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract)) zoom(2.0);
-    if (ImGui::IsKeyPressed(ImGuiKey_A, false)) {
-        setView(tBegin(), tEnd());
-        fmin_ = fc_ - fs_ / 2;
-        fmax_ = fc_ + fs_ / 2;
-    }
+    if (ImGui::IsKeyPressed(ImGuiKey_A, false)) showAll();
     if (ImGui::IsKeyPressed(ImGuiKey_T, false)) tMarkers_ = !tMarkers_;
     if (ImGui::IsKeyPressed(ImGuiKey_F, false)) fMarkers_ = !fMarkers_;
     if (ImGui::IsKeyPressed(ImGuiKey_C, false)) demod_.chanEnable = !demod_.chanEnable;
-    if (ImGui::IsKeyPressed(ImGuiKey_B, false)) {
-        char name[64];
-        snprintf(name, sizeof name, "B%zu @ %s", bookmarks_.size() + 1, fmtSI(tmin_, "s", 5).c_str());
-        bookmarks_.push_back({name, tmin_, tmax_});
-        bookmarkSel_ = (int)bookmarks_.size() - 1;
-    }
+    if (ImGui::IsKeyPressed(ImGuiKey_B, false)) addBookmark();
     if (tMarkers_ && ImGui::IsKeyPressed(ImGuiKey_Z, false)) setView(std::min(tm1_, tm2_), std::max(tm1_, tm2_));
 }

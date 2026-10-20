@@ -229,16 +229,8 @@ void App::playFrom(double t) {
 }
 
 // ---------------------------------------------------------------------------
-// Toolbar button & window
+// Window
 // ---------------------------------------------------------------------------
-void App::drawAudioButton() {
-    ImGui::SameLine();
-    const bool on = audio_ && audio_->running();
-    if (ImGui::Button(on ? "Audio *" : "Audio")) auOpen_ = !auOpen_;
-    tooltipAlways(on ? "Audio is playing. Click to open or close the audio window (Ctrl+D)."
-                     : "Open or close the audio window: demodulate and play a channel (Ctrl+D)");
-}
-
 void App::drawAudioWindow() {
     if (!auOpen_) return;
     const float fs = ImGui::GetFontSize();

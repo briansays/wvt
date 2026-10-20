@@ -141,21 +141,6 @@ void App::stopTx(const std::string& why) {
 }
 
 // ---------------------------------------------------------------------------
-// Toolbar button
-// ---------------------------------------------------------------------------
-void App::drawSigGenButton() {
-    ImGui::SameLine();
-    const bool txOn = tx_ && tx_->running();
-    if (txOn) {
-        if (redButton("TX ON")) sgOpen_ = true;
-        tooltipAlways("The signal generator is transmitting. Click to open it.");
-    } else {
-        if (ImGui::Button(sgOpen_ ? "Signal gen *" : "Signal gen")) sgOpen_ = !sgOpen_;
-        tooltipAlways("Open or close the signal generator (Ctrl+G)");
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Window
 // ---------------------------------------------------------------------------
 void App::drawSigGenWindow() {

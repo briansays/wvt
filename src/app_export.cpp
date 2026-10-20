@@ -127,23 +127,8 @@ void App::pollExport() {
 }
 
 // ---------------------------------------------------------------------------
-// Toolbar button & window
+// Window
 // ---------------------------------------------------------------------------
-void App::drawExportButton() {
-    if (liveMode_) return;
-    ImGui::SameLine();
-    const bool busy = exportBusy();
-    ImGui::BeginDisabled(!file_);
-    if (ImGui::Button(busy ? "Export *" : "Export")) {
-        exOpen_ = !exOpen_;
-        if (exOpen_ && exT1_ <= exT0_) exportFrom(FillView);
-    }
-    ImGui::EndDisabled();
-    tooltipAlways(busy ? "An export is running. Click to open or close the export window (Ctrl+E)."
-                       : "Export a time range and a band of the file to a new file (Ctrl+E).\n"
-                         "Right-click the waterfall to select the region with the mouse.");
-}
-
 void App::drawExportWindow() {
     pollExport();
     if (!exOpen_ || liveMode_) return;
@@ -396,11 +381,7 @@ void App::drawWaterfallMenu() {
     if (ImGui::MenuItem("Export the channel...", nullptr, false, demod_.chanEnable)) exportFrom(FillChannel);
     ImGui::EndDisabled();
     ImGui::Separator();
-    if (ImGui::MenuItem("Show everything", "A")) {
-        setView(tBegin(), tEnd());
-        fmin_ = fc_ - fs_ / 2;
-        fmax_ = fc_ + fs_ / 2;
-    }
+    if (ImGui::MenuItem("Show everything", "A")) showAll();
     ImGui::EndPopup();
 }
 

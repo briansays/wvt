@@ -265,6 +265,18 @@ void colorbar(const char* id, float dbMin, float dbMax, float height, int cmap) 
     ImPlot::PopStyleVar();
 }
 
+std::string elideMiddle(const std::string& text, float maxW) {
+    if (ImGui::CalcTextSize(text.c_str()).x <= maxW) return text;
+    const char* dots = "...";
+    // Keep the end (a file name) a little longer than the start.
+    for (size_t keep = text.size(); keep > 0; --keep) {
+        const size_t head = keep * 2 / 5, tail = keep - head;
+        std::string t = text.substr(0, head) + dots + text.substr(text.size() - tail);
+        if (ImGui::CalcTextSize(t.c_str()).x <= maxW) return t;
+    }
+    return dots;
+}
+
 void groupSeparator() {
     ImGui::SameLine();
     const ImVec2 p = ImGui::GetCursorScreenPos();
