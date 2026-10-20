@@ -195,7 +195,7 @@ The user said to go with the recommendations:
 
 ### Verification (macOS)
 
-- The build has no warnings. `extract_check` (40 checks), `gpu_check`, `segment_check`,
+- The build has no warnings. `extract_check` (36 checks), `gpu_check`, `segment_check`,
   `siggen_check`, `audio_check` and `log_check` pass.
 - `--help` differs from `main` only by the new lines. A signal-generator file (`--gen-out`)
   has the same data as `main`, and the same metadata apart from `core:datetime`.
