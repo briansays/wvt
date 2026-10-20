@@ -1,7 +1,8 @@
 // siggen_check - verifies the signal generator: tone frequency and level,
 // pulse timing (fixed, stagger, jitter, bursts), chirp sweep, Barker chips,
-// edges, noise level, deferred parameter changes, file output and playback
-// of recordings (looping, gaps, segments, resampling, SigMF round trip).
+// edges, noise level, deferred parameter changes, file output, playback
+// of recordings (looping, gaps, segments, resampling, SigMF round trip) and
+// CW frequency and level sweeps.
 //
 //   siggen_check [scratch_dir]     exit status 0 = all checks passed
 #include <cmath>
@@ -635,6 +636,249 @@ int main(int argc, char** argv) {
         }
         remove(rampPath.c_str());
         remove(tonePath.c_str());
+    }
+
+    // --- CW sweeps ---
+    {
+        // Instantaneous frequency from the phase step into sample i (the step uses sample i-1's frequency).
+        auto stepHz = [](const std::vector<cf>& v, size_t i, double rate) {
+            return std::arg(std::complex<double>(v[i]) * std::conj(std::complex<double>(v[i - 1]))) * rate / (2 * M_PI);
+        };
+        // Largest error of the measured frequency against the sweep, over the whole of v.
+        auto sweepErr = [&](const WaveformParams& p, const std::vector<cf>& v) {
+            const int64_t P = p.sweepSamples();
+            double e = 0;
+            for (size_t i = 1; i < v.size(); ++i)
+                e = std::max(e, std::fabs(stepHz(v, i, p.rate) - p.sweepOffsetAt((int64_t)(i - 1) % P)));
+            return e;
+        };
+        WaveformParams p;
+        p.rate = 2e6;
+        p.fSweep = SweepShape::RampUp;
+        p.fFrom = -400e3;
+        p.fTo = 400e3;
+        p.sweepPeriod = 1e-3;  // 2000 samples
+        check(p.sweepSamples() == 2000, "sweep period 1 ms = 2000 samples");
+        auto v = gen(p, 7000);
+        double e = sweepErr(p, v);
+        check(e < 800, "ramp up follows From -> To, wraps and repeats (3.5 periods)", fmt("worst %.3g Hz", e));
+        check(std::fabs(stepHz(v, 1, p.rate) + 400e3) < 1 && std::fabs(stepHz(v, 2000, p.rate) - p.sweepOffsetAt(1999)) < 1 &&
+                  std::fabs(stepHz(v, 2001, p.rate) + 400e3) < 1,
+              "ramp wraps back to From on sample 2000");
+
+        p.fSweep = SweepShape::RampDown;
+        v = gen(p, 4000);
+        e = sweepErr(p, v);
+        check(e < 800 && stepHz(v, 1, p.rate) > 399e3, "ramp down goes To -> From", fmt("worst %.3g Hz", e));
+
+        p.fSweep = SweepShape::Triangle;
+        v = gen(p, 4001);
+        e = sweepErr(p, v);
+        check(e < 800 && std::fabs(stepHz(v, 1001, p.rate) - 400e3) < 1, "triangle turns around at To mid-period",
+              fmt("worst %.3g Hz", e));
+
+        p.fSweep = SweepShape::Stepped;
+        p.fFrom = -100e3;
+        p.fTo = 100e3;
+        p.fStep = 50e3;
+        p.fDwell = 100e-6;  // 200 samples
+        check(p.sweepSteps() == 5 && p.sweepSamples() == 1000, "stepped: 5 steps x 200 samples");
+        v = gen(p, 3000);
+        e = sweepErr(p, v);
+        int held = 0;
+        for (size_t i = 1; i < 1001; ++i) held += std::fabs(stepHz(v, i, p.rate) - 50e3) < 1;
+        check(e < 1 && held == 200, "stepped holds each frequency for one dwell", fmt("worst %.3g Hz", e));
+
+        // The phase never jumps: the largest step is the largest frequency.
+        double maxStep = 0;
+        for (size_t i = 1; i < v.size(); ++i) maxStep = std::max(maxStep, std::fabs(stepHz(v, i, p.rate)));
+        check(maxStep < 100e3 + 1, "stepped sweep is phase-continuous", fmt("largest step %.6g Hz", maxStep));
+
+        // Level ramp, linear in dB, over the same period as a triangle frequency sweep.
+        p.fSweep = SweepShape::Triangle;
+        p.aSweep = SweepShape::RampUp;
+        p.aFrom = -40;
+        p.aTo = -6;
+        v = gen(p, 5000);
+        double le = 0;
+        for (size_t i = 0; i < v.size(); ++i)
+            le = std::max(le, std::fabs(20 * std::log10(std::abs(v[i])) - p.sweepLevelAt((int64_t)i % p.sweepSamples())));
+        check(le < 0.05, "level ramp -40 -> -6 dBFS is linear in dB", fmt("worst %.4f dB", le));
+        check(sweepErr(p, v) < 800, "frequency sweep unchanged by the level sweep");
+
+        p.aSweep = SweepShape::Triangle;
+        v = gen(p, 2000);
+        check(std::fabs(20 * std::log10(std::abs(v[1000])) + 6) < 0.05 && std::fabs(20 * std::log10(std::abs(v[0])) + 40) < 0.05,
+              "level triangle peaks mid-period");
+
+        // A level sweep alone keeps the offset and the drift.
+        WaveformParams q;
+        q.rate = 2e6;
+        q.offset = 100e3;
+        q.driftHzPerSec = 1e6;
+        q.aSweep = SweepShape::RampDown;
+        q.sweepPeriod = 1e-3;
+        v = gen(q, 3000);
+        e = 0;
+        for (size_t i = 1; i < v.size(); ++i)
+            e = std::max(e, std::fabs(stepHz(v, i, q.rate) - (100e3 + 1e6 * (double)(i - 1) / q.rate)));
+        check(e < 1, "level sweep alone: offset + drift", fmt("worst %.3g Hz", e));
+
+        // Events: one per period, and a change restarts the period without a phase jump.
+        p.aSweep = SweepShape::Off;
+        p.fSweep = SweepShape::RampUp;
+        p.fFrom = -400e3;
+        p.fTo = 400e3;
+        SigGen g(p);
+        std::vector<cf> a(4700), b(1000);
+        g.generate(a.data(), 4700);
+        bool ev = g.lastPulses().size() == 3 && g.lastPulses()[1].start == 2000 && g.lastPulses()[2].start == 4000 &&
+                  g.lastPulses()[0].len == 2000;
+        check(ev, "one event per sweep period");
+        WaveformParams p2 = p;
+        p2.fTo = 200e3;
+        g.setParams(p2);
+        g.generate(b.data(), 1000);
+        const double jump = std::arg(std::complex<double>(b[0]) * std::conj(std::complex<double>(a[4699]))) * p.rate / (2 * M_PI);
+        check(g.lastPulses().size() == 1 && g.lastPulses()[0].start == 4700 && std::fabs(jump - p.sweepOffsetAt(699)) < 1 &&
+                  std::fabs(stepHz(b, 1, p.rate) + 400e3) < 1,
+              "a sweep change restarts the period, phase-continuous");
+
+        // Checks.
+        WaveformParams c = p;
+        c.fTo = 1.2e6;
+        check(!checkParams(c).ok(), "rejects a sweep past the band edge");
+        c = p;
+        c.fTo = c.fFrom;
+        check(!checkParams(c).ok(), "rejects From = To");
+        c = p;
+        c.sweepPeriod = 0.5e-6;
+        check(!checkParams(c).ok(), "rejects a period under 2 samples");
+        c = p;
+        c.aSweep = SweepShape::Stepped;
+        check(!checkParams(c).ok(), "rejects a stepped level");
+        c = p;
+        c.aSweep = SweepShape::RampUp;
+        c.aTo = 3;
+        check(!checkParams(c).ok(), "rejects a level above 0 dBFS");
+        check(checkParams(p).ok(), "accepts a -400 k to 400 k ramp at 2 MS/s");
+
+        // File: exactly N sweeps, annotated.
+        p.fSweep = SweepShape::Stepped;
+        p.fFrom = -100e3;
+        p.fTo = 100e3;
+        FileGenJob job;
+        FileGenConfig fc;
+        fc.rec.prefix = dir + "/sgcheck_sweep";
+        fc.pulses = 4;
+        fc.annotatePulses = true;
+        std::string err;
+        if (job.start(p, fc, err)) {
+            auto st = waitJob(job);
+            check(fileSize(st.rec.dataPath) == 4 * 1000 * 8, "4 sweeps of cf32 = 32000 bytes",
+                  fmt("%g bytes", (double)fileSize(st.rec.dataPath)));
+            std::string meta = readFile(st.rec.metaPath);
+            check(countOf(meta, "\"core:label\": \"sweep ") == 4 && meta.find("\"sweep\": {") != std::string::npos,
+                  "sweep file metadata: annotations and settings");
+            remove(st.rec.dataPath.c_str());
+            remove(st.rec.metaPath.c_str());
+        } else {
+            check(false, "sweep file starts", err);
+        }
+
+        // Preview: max-hold spectrum covers the swept band.
+        p.fSweep = SweepShape::RampUp;
+        p.fFrom = -400e3;
+        p.fTo = 400e3;
+        p.fc = 0;
+        p.sweepPeriod = 0.5;  // much longer than the preview blocks
+        auto pr = computeSigPreview({p, false}, [] { return false; });
+        int lit = 0, inside = 0;
+        for (size_t i = 0; pr && i < pr->f.size(); ++i)
+            if (std::fabs(pr->f[i]) < 380e3) {
+                ++inside;
+                lit += pr->db[i] > -60;
+            }
+        check(pr && pr->hold && !pr->sweepF.empty() && inside > 0 && lit > inside * 0.9,
+              "preview: the max-hold spectrum covers the swept band", fmt("%g of %g bins", lit, inside));
+    }
+
+    // --- Pulsed sweeps: each pulse takes the sweep's frequency and level at its start ---
+    {
+        WaveformParams p;
+        p.mode = GenMode::Pulsed;
+        p.rate = 2e6;
+        p.pri = 100e-6;  // 200 samples
+        p.pw = 20e-6;    // 40 samples
+        p.fSweep = SweepShape::RampUp;
+        p.fFrom = -400e3;
+        p.fTo = 400e3;
+        p.sweepPeriod = 1e-3;  // 2000 samples: 10 pulses per sweep
+        p.aSweep = SweepShape::RampUp;
+        p.aFrom = -30;
+        p.aTo = -6;
+        check(checkParams(p).ok(), "pulsed sweep is valid");
+        auto v = gen(p, 4000);
+        double fe = 0, le = 0;
+        for (int j = 0; j < 20; ++j) {
+            const size_t a = (size_t)(200 * j);
+            const int64_t k = (int64_t)(200 * j) % 2000;
+            fe = std::max(fe, std::fabs(meanFreq(v, a, a + 40, p.rate) - p.sweepOffsetAt(k)));
+            double pk = 0;
+            for (size_t i = a; i < a + 40; ++i) pk = std::max(pk, (double)std::abs(v[i]));
+            le = std::max(le, std::fabs(20 * std::log10(pk) - p.sweepLevelAt(k)));
+        }
+        check(fe < 1, "each pulse sits at the sweep's frequency when it starts", fmt("worst %.3g Hz", fe));
+        check(le < 0.01, "each pulse has the sweep's level when it starts", fmt("worst %.3g dB", le));
+        bool quiet = true;
+        for (int j = 0; j < 20; ++j)
+            for (size_t i = (size_t)(200 * j + 40); i < (size_t)(200 * j + 200); ++i) quiet &= std::abs(v[i]) == 0;
+        check(quiet, "pulsed sweep: silence between pulses");
+        // Stepped: 5 steps of 600 samples; pulses every 200 samples take 3 pulses per step.
+        p.aSweep = SweepShape::Off;
+        p.fSweep = SweepShape::Stepped;
+        p.fFrom = -200e3;
+        p.fTo = 200e3;
+        p.fStep = 100e3;
+        p.fDwell = 300e-6;
+        v = gen(p, 3000);
+        fe = 0;
+        for (int j = 0; j < 15; ++j)
+            fe = std::max(fe, std::fabs(meanFreq(v, (size_t)(200 * j), (size_t)(200 * j + 40), p.rate) - (-200e3 + 100e3 * (j / 3))));
+        check(fe < 1, "pulsed stepped sweep: 3 pulses per step", fmt("worst %.3g Hz", fe));
+        // A chirp centred on the swept frequency.
+        p.intra = IntraMod::LfmUp;
+        p.chirpBw = 200e3;
+        v = gen(p, 1400);
+        // Pulse 6 is on step 2 (0 Hz): the same as an unswept chirp at offset 0.
+        WaveformParams fixed = p;
+        fixed.fSweep = SweepShape::Off;
+        fixed.offset = 0;
+        const auto u = gen(fixed, 1400);
+        const double df = meanFreq(v, 1200, 1240, p.rate) - meanFreq(u, 1200, 1240, p.rate);
+        check(std::fabs(df) < 1, "a chirp is centred on the swept frequency", fmt("%.3g Hz apart", df));
+        p.intra = IntraMod::None;
+        WaveformParams c = p;
+        c.fSweep = SweepShape::RampUp;
+        c.sweepPeriod = 150e-6;
+        check(!checkParams(c).warnings.empty(), "warns when the sweep is shorter than two PRIs");
+        check(describeParams(p).find("stepped") != std::string::npos && paramsJson(p).find("\"per_pulse\": true") != std::string::npos,
+              "pulsed sweep description and metadata");
+        // Preview: the max-hold spectrum covers the swept band.
+        p.fSweep = SweepShape::Triangle;
+        p.fFrom = -400e3;
+        p.fTo = 400e3;
+        p.sweepPeriod = 0.2;
+        p.fc = 0;
+        auto pr = computeSigPreview({p, false}, [] { return false; });
+        int lit = 0, inside = 0;
+        for (size_t i = 0; pr && i < pr->f.size(); ++i)
+            if (std::fabs(pr->f[i]) < 380e3) {
+                ++inside;
+                lit += pr->db[i] > -70;
+            }
+        check(pr && pr->hold && !pr->sweepF.empty() && !pr->t.empty() && lit > inside * 0.9,
+              "pulsed sweep preview: the pulse, the sweep curves and a max-hold over the band", fmt("%g of %g bins", lit, inside));
     }
 
     printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "all checks passed", failures, failures == 1 ? "" : "s");

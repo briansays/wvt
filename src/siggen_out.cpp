@@ -11,6 +11,10 @@
 // ---------------------------------------------------------------------------
 // File generation
 // ---------------------------------------------------------------------------
+const char* eventName(const WaveformParams& p) {
+    return p.mode == GenMode::Playback ? "play" : p.mode == GenMode::CW ? "sweep" : "pulse";
+}
+
 bool FileGenJob::start(const WaveformParams& p, const FileGenConfig& cfg, std::string& err) {
     cancel();
     ParamCheck chk = checkParams(p);
@@ -19,8 +23,8 @@ bool FileGenJob::start(const WaveformParams& p, const FileGenConfig& cfg, std::s
         LOG_DEBUG("siggen", "file generation rejected: %s", err.c_str());
         return false;
     }
-    if (cfg.pulses > 0 ? p.mode == GenMode::CW : !(cfg.seconds > 0)) {
-        err = cfg.pulses > 0 ? "a pulse count needs pulsed mode or playback" : "length must be positive";
+    if (cfg.pulses > 0 ? p.mode == GenMode::CW && !p.sweeping() : !(cfg.seconds > 0)) {
+        err = cfg.pulses > 0 ? "a pulse count needs pulsed mode, playback or a sweep" : "length must be positive";
         LOG_DEBUG("siggen", "file generation rejected: %s", err.c_str());
         return false;
     }
@@ -51,7 +55,7 @@ bool FileGenJob::start(const WaveformParams& p, const FileGenConfig& cfg, std::s
     rc.extraGlobal = "\"wvt:siggen\": " + paramsJson(p);
     if (!rec_.start(ring_, src, rc, err)) return false;
     LOG_INFO("siggen", "generating %s at %s, %s to a file, format %s", describeParams(p).c_str(), fmtSI(p.rate, "S/s", 6).c_str(),
-             cfg_.pulses > 0 ? (std::to_string(cfg_.pulses) + (p.mode == GenMode::Playback ? " plays" : " pulses")).c_str()
+             cfg_.pulses > 0 ? (std::to_string(cfg_.pulses) + " " + eventName(p) + "s").c_str()
                              : fmtSI(cfg_.seconds, "s", 5).c_str(),
              formatName(cfg.fmt));
 
@@ -107,7 +111,8 @@ void FileGenJob::run() {
             }
             ++pulses;
             if (cfg_.annotatePulses)
-                rec_.annotate(pl.start, pl.len, (p_.mode == GenMode::Playback ? "playback " : "pulse ") + std::to_string(pulses));
+                rec_.annotate(pl.start, pl.len, std::string(p_.mode == GenMode::Playback ? "playback" : eventName(p_)) + " " +
+                                                    std::to_string(pulses));
         }
         encodeSamples(cfg_.fmt, buf.data(), n, raw.data());
         ring_->push(raw.data(), n);
@@ -242,8 +247,21 @@ std::shared_ptr<SigPreviewRes> computeSigPreview(const SigPreviewReq& r, const C
     }
 
     // --- time domain ---
-    int64_t n;
-    if (p.mode == GenMode::CW) {
+    if (p.sweeping()) {
+        // One period of the sweep, from the parameters: a long sweep costs nothing.
+        const int64_t P = p.sweepSamples();
+        const int pts = (int)std::min<int64_t>(P, kMaxPoints);
+        for (int j = 0; j <= pts; ++j) {
+            const int64_t k = std::min(P - 1, (int64_t)((double)j * (double)P / pts));
+            res->sweepT.push_back((double)k / rate);
+            res->sweepF.push_back(p.fc + p.sweepOffsetAt(k));
+            res->sweepDb.push_back(p.sweepLevelAt(k));
+        }
+    }
+    int64_t n = 0;
+    if (p.mode == GenMode::CW && p.sweeping()) {
+        // (a CW sweep shows only its curves)
+    } else if (p.mode == GenMode::CW) {
         n = p.offset != 0 ? std::llround(10 * rate / std::fabs(p.offset)) : 1024;  // about 10 cycles
         n = std::clamp<int64_t>(n, 64, 4096);
     } else if (p.mode == GenMode::Playback) {
@@ -259,7 +277,7 @@ std::shared_ptr<SigPreviewRes> computeSigPreview(const SigPreviewReq& r, const C
         n = std::max<int64_t>(16, std::llround(span * rate));
     }
     n = std::min<int64_t>(n, p.mode == GenMode::Playback ? kMaxPlaySamples + (8 << 20) : 4 << 20);
-    {
+    if (n > 0) {
         SigGen g(p);
         const int64_t per = std::max<int64_t>(1, (n + kMaxPoints - 1) / kMaxPoints);
         res->iq = per == 1;
@@ -292,7 +310,7 @@ std::shared_ptr<SigPreviewRes> computeSigPreview(const SigPreviewReq& r, const C
         }
     }
 
-    // --- spectrum (Welch average) ---
+    // --- spectrum (Welch average; a sweep: max-hold of blocks spread over one period) ---
     p = r.p;
     p.startDelay = 0;
     const int nfft = 4096;
@@ -300,7 +318,11 @@ std::shared_ptr<SigPreviewRes> computeSigPreview(const SigPreviewReq& r, const C
     if (p.mode == GenMode::Pulsed) total = std::max<int64_t>(total, std::llround(16 * p.meanPri() * rate));
     if (p.mode == GenMode::Playback) total = std::max(total, playLen);
     total = std::min<int64_t>(total, 2 << 20);
-    const int segs = (int)std::max<int64_t>(1, total / nfft);
+    const bool hold = p.sweeping();
+    // Up to 1024 blocks: a sweep across the whole band then moves at most 4 bins between blocks,
+    // inside the window's main lobe, so the band shows filled.
+    const int segs = hold ? (int)std::clamp<int64_t>((p.sweepSamples() + nfft - 1) / nfft, 64, 1024)
+                          : (int)std::max<int64_t>(1, total / nfft);
     auto fft = getFFT(nfft);
     auto win = makeWindow(WindowType::BlackmanHarris, nfft);
     double wsum = 0;
@@ -310,19 +332,22 @@ std::shared_ptr<SigPreviewRes> computeSigPreview(const SigPreviewReq& r, const C
     SigGen g(p);
     for (int s = 0; s < segs; ++s) {
         if (cancelled()) return nullptr;
+        // (Pulsed: a pulse in the middle of each block, at that point of the sweep.)
+        if (hold) g.seekSweep((int64_t)((double)s * (double)p.sweepSamples() / segs), nfft / 2 - std::llround(p.pw * rate) / 2);
         g.generate(seg.data(), nfft);
         for (int k = 0; k < nfft; ++k) seg[k] *= win[k];
         fft->forward(seg.data());
-        for (int k = 0; k < nfft; ++k) acc[k] += std::norm(seg[k]);
+        for (int k = 0; k < nfft; ++k) acc[k] = hold ? std::max(acc[k], (double)std::norm(seg[k])) : acc[k] + std::norm(seg[k]);
     }
     res->f.resize(nfft);
     res->db.resize(nfft);
-    const double norm = 1.0 / (segs * wsum * wsum);  // a full-scale tone reads 0 dBFS
+    const double norm = 1.0 / ((hold ? 1 : segs) * wsum * wsum);  // a full-scale tone reads 0 dBFS
     for (int j = 0; j < nfft; ++j) {
         const int k = (j + nfft / 2) % nfft;
         res->f[j] = p.fc + (j - nfft / 2) * rate / nfft;
         res->db[j] = 10 * std::log10(acc[k] * norm + 1e-20);
     }
     res->rbw = rate / nfft;
+    res->hold = hold;
     return res;
 }

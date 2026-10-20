@@ -158,6 +158,8 @@ signal generator (-c sets the center frequency, -r the sample rate):
       --siggen         open the signal generator window
       --gen cw|pulsed|playback   waveform mode (also opens the window)
       --offset HZ  --amp DBFS  --drift HZ_PER_S
+      --sweep FROM:TO  --sweep-shape up|down|tri  --sweep-step HZ:DWELL  --sweep-time S
+      --level-sweep FROM:TO  --level-shape up|down|tri
       --pri S | --prf HZ   --pw S   --edge rect|linear|cos|gauss  --rise S  --fall S
       --stagger S,S,..  --jitter PCT  --seed N  --burst N[:GAP]  --delay S
       --lfm up|down|tri:BW  --barker N
@@ -335,6 +337,7 @@ The window floats over the main window. It works in File mode and in Device mode
 |---|---|
 | Carrier | sample rate, center frequency, offset from center, peak amplitude (dBFS), start phase |
 | CW | a steady tone, with an optional drift (Hz/s). Retuning keeps the phase continuous |
+| Sweeps | CW and pulsed. A frequency sweep (ramp up, ramp down, triangle, or stepped with a step and dwell) between two offsets, and a level sweep (ramp or triangle, linear in dB) between two dBFS levels. Both share one period and repeat until the output stops |
 | Pulsed | PRI or PRF, pulse width or duty cycle (the width includes the edges) |
 | Edges | rectangular, linear, raised cosine or Gaussian, with separate rise and fall times |
 | PRI pattern | fixed, stagger (a list of PRIs used in turn), or jitter (+-%, repeatable with a seed) |
@@ -347,7 +350,16 @@ The pulses are slices of one continuous carrier, so they are phase-coherent. wvt
 settings while you type. Settings with problems show in red, and wvt does not apply them. Examples
 of problems are a pulse wider than the PRI, a Barker chip shorter than one sample, and an offset
 outside the band. The **preview** shows one pulse (or the pulse train) in time, and the averaged
-spectrum.
+spectrum. For a sweep it shows the frequency and the level over one period, and a max-hold spectrum
+of the swept band.
+
+**Sweeps.** While the frequency sweeps, it replaces the Offset (and the Drift). While the level
+sweeps, it replaces the Amplitude. A CW tone follows the sweep continuously, and its phase stays
+continuous through the wraps and the steps. In pulsed mode (the **Sweep** section under Pulse),
+each pulse takes the frequency and level the sweep has when the pulse starts and keeps them for the
+whole pulse: pulse-to-pulse frequency agility, stepped-frequency trains, or scan-like amplitude
+modulation. A chirp or Barker code is centred on the swept frequency. Changing a sweep setting
+while an output runs starts the period again. Noise (SNR) is set from the peak of the level sweep.
 
 **Playback** plays a recording. The recording can be a file from the generator, a wvt recording,
 or any SigMF or raw IQ capture. **Load** reads the format, rate and frequency from the SigMF
@@ -371,9 +383,10 @@ viewer. **Viewer's markers** plays only the part between the time markers of the
 **Outputs** (select one with *Output* at the top of the window):
 
 - **File** writes SigMF or raw files in cf32, ci16, ci8 or cu8, with names like recordings. The
-  length is a duration. In pulsed mode, the length can also be an exact number of PRIs. The SigMF
+  length is a duration. In pulsed mode, the length can also be an exact number of PRIs, and with
+  a sweep an exact number of sweep periods. The SigMF
   metadata includes all generator settings (`wvt:siggen`). If you select it, the metadata also has
-  one annotation for each pulse. **Open in viewer** opens the result.
+  one annotation for each pulse, play or sweep. **Open in viewer** opens the result.
 - **Loopback** streams the waveform into the live spectrum and waterfall, in Device mode with the
   device *Signal generator loopback*. The live view shows the waveform as a receiver tuned to the
   center frequency shows it. Changes apply while you make them. The main window can record the
@@ -403,6 +416,10 @@ Transmit safety:
 wvt --gen pulsed --pri 1m --pw 20u --lfm up:2M -r 10M -c 915M                     # open the window
 wvt --gen pulsed --pri 1m --pw 20u --barker 13 -r 2M --gen-out ~/caps/b13 --gen-pulses 100 --gen-annotate
 wvt --device siggen --gen cw --offset 250k -c 915M -r 2M                          # loopback view
+wvt --device siggen --sweep -400k:400k --sweep-shape tri --sweep-time 2 -c 915M -r 2M  # sweep, loopback
+wvt --sweep -1M:1M --sweep-time 10m --level-sweep -40:-6 -r 5M -c 915M --gen-out ~/caps/sw --gen-pulses 20
+wvt --sweep -200k:200k --sweep-step 25k:5m -r 1M -c 915M --tx --tx-gain 10        # stepped, transmit
+wvt --gen pulsed --pri 1m --pw 20u --sweep -2M:2M --sweep-step 500k:10m --level-sweep -30:-6 -r 10M -c 915M  # agile pulses
 wvt --gen cw --offset 100k -c 915M -r 1M --tx --tx-gain 10 --gen-duration 5         # transmit 5 s
 wvt --play ~/caps/b13_*.sigmf-meta --play-gap 5m --gen-out ~/caps/b13x10 --gen-pulses 10  # 10 plays
 wvt --play capture.cs16 --play-rate 2.4M -r 10M -c 915M --play-segment 1.5:0.2 --tx    # replay a burst

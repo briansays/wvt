@@ -251,14 +251,21 @@ void App::drawSigGenWaveform() {
         tooltipAlways("RF center frequency: the transmit tuning and the file's frequency.\n"
                       "The signal itself sits at center + offset.");
 
+        const bool fSweep = p.sweeping() && p.fSweep != SweepShape::Off;
+        const bool aSweep = p.sweeping() && p.aSweep != SweepShape::Off;
         row("Offset");
+        ImGui::BeginDisabled(fSweep);
         InputSI("##sgoff", &p.offset, "Hz", -FLT_MIN);
-        tooltipAlways("Carrier offset from the center frequency, inside +-rate/2.\n"
-                      "A non-zero offset keeps the signal away from the USRP's LO leakage at the center.");
+        ImGui::EndDisabled();
+        tooltipAlways(fSweep ? "The frequency sweep sets the frequency (Sweep rows)"
+                             : "Carrier offset from the center frequency, inside +-rate/2.\n"
+                               "A non-zero offset keeps the signal away from the USRP's LO leakage at the center.");
 
         row("Amplitude");
+        ImGui::BeginDisabled(aSweep);
         ImGui::InputDouble("##sgamp", &p.ampDb, 1, 6, "%.1f dBFS");
-        tooltipAlways("Peak amplitude relative to full scale (0 dBFS)");
+        ImGui::EndDisabled();
+        tooltipAlways(aSweep ? "The level sweep sets the amplitude (Sweep rows)" : "Peak amplitude relative to full scale (0 dBFS)");
 
         row("Start phase");
         ImGui::InputDouble("##sgph", &p.phaseDeg, 15, 90, "%.1f deg");
@@ -277,9 +284,13 @@ void App::drawSigGenWaveform() {
 
     if (p.mode == GenMode::CW) {
         if (ImGui::CollapsingHeader("CW", ImGuiTreeNodeFlags_DefaultOpen) && beginForm("##sgcw", 8.5f)) {
+            drawSweepRows(p);
             row("Drift");
+            ImGui::BeginDisabled(p.fSweep != SweepShape::Off);
             InputSI("##sgdrift", &p.driftHzPerSec, "Hz/s", -FLT_MIN);
-            tooltipAlways("Linear frequency drift, e.g. to test a tracking loop. 0 = steady tone.");
+            ImGui::EndDisabled();
+            tooltipAlways("Linear frequency drift, e.g. to test a tracking loop. 0 = steady tone.\n"
+                          "Not used while the frequency sweeps.");
             ImGui::EndTable();
         }
     } else if (p.mode == GenMode::Playback) {
@@ -379,6 +390,11 @@ void App::drawSigGenWaveform() {
                 ImGui::TableSetColumnIndex(1);
                 ImGui::TextDisabled("time-bandwidth product %.4g", p.chirpBw * p.pw);
             }
+            ImGui::EndTable();
+        }
+        // Pulse-to-pulse frequency and level sweeps (frequency agility, scan modulation).
+        if (ImGui::CollapsingHeader("Sweep", p.sweeping() ? ImGuiTreeNodeFlags_DefaultOpen : 0) && beginForm("##sgpsweep", 8.5f)) {
+            drawSweepRows(p);
             ImGui::EndTable();
         }
     }
@@ -573,7 +589,8 @@ void App::drawSigGenPreview() {
     static const char* kUnitS = "s";
     static const char* kUnitHz = "Hz";
 
-    if (ImPlot::BeginPlot("##sgtime", ImVec2(-1, fs * 9), ImPlotFlags_NoMenus)) {
+    if (!r->sweepF.empty()) drawSweepPreview(*r);
+    if (!r->t.empty() && ImPlot::BeginPlot("##sgtime", ImVec2(-1, fs * 9), ImPlotFlags_NoMenus)) {
         ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
         ImPlot::SetupAxisFormat(ImAxis_X1, formatValueSI, (void*)kUnitS);
         ImPlot::SetupLegend(ImPlotLocation_North, ImPlotLegendFlags_Horizontal | ImPlotLegendFlags_Outside);
@@ -600,7 +617,82 @@ void App::drawSigGenPreview() {
         ImPlot::PlotLine("spectrum", r->f.data(), r->db.data(), (int)r->f.size());
         ImPlot::EndPlot();
     }
-    ImGui::TextDisabled("spectrum: %s bins, power per bin%s", fmtSI(r->rbw, "Hz", 3).c_str(), stale ? "  (updating)" : "");
+    ImGui::TextDisabled("spectrum: %s bins, power per bin%s%s", fmtSI(r->rbw, "Hz", 3).c_str(),
+                        r->hold ? ", max-hold over the sweep" : "", stale ? "  (updating)" : "");
+}
+
+// The sweep rows of the CW and Pulse sections (inside their form table).
+void App::drawSweepRows(WaveformParams& p) {
+    const float half = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemInnerSpacing.x) / 2;
+    auto shapeCombo = [](const char* id, SweepShape& v, bool stepped) {
+        if (!ImGui::BeginCombo(id, sweepShapeName(v))) return;
+        for (int i = 0; i < (int)SweepShape::Count; ++i)
+            if ((stepped || (SweepShape)i != SweepShape::Stepped) && ImGui::Selectable(sweepShapeName((SweepShape)i), (int)v == i))
+                v = (SweepShape)i;
+        ImGui::EndCombo();
+    };
+    row("Freq sweep", "Ramp up: From to To, then again. Ramp down: To to From. Triangle: From to To and back.\n"
+                      "Stepped: From, From + step, ... up to To, each for one dwell. Repeats until the output stops.\n"
+                      "Pulsed: each pulse takes the frequency the sweep has when it starts.");
+    shapeCombo("##sgfsweep", p.fSweep, true);
+    if (p.fSweep != SweepShape::Off) {
+        row("From / to", "Sweep limits as offsets from the center frequency, inside +-rate/2");
+        InputSI("##sgffrom", &p.fFrom, "Hz", half);
+        ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+        InputSI("##sgfto", &p.fTo, "Hz", -FLT_MIN);
+        if (p.fSweep == SweepShape::Stepped) {
+            row("Step / dwell", "Frequency step, and how long each frequency is held");
+            InputSI("##sgfstep", &p.fStep, "Hz", half);
+            ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+            InputSI("##sgfdwell", &p.fDwell, "s", -FLT_MIN);
+        }
+    }
+    row("Level sweep", "Sweeps the amplitude in dB over the same period. Ramp up: From to To. Ramp down: To to From.\n"
+                       "Triangle: From to To and back. Pulsed: each pulse takes the level the sweep has when it starts.");
+    shapeCombo("##sgasweep", p.aSweep, false);
+    if (p.aSweep != SweepShape::Off) {
+        row("From / to", "Level limits, dBFS");
+        ImGui::SetNextItemWidth(half);
+        ImGui::InputDouble("##sgafrom", &p.aFrom, 0, 0, "%.1f dBFS");
+        ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::InputDouble("##sgato", &p.aTo, 0, 0, "%.1f dBFS");
+    }
+    if (p.sweeping()) {
+        row("Period", "The time of one sweep, shared by the frequency and level sweeps");
+        if (p.fSweep == SweepShape::Stepped) {
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextDisabled("%s (%d steps x dwell)", fmtSI((double)p.sweepSamples() / p.rate, "s", 4).c_str(),
+                                p.sweepSteps());
+        } else {
+            InputSI("##sgsper", &p.sweepPeriod, "s", -FLT_MIN);
+        }
+    }
+}
+
+// One period of a sweep: the frequency (left axis) and the level (right axis).
+void App::drawSweepPreview(const SigPreviewRes& r) {
+    static const char* kUnitS = "s";
+    static const char* kUnitHz = "Hz";
+    const WaveformParams& p = r.req.p;
+    const bool fs = p.fSweep != SweepShape::Off, as = p.aSweep != SweepShape::Off;
+    if (!ImPlot::BeginPlot("##sgsweep", ImVec2(-1, ImGui::GetFontSize() * 9), ImPlotFlags_NoMenus)) return;
+    ImPlot::SetupAxes(nullptr, fs ? "Hz" : "dBFS", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+    ImPlot::SetupAxisFormat(ImAxis_X1, formatValueSI, (void*)kUnitS);
+    if (fs) ImPlot::SetupAxisFormat(ImAxis_Y1, formatValueSI, (void*)kUnitHz);
+    if (fs && as) ImPlot::SetupAxis(ImAxis_Y2, "dBFS", ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_Opposite);
+    ImPlot::SetupLegend(ImPlotLocation_North, ImPlotLegendFlags_Horizontal | ImPlotLegendFlags_Outside);
+    const int n = (int)r.sweepT.size();
+    if (fs) {
+        ImPlot::SetNextLineStyle(kColI, 1.5f);
+        ImPlot::PlotLine("frequency", r.sweepT.data(), r.sweepF.data(), n);
+    }
+    if (as) {
+        if (fs) ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
+        ImPlot::SetNextLineStyle(kColEnv, 1.5f);
+        ImPlot::PlotLine("level", r.sweepT.data(), r.sweepDb.data(), n);
+    }
+    ImPlot::EndPlot();
 }
 
 // ---------------------------------------------------------------------------
@@ -609,6 +701,7 @@ void App::drawSigGenPreview() {
 void App::drawSigGenFile() {
     const bool active = sgFileSt_.active;
     FileGenConfig& c = sgFileCfg_;
+    const bool counted = sg_.mode != GenMode::CW || sg_.sweeping();  // the length can be a count of events
     ImGui::BeginDisabled(active);
     if (beginForm("##sgfile", 8.5f)) {
         row("Save to");
@@ -633,16 +726,19 @@ void App::drawSigGenFile() {
 
         row("Length");
         const bool playOnce = sg_.mode == GenMode::Playback && !sg_.playLoop;
-        if (sg_.mode != GenMode::CW) {
+        if (counted) {
             int by = sgByPulses_ ? 1 : 0;
             ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6);
-            const char* bys[] = {"Duration", sg_.mode == GenMode::Pulsed ? "Pulses" : playOnce ? "One play" : "Repeats"};
+            const char* bys[] = {"Duration", sg_.mode == GenMode::Pulsed ? "Pulses"
+                                             : sg_.mode == GenMode::CW   ? "Sweeps"
+                                             : playOnce                  ? "One play"
+                                                                         : "Repeats"};
             if (ImGui::Combo("##sgby", &by, bys, 2)) sgByPulses_ = by == 1;
             if (sg_.mode == GenMode::Playback)
                 tooltipAlways("Repeats / One play: the file holds whole plays of the recording, gaps included");
             ImGui::SameLine();
         }
-        const bool byPulses = sgByPulses_ && sg_.mode != GenMode::CW;
+        const bool byPulses = sgByPulses_ && counted;
         if (byPulses && playOnce) {
             ImGui::AlignTextToFramePadding();
             ImGui::TextDisabled("start delay + the recording");
@@ -655,18 +751,20 @@ void App::drawSigGenFile() {
         } else {
             InputSI("##sglen", &c.seconds, "s", -FLT_MIN);
         }
-        if (sg_.mode != GenMode::CW && c.rec.sigmf) {
+        if (counted && c.rec.sigmf) {
             row("Annotations");
-            ImGui::Checkbox(sg_.mode == GenMode::Pulsed ? "Mark each pulse##sgann" : "Mark each play##sgann", &c.annotatePulses);
-            tooltipAlways("Adds a SigMF annotation (start and length) for every pulse or play of the recording, up to 10000.");
+            ImGui::Checkbox(("Mark each " + std::string(eventName(sg_)) + "##sgann").c_str(), &c.annotatePulses);
+            tooltipAlways("Adds a SigMF annotation (start and length) for every pulse, sweep or play of the recording, up to 10000.");
         }
         ImGui::EndTable();
     }
     ImGui::EndDisabled();
 
-    const bool byPulses = sgByPulses_ && sg_.mode != GenMode::CW;
+    const bool byPulses = sgByPulses_ && counted;
     double secs = c.seconds;
-    if (byPulses && sg_.mode == GenMode::Pulsed) {
+    if (byPulses && sg_.mode == GenMode::CW) {
+        secs = (double)std::max<int64_t>(1, c.pulses) * (double)sg_.sweepSamples() / sg_.rate;
+    } else if (byPulses && sg_.mode == GenMode::Pulsed) {
         secs = (double)std::max<int64_t>(1, c.pulses) * sg_.meanPri() + sg_.startDelay;
     } else if (byPulses) {
         const double play = sgPrev_ && sgPrev_->req.p == sg_ ? sgPrev_->playSeconds : 0;
