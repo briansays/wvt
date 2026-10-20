@@ -1,8 +1,10 @@
 // Metal GPU backend for Apple GPUs (issue #21, docs/apple-gpu-plan.md).
-// Our kernels (Metal Shading Language, compiled at run time, so Xcode is not
-// needed) decode, window, sum and pool; MPSGraph does the FFT. On unified
-// memory the GPU reads the memory-mapped file in place: no gather, no copy.
-// Apple GPUs have no double, so cf64 is decoded on the CPU.
+// Our kernels are Metal Shading Language, compiled at run time (no Xcode
+// needed). FFTs that fit in threadgroup memory (N <= 4096 on Apple GPUs) run
+// in one pass: decode, window, FFT and |X|^2 per threadgroup, so each sample
+// is read once. Larger FFTs use MPSGraph between our decode and sum kernels.
+// On unified memory the GPU reads the memory-mapped file in place: no
+// gather, no copy. Apple GPUs have no double, so cf64 is decoded on the CPU.
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
@@ -72,9 +74,61 @@ kernel void decodeWindow(device const uchar* raw [[buffer(0)]], device const lon
     out[idx] = s * win[i];
 }
 
+struct AccParams { long f0; long f1; int r0; int rowsHere; int avg; int log2n; };
+
+// One FFT per threadgroup, in threadgroup memory: decode and window into
+// bit-reversed order, radix-2 butterflies, then the fftshifted |X|^2 of FFT j
+// goes to pw[j * n ...]. Same inputs as decodeWindow.
+kernel void fftPower(device const uchar* raw [[buffer(0)]], device const long* offs [[buffer(1)]],
+                     device const int2* valid [[buffer(2)]], device const float* win [[buffer(3)]],
+                     constant DecodeParams& P [[buffer(4)]], device float* pw [[buffer(5)]],
+                     device const float2* tw [[buffer(6)]], threadgroup float2* buf [[threadgroup(0)]],
+                     uint j [[threadgroup_position_in_grid]], uint t [[thread_position_in_threadgroup]],
+                     uint nt [[threads_per_threadgroup]]) {
+    const uint n = 1u << P.log2n;
+    const int2 v = valid[j];
+    device const uchar* x = raw + offs[j];
+    for (uint i = t; i < n; i += nt) {
+        float2 s = float2(0);
+        if (int(i) >= v.x && int(i) < v.y) s = decodeOne(x + long(i) * P.bps, P);
+        const uint r = P.log2n ? reverse_bits(i) >> (32 - P.log2n) : 0;
+        buf[r] = s * win[i];
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    for (uint len = 2; len <= n; len <<= 1) {
+        const uint hl = len >> 1, stp = n / len;
+        for (uint b = t; b < n / 2; b += nt) {
+            const uint grp = b / hl, k = b - grp * hl, i0 = grp * len + k, i1 = i0 + hl;
+            const float2 w = tw[k * stp], a = buf[i0], c = buf[i1];
+            const float2 cw = float2(c.x * w.x - c.y * w.y, c.x * w.y + c.y * w.x);
+            buf[i0] = a + cw;
+            buf[i1] = a - cw;
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+    device float* o = pw + long(j) * n;
+    for (uint i = t; i < n; i += nt) {
+        const float2 c = buf[(i + n / 2) & (n - 1)];  // fftshift
+        o[i] = c.x * c.x + c.y * c.y;
+    }
+}
+
+// acc[rl * n + i] += the powers of the FFTs of row r0 + rl in this chunk
+// (already fftshifted, from fftPower).
+kernel void accumulatePower(device const float* pw [[buffer(0)]], device float* acc [[buffer(1)]],
+                            constant AccParams& P [[buffer(2)]], uint idx [[thread_position_in_grid]]) {
+    const uint n = 1u << P.log2n;
+    if (idx >= uint(P.rowsHere) * n) return;
+    const uint rl = idx >> P.log2n, i = idx & (n - 1);
+    const long row = long(P.r0) + rl;
+    const long fa = max(P.f0, row * P.avg), fb = min(P.f1, (row + 1) * P.avg);
+    float s = 0;
+    for (long f = fa; f < fb; ++f) s += pw[((f - P.f0) << P.log2n) + i];
+    acc[idx] += s;
+}
+
 // acc[rl * n + i] += |X|^2 at fftshifted bin i, summed over the FFTs of row
 // r0 + rl in this chunk (global FFT index f = row * avg + a, f in [f0, f1)).
-struct AccParams { long f0; long f1; int r0; int rowsHere; int avg; int log2n; };
 kernel void accumulate(device const float2* X [[buffer(0)]], device float* acc [[buffer(1)]],
                        constant AccParams& P [[buffer(2)]], uint idx [[thread_position_in_grid]]) {
     const uint n = 1u << P.log2n;
@@ -102,7 +156,60 @@ kernel void pool(device const float* acc [[buffer(0)]], device float* lin [[buff
     for (int b = 0; b < per; ++b) mx = max(mx, a[b]);
     lin[idx] = mx * P.scale;
 }
+
+// Channel filter. Samples in0 + k, k < len, zero outside [lo, hi) (raw starts
+// at sample lo), mixed down
+// by frac cycles per sample. The phase is a 64-bit fixed-point number of
+// cycles (no double on the GPU): ph = ph0 + k * inc, wrapping; ph0 and inc
+// come from the host. The top 24 bits give the phase in cycles.
+struct MixParams { long lo; long hi; long len; ulong ph0; ulong inc; int mix; };
+kernel void decodeMix(device const uchar* raw [[buffer(0)]], constant DecodeParams& P [[buffer(1)]],
+                      constant MixParams& M [[buffer(2)]], device float2* x [[buffer(3)]],
+                      uint k [[thread_position_in_grid]]) {
+    if (long(k) >= M.len) return;
+    float2 s = float2(0);
+    if (long(k) >= M.lo && long(k) < M.hi) s = decodeOne(raw + (long(k) - M.lo) * P.bps, P);
+    if (M.mix) {
+        const ulong ph = M.ph0 + ulong(k) * M.inc;
+        const float cyc = float(ph >> 40) * (1.0f / 16777216.0f);  // [0, 1)
+        const float c = cospi(-2.0f * cyc), sn = sinpi(-2.0f * cyc);
+        s = float2(s.x * c - s.y * sn, s.x * sn + s.y * c);
+    }
+    x[k] = s;
+}
+
+// y[j] = sum over m of h[m] * x[j * D + m], j < J. The taps are copied to
+// threadgroup memory when they fit (tapsShared).
+struct FirParams { int taps; int decim; long outLen; int tapsShared; };
+kernel void fir(device const float2* x [[buffer(0)]], device const float* h [[buffer(1)]],
+                constant FirParams& F [[buffer(2)]], device float2* y [[buffer(3)]],
+                threadgroup float* sh [[threadgroup(0)]], uint j [[thread_position_in_grid]],
+                uint t [[thread_position_in_threadgroup]], uint nt [[threads_per_threadgroup]]) {
+    if (F.tapsShared) {
+        for (int m = t; m < F.taps; m += nt) sh[m] = h[m];
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+    if (long(j) >= F.outLen) return;
+    device const float2* xp = x + long(j) * F.decim;
+    float2 acc = float2(0);
+    if (F.tapsShared)
+        for (int m = 0; m < F.taps; ++m) acc += sh[m] * xp[m];
+    else
+        for (int m = 0; m < F.taps; ++m) acc += h[m] * xp[m];
+    y[j] = acc;
+}
 )MSL";
+
+struct MixParams {
+    int64_t lo, hi, len;
+    uint64_t ph0, inc;
+    int mix;
+};
+struct FirParams {
+    int taps, decim;
+    int64_t outLen;
+    int tapsShared;
+};
 
 struct DecodeParams {
     int fmt, bps, bigEndian, swapIQ, log2n, m;
@@ -119,7 +226,7 @@ struct PoolParams {
 // The compiled kernels, shared by all threads. Compiled on first use (about
 // 0.2 s); a failure is kept, so it is reported once per job and not retried.
 struct Pipelines {
-    id<MTLComputePipelineState> decodeWindow, accumulate, pool;
+    id<MTLComputePipelineState> decodeWindow, accumulate, pool, fftPower, accumulatePower, decodeMix, fir;
     std::string err;
 };
 Pipelines& pipelines() {
@@ -153,6 +260,10 @@ Pipelines& pipelines() {
             p.decodeWindow = make("decodeWindow");
             p.accumulate = make("accumulate");
             p.pool = make("pool");
+            p.fftPower = make("fftPower");
+            p.accumulatePower = make("accumulatePower");
+            p.decodeMix = make("decodeMix");
+            p.fir = make("fir");
         }
     });
     return p;
@@ -203,9 +314,89 @@ struct GraphCache {
 // Per-thread state: a command queue, the buffers and the graphs.
 struct SpecContext {
     id<MTLCommandQueue> queue = nil;
-    Shared xin, xout, offs, valid, win, acc, lin, decoded;
+    Shared xin, xout, offs, valid, win, acc, lin, decoded, tw;
+    int twN = 0;
     GraphCache graphs;
 };
+
+// Twiddles e^(-2 pi i k / n), k < n / 2, for fftPower (computed in double).
+bool twiddles(Shared& tw, int& twN, int n) {
+    if (twN == n) return true;
+    if (!tw.reserve((size_t)std::max(1, n / 2) * 8)) return false;
+    float* t = tw.ptr<float>();
+    for (int k = 0; k < n / 2; ++k) {
+        t[2 * k] = (float)std::cos(-2 * M_PI * k / n);
+        t[2 * k + 1] = (float)std::sin(-2 * M_PI * k / n);
+    }
+    twN = n;
+    return true;
+}
+
+// One-pass FFTs fit when an FFT of n complex floats fits in threadgroup memory.
+bool onePass(int n) { return (NSUInteger)n * 8 <= g_device.maxThreadgroupMemoryLength; }
+
+// Encodes m FFTs of size n (their byte offsets and valid ranges in c.offs and
+// c.valid, the window in c.win) and adds their fftshifted powers to the rows
+// of c.acc that `ap` names. One pass when the FFT fits in threadgroup memory,
+// else decode, MPSGraph FFT (g, tin -> tout) and sum. Returns an open compute
+// encoder for the caller's next step.
+id<MTLComputeCommandEncoder> encodeFftSum(SpecContext& c, Pipelines& pl, MPSCommandBuffer* cb, id<MTLBuffer> raw,
+                                          const DecodeParams& dp, const AccParams& ap, int n, int m, FftGraph* g,
+                                          MPSGraphTensorData* tin, MPSGraphTensorData* tout) API_AVAILABLE(macos(14.0)) {
+    id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
+    [e setBuffer:raw offset:0 atIndex:0];
+    [e setBuffer:c.offs.buf offset:0 atIndex:1];
+    [e setBuffer:c.valid.buf offset:0 atIndex:2];
+    [e setBuffer:c.win.buf offset:0 atIndex:3];
+    [e setBytes:&dp length:sizeof dp atIndex:4];
+    if (!g) {
+        // One pass: the powers of each FFT into xout, then summed per row.
+        [e setBuffer:c.xout.buf offset:0 atIndex:5];
+        [e setBuffer:c.tw.buf offset:0 atIndex:6];
+        [e setComputePipelineState:pl.fftPower];
+        [e setThreadgroupMemoryLength:(NSUInteger)n * 8 atIndex:0];
+        const NSUInteger tg = std::max<NSUInteger>(1, std::min<NSUInteger>(pl.fftPower.maxTotalThreadsPerThreadgroup, n / 2));
+        [e dispatchThreadgroups:MTLSizeMake(m, 1, 1) threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
+        [e setBuffer:c.xout.buf offset:0 atIndex:0];
+        [e setBuffer:c.acc.buf offset:0 atIndex:1];
+        [e setBytes:&ap length:sizeof ap atIndex:2];
+        dispatch(e, pl.accumulatePower, (NSUInteger)ap.rowsHere * n);
+        return e;
+    }
+    [e setBuffer:c.xin.buf offset:0 atIndex:5];
+    dispatch(e, pl.decodeWindow, (NSUInteger)m * n);
+    [e endEncoding];
+    // The batch may be larger than m; the extra transforms are ignored.
+    [g->graph encodeToCommandBuffer:cb feeds:@{g->in : tin} targetOperations:nil resultsDictionary:@{g->out : tout}
+                executionDescriptor:nil];
+    e = [cb computeCommandEncoder];
+    [e setBuffer:c.xout.buf offset:0 atIndex:0];
+    [e setBuffer:c.acc.buf offset:0 atIndex:1];
+    [e setBytes:&ap length:sizeof ap atIndex:2];
+    dispatch(e, pl.accumulate, (NSUInteger)ap.rowsHere * n);
+    return e;
+}
+
+// Buffers and graph for FFTs of size n in chunks of up to `batch`.
+bool prepareFft(SpecContext& c, int n, int batch, FftGraph*& g, MPSGraphTensorData* __strong& tin,
+                MPSGraphTensorData* __strong& tout)
+    API_AVAILABLE(macos(14.0)) {
+    const bool fused = onePass(n);
+    if ((!fused && !c.xin.reserve((size_t)batch * n * 8)) || !c.xout.reserve((size_t)batch * n * 8) ||
+        (fused && !twiddles(c.tw, c.twN, n)) || !c.offs.reserve((size_t)batch * 8) || !c.valid.reserve((size_t)batch * 8) ||
+        !c.win.reserve((size_t)n * 4))
+        return false;
+    g = nullptr;
+    tin = tout = nil;
+    if (!fused) {
+        g = &c.graphs.get(n, batch);
+        tin = [[MPSGraphTensorData alloc] initWithMTLBuffer:c.xin.buf shape:@[ @(batch), @(n) ]
+                                                   dataType:MPSDataTypeComplexFloat32];
+        tout = [[MPSGraphTensorData alloc] initWithMTLBuffer:c.xout.buf shape:@[ @(batch), @(n) ]
+                                                    dataType:MPSDataTypeComplexFloat32];
+    }
+    return true;
+}
 thread_local SpecContext t_spec;
 
 int log2Of(int n) {
@@ -243,7 +434,7 @@ NSArray<id<MTLDevice>>* allDevices() {
 
 bool gpuBackendBuilt() { return true; }
 const char* gpuBackendName() { return "Metal"; }
-bool gpuBackendImplements(GpuJob job) { return job == GpuJob::Spectrogram; }
+bool gpuBackendImplements(GpuJob) { return true; }
 
 // From gpu_check --bench on an M5 (docs/apple-gpu-plan.md §11). The CPU uses
 // vDSP there, so the GPU wins only on large jobs, and by less than CUDA does.
@@ -251,6 +442,7 @@ GpuLimits gpuBackendLimits() {
     GpuLimits l;
     l.specBudget = 512e6;
     l.specMinInput = 16e6;
+    l.liveMinInput = 131072;  // smaller rows (an RTL-SDR at 2.4 MS/s) are as fast on one CPU core
     return l;
 }
 
@@ -352,20 +544,15 @@ GpuStatus gpuBackendSpectrogram(const SpecJob& j, float* lin, const std::functio
         const uint8_t* base = j.file->data();
         const size_t mapped = (j.file->sizeBytes() + page - 1) / page * page;
 
-        if (!c.xin.reserve((size_t)batch * n * 8) || !c.xout.reserve((size_t)batch * n * 8) ||
-            !c.offs.reserve((size_t)batch * 8) || !c.valid.reserve((size_t)batch * 8) || !c.win.reserve((size_t)n * 4) ||
-            !c.acc.reserve((size_t)rowsPerGroup * n * 4) || !c.lin.reserve((size_t)j.rows * j.cols * 4) ||
-            (cf64 && !c.decoded.reserve((size_t)batch * n * 8))) {
+        FftGraph* g = nullptr;
+        MPSGraphTensorData *tin = nil, *tout = nil;
+        if (!prepareFft(c, n, batch, g, tin, tout) || !c.acc.reserve((size_t)rowsPerGroup * n * 4) ||
+            !c.lin.reserve((size_t)j.rows * j.cols * 4) || (cf64 && !c.decoded.reserve((size_t)batch * n * 8))) {
             err = "out of GPU memory for the buffers";
             oom = true;
             return GpuStatus::Failed;
         }
         memcpy(c.win.ptr<float>(), j.win, (size_t)n * 4);
-        FftGraph& g = c.graphs.get(n, batch);
-        MPSGraphTensorData* tin = [[MPSGraphTensorData alloc] initWithMTLBuffer:c.xin.buf shape:@[ @(batch), @(n) ]
-                                                                      dataType:MPSDataTypeComplexFloat32];
-        MPSGraphTensorData* tout = [[MPSGraphTensorData alloc] initWithMTLBuffer:c.xout.buf shape:@[ @(batch), @(n) ]
-                                                                       dataType:MPSDataTypeComplexFloat32];
         const float scale = j.norm / j.avg;
 
         for (int r0 = 0; r0 < j.rows; r0 += rowsPerGroup) {
@@ -423,24 +610,8 @@ GpuStatus gpuBackendSpectrogram(const SpecJob& j, float* lin, const std::functio
                     }
                 }
                 MPSCommandBuffer* cb = [MPSCommandBuffer commandBufferFromCommandQueue:c.queue];
-                id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
-                [e setBuffer:raw offset:0 atIndex:0];
-                [e setBuffer:c.offs.buf offset:0 atIndex:1];
-                [e setBuffer:c.valid.buf offset:0 atIndex:2];
-                [e setBuffer:c.win.buf offset:0 atIndex:3];
-                [e setBytes:&dp length:sizeof dp atIndex:4];
-                [e setBuffer:c.xin.buf offset:0 atIndex:5];
-                dispatch(e, pl.decodeWindow, (NSUInteger)m * n);
-                [e endEncoding];
-                // The batch may be larger than m; the extra transforms are ignored.
-                [g.graph encodeToCommandBuffer:cb feeds:@{g.in : tin} targetOperations:nil resultsDictionary:@{g.out : tout}
-                           executionDescriptor:nil];
-                AccParams ap{f0, f0 + m, r0, rowsHere, j.avg, log2n};
-                e = [cb computeCommandEncoder];
-                [e setBuffer:c.xout.buf offset:0 atIndex:0];
-                [e setBuffer:c.acc.buf offset:0 atIndex:1];
-                [e setBytes:&ap length:sizeof ap atIndex:2];
-                dispatch(e, pl.accumulate, (NSUInteger)rowsHere * n);
+                const AccParams ap{f0, f0 + m, r0, rowsHere, j.avg, log2n};
+                id<MTLComputeCommandEncoder> e = encodeFftSum(c, pl, cb, raw, dp, ap, n, m, g, tin, tout);
                 const bool groupDone = f0 + m >= gEnd;
                 if (groupDone) {
                     PoolParams pp{rowsHere, n, j.cols, scale};
@@ -458,12 +629,173 @@ GpuStatus gpuBackendSpectrogram(const SpecJob& j, float* lin, const std::functio
     }
     return GpuStatus::Ok;
 }
-GpuStatus gpuBackendChannelize(const ChanJob&, float*, const std::function<bool()>&, std::string&, bool&) {
-    return GpuStatus::Unavailable;
+// ---------------------------------------------------------------------------
+// Channel filter (dense demodulator, region export)
+// ---------------------------------------------------------------------------
+namespace {
+struct ChanContext {
+    id<MTLCommandQueue> queue = nil;
+    Shared x, y, h, decoded;
+};
+thread_local ChanContext t_chan;
+}  // namespace
+
+GpuStatus gpuBackendChannelize(const ChanJob& j, float* y, const std::function<bool()>& cancelled, std::string& err,
+                               bool& oom) {
+    @autoreleasepool {
+        Pipelines& pl = pipelines();
+        if (!pl.err.empty()) {
+            err = pl.err;
+            return GpuStatus::Failed;
+        }
+        ChanContext& c = t_chan;
+        if (!c.queue) c.queue = [g_device newCommandQueue];
+        const int N = j.taps, D = j.decim;
+        if (N < 1 || D < 1 || j.outLen < 1 || !c.queue) {
+            err = "bad channel filter job";
+            return GpuStatus::Failed;
+        }
+        const bool cf64 = j.fp.fmt == SampleFormat::CF64;
+        const int bps = formatBytesPerSample(j.fp.fmt);
+        const int64_t fileSamples = j.file->numSamples(j.fp);
+        const size_t page = (size_t)getpagesize();
+        const uint8_t* base = j.file->data();
+        const size_t mapped = (j.file->sizeBytes() + page - 1) / page * page;
+        // Outputs per chunk, so that its input ((J - 1) * D + N samples) fits.
+        const int64_t chunkOut = std::min<int64_t>(j.outLen, std::max<int64_t>(1, (kChunkSamples - N) / D + 1));
+        const int64_t chunkIn = (chunkOut - 1) * D + N;
+        if (!c.x.reserve((size_t)chunkIn * 8) || !c.y.reserve((size_t)chunkOut * 8) || !c.h.reserve((size_t)N * 4) ||
+            (cf64 && !c.decoded.reserve((size_t)chunkIn * 8))) {
+            err = "out of GPU memory for the buffers";
+            oom = true;
+            return GpuStatus::Failed;
+        }
+        memcpy(c.h.ptr<float>(), j.h, (size_t)N * 4);
+        const bool tapsShared = (NSUInteger)N * 4 <= g_device.maxThreadgroupMemoryLength;
+        // The phase increment in 2^-64 cycles: frac reduced to [0, 1), 52 bits kept.
+        const double f = j.frac - std::floor(j.frac);
+        const uint64_t inc = (uint64_t)std::llround(f * 4503599627370496.0) << 12;  // 2^52
+
+        for (int64_t j0 = 0; j0 < j.outLen; j0 += chunkOut) {
+            if (cancelled()) return GpuStatus::Cancelled;
+            const int64_t J = std::min(chunkOut, j.outLen - j0);
+            const int64_t in0 = j.inStart + j0 * D, len = (J - 1) * D + N;
+            const int64_t lo = std::max<int64_t>(0, -in0), hi = std::max(lo, std::min<int64_t>(len, fileSamples - in0));
+            DecodeParams dp{(int)j.fp.fmt, bps, j.fp.bigEndian, j.fp.swapIQ, 0, 0};
+            MixParams mp{lo, hi, len, (uint64_t)in0 * inc, inc, j.frac != 0.0};
+            id<MTLBuffer> raw;
+            NSUInteger rawOffset = 0;
+            if (cf64) {
+                // No double on the GPU: decode on the CPU (read() zero-fills outside the file).
+                j.file->read(j.fp, in0, len, c.decoded.ptr<std::complex<float>>());
+                raw = c.decoded.buf;
+                dp = DecodeParams{0, 8, 0, 0, 0, 0};
+                mp.lo = 0;
+                mp.hi = len;
+            } else if (hi > lo) {
+                // Wrap the mapped pages of the samples inside the file; the GPU reads them in place.
+                const size_t first = (size_t)j.fp.headerBytes + (size_t)(in0 + lo) * bps;
+                const size_t b0 = first / page * page;
+                const size_t b1 = std::min(mapped, ((size_t)j.fp.headerBytes + (size_t)(in0 + hi) * bps + page - 1) / page * page);
+                raw = [g_device newBufferWithBytesNoCopy:(void*)(base + b0) length:std::max(b1 - b0, page)
+                                                 options:MTLResourceStorageModeShared deallocator:nil];
+                if (!raw) {
+                    err = "cannot map the file for the GPU";
+                    return GpuStatus::Failed;
+                }
+                rawOffset = (NSUInteger)(first - b0);  // sample lo of the chunk
+            } else {
+                raw = c.x.buf;  // nothing inside the file: decodeMix writes zeros and reads nothing
+                mp.lo = mp.hi = 0;
+            }
+            MPSCommandBuffer* cb = [MPSCommandBuffer commandBufferFromCommandQueue:c.queue];
+            id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
+            [e setBuffer:raw offset:rawOffset atIndex:0];
+            [e setBytes:&dp length:sizeof dp atIndex:1];
+            [e setBytes:&mp length:sizeof mp atIndex:2];
+            [e setBuffer:c.x.buf offset:0 atIndex:3];
+            dispatch(e, pl.decodeMix, (NSUInteger)len);
+            const FirParams fpar{N, D, J, tapsShared ? 1 : 0};
+            [e setBuffer:c.x.buf offset:0 atIndex:0];
+            [e setBuffer:c.h.buf offset:0 atIndex:1];
+            [e setBytes:&fpar length:sizeof fpar atIndex:2];
+            [e setBuffer:c.y.buf offset:0 atIndex:3];
+            [e setComputePipelineState:pl.fir];
+            [e setThreadgroupMemoryLength:tapsShared ? (((NSUInteger)N * 4 + 15) / 16 * 16) : 16 atIndex:0];
+            const NSUInteger tg = std::min<NSUInteger>(pl.fir.maxTotalThreadsPerThreadgroup, 256);
+            [e dispatchThreads:MTLSizeMake((NSUInteger)J, 1, 1) threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
+            [e endEncoding];
+            if (!finish(cb, err, oom)) return GpuStatus::Failed;
+            memcpy(y + 2 * j0, c.y.ptr<float>(), (size_t)J * 8);
+        }
+    }
+    return GpuStatus::Ok;
 }
-GpuLiveImpl* gpuBackendLiveCreate() { return nullptr; }
-void gpuBackendLiveDestroy(GpuLiveImpl*) {}
-GpuStatus gpuBackendLiveRun(GpuLiveImpl*, const uint8_t*, const FormatParams&, int, int, const float*, float*, std::string&,
-                            bool&) {
-    return GpuStatus::Unavailable;
+// ---------------------------------------------------------------------------
+// Live spectrum: one row of `frames` FFTs, summed into n powers
+// ---------------------------------------------------------------------------
+struct GpuLiveImpl {
+    SpecContext c;
+    Shared raw;
+};
+
+GpuLiveImpl* gpuBackendLiveCreate() { return new GpuLiveImpl; }
+void gpuBackendLiveDestroy(GpuLiveImpl* impl) { delete impl; }
+
+GpuStatus gpuBackendLiveRun(GpuLiveImpl* L, const uint8_t* raw, const FormatParams& fp, int n, int frames, const float* win,
+                            float* pw, std::string& err, bool& oom) {
+    if (@available(macOS 14.0, *)) {
+    } else {
+        return GpuStatus::Unavailable;
+    }
+    if (fp.fmt == SampleFormat::CF64) return GpuStatus::Unavailable;  // no double on the GPU; devices never give cf64
+    @autoreleasepool {
+        Pipelines& pl = pipelines();
+        if (!pl.err.empty()) {
+            err = pl.err;
+            return GpuStatus::Failed;
+        }
+        SpecContext& c = L->c;
+        if (!c.queue) c.queue = [g_device newCommandQueue];
+        const int log2n = log2Of(n), bps = formatBytesPerSample(fp.fmt);
+        if (log2n < 0 || frames < 1 || !c.queue) {
+            err = "bad live spectrum job";
+            return GpuStatus::Failed;
+        }
+        const int64_t maxFfts = std::max<int64_t>(1, kChunkSamples / n);
+        const int64_t chunk = std::min<int64_t>(frames, maxFfts);
+        const int batch = batchFor(chunk, maxFfts);
+        FftGraph* g = nullptr;
+        MPSGraphTensorData *tin = nil, *tout = nil;
+        if (!prepareFft(c, n, batch, g, tin, tout) || !c.acc.reserve((size_t)n * 4) ||
+            !L->raw.reserve((size_t)frames * n * bps)) {
+            err = "out of GPU memory for the buffers";
+            oom = true;
+            return GpuStatus::Failed;
+        }
+        memcpy(L->raw.ptr<uint8_t>(), raw, (size_t)frames * n * bps);
+        memcpy(c.win.ptr<float>(), win, (size_t)n * 4);
+        memset(c.acc.ptr<float>(), 0, (size_t)n * 4);
+        const DecodeParams dp{(int)fp.fmt, bps, fp.bigEndian, fp.swapIQ, log2n, 0};
+        for (int64_t f0 = 0; f0 < frames; f0 += chunk) {
+            const int m = (int)std::min<int64_t>(chunk, frames - f0);
+            int64_t* offs = c.offs.ptr<int64_t>();
+            int32_t* valid = c.valid.ptr<int32_t>();
+            for (int k = 0; k < m; ++k) {
+                offs[k] = (f0 + k) * n * bps;
+                valid[2 * k] = 0;
+                valid[2 * k + 1] = n;
+            }
+            DecodeParams d = dp;
+            d.m = m;
+            MPSCommandBuffer* cb = [MPSCommandBuffer commandBufferFromCommandQueue:c.queue];
+            // One "row" holding all the frames; this chunk adds frames [f0, f0 + m).
+            const AccParams ap{f0, f0 + m, 0, 1, frames, log2n};
+            id<MTLComputeCommandEncoder> e = encodeFftSum(c, pl, cb, L->raw.buf, d, ap, n, m, g, tin, tout);
+            [e endEncoding];
+            if (!finish(cb, err, oom)) return GpuStatus::Failed;
+        }
+        memcpy(pw, c.acc.ptr<float>(), (size_t)n * 4);
+    }
+    return GpuStatus::Ok;
 }
