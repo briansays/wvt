@@ -94,6 +94,9 @@ void App::pollSigGen() {
     if (tx_ && tx_->running()) {
         txStats_ = tx_->stats();
         if (!txStats_.error.empty()) stopTx("Transmitter stopped: " + txStats_.error);
+        else if (txStats_.finished)
+            stopTx("The chain finished after " + std::to_string(txStats_.chainPasses) +
+                   (txStats_.chainPasses == 1 ? " pass" : " passes") + ": transmitter stopped");  // (not an error)
     }
 }
 
@@ -189,17 +192,22 @@ void App::drawSigGenWindow() {
         sgCheck_ = checkParams(sg_);
         // A recording is published only once it's loaded (the preview worker loads it), so the
         // streaming outputs pick it up from the cache instead of stalling on the disk.
-        sgReady_ = sgCheck_.ok() && (sg_.mode != GenMode::Playback || cachedPlayback(sg_));
+        int loaded = 0;
+        sgReady_ = sgCheck_.ok() && (sg_.mode != GenMode::Playback || cachedPlayback(sg_)) &&
+                   (sg_.mode != GenMode::Chain || chainLoaded(&loaded));
         const bool playErr = sgCheck_.ok() && !sgReady_ && sgPrev_ && sgPrev_->req.p == sg_ && !sgPrev_->error.empty();
         ImGui::PushTextWrapPos(0);
         for (const auto& e : sgCheck_.errors) ImGui::TextColored(kColErr, "%s", e.c_str());
-        if (playErr) ImGui::TextColored(kColErr, "Recording: %s", sgPrev_->error.c_str());
+        if (playErr) ImGui::TextColored(kColErr, "%s: %s", sg_.mode == GenMode::Chain ? "Chain" : "Recording", sgPrev_->error.c_str());
         for (const auto& w : sgCheck_.warnings) ImGui::TextColored(kColWarn, "%s", w.c_str());
         if (!sgReady_ && (txOn || sigGenLoopback()) && (!sgCheck_.ok() || playErr))
             ImGui::TextColored(kColErr, "Not applied: the output keeps the last valid settings.");
         if (sgCheck_.ok()) {
             ImGui::TextDisabled("%s", describeParams(sg_).c_str());
-            if (!sgReady_ && !playErr) ImGui::TextDisabled("Loading the recording...");
+            if (!sgReady_ && !playErr) {
+                if (sg_.mode == GenMode::Chain) ImGui::TextDisabled("Loading the chain (%d of %d)...", loaded, (int)sg_.chain.size());
+                else ImGui::TextDisabled("Loading the recording...");
+            }
             if (sgReady_) sigGenBus().publish(sg_);
             sgPrevWorker_->submit({sg_, sgPrevTrain_ && sg_.mode == GenMode::Pulsed});
         }
@@ -251,21 +259,25 @@ void App::drawSigGenWaveform() {
         tooltipAlways("RF center frequency: the transmit tuning and the file's frequency.\n"
                       "The signal itself sits at center + offset.");
 
+        const bool chain = p.mode == GenMode::Chain;
         const bool fSweep = p.mode == GenMode::CW && p.fSweep != SweepShape::Off;
         const bool aSweep = p.mode == GenMode::CW && p.aSweep != SweepShape::Off;
         row("Offset");
-        ImGui::BeginDisabled(fSweep);
+        ImGui::BeginDisabled(fSweep || chain);
         InputSI("##sgoff", &p.offset, "Hz", -FLT_MIN);
         ImGui::EndDisabled();
-        tooltipAlways(fSweep ? "The frequency sweep sets the frequency (CW section)"
-                             : "Carrier offset from the center frequency, inside +-rate/2.\n"
-                               "A non-zero offset keeps the signal away from the USRP's LO leakage at the center.");
+        tooltipAlways(chain    ? "Each chain item has its own offset (Chain section)"
+                      : fSweep ? "The frequency sweep sets the frequency (CW section)"
+                               : "Carrier offset from the center frequency, inside +-rate/2.\n"
+                                 "A non-zero offset keeps the signal away from the USRP's LO leakage at the center.");
 
         row("Amplitude");
-        ImGui::BeginDisabled(aSweep);
+        ImGui::BeginDisabled(aSweep || chain);
         ImGui::InputDouble("##sgamp", &p.ampDb, 1, 6, "%.1f dBFS");
         ImGui::EndDisabled();
-        tooltipAlways(aSweep ? "The level sweep sets the amplitude (CW section)" : "Peak amplitude relative to full scale (0 dBFS)");
+        tooltipAlways(chain    ? "Each chain item has its own level (Chain section)"
+                      : aSweep ? "The level sweep sets the amplitude (CW section)"
+                               : "Peak amplitude relative to full scale (0 dBFS)");
 
         row("Start phase");
         ImGui::InputDouble("##sgph", &p.phaseDeg, 15, 90, "%.1f deg");
@@ -278,6 +290,10 @@ void App::drawSigGenWaveform() {
         ImGui::SameLine();
         ImGui::RadioButton("Playback", &mode, (int)GenMode::Playback);
         tooltipAlways("Playback: a canned waveform from a SigMF or raw IQ recording, e.g. one this generator wrote");
+        ImGui::SameLine();
+        ImGui::RadioButton("Chain", &mode, (int)GenMode::Chain);
+        tooltipAlways("Chain: several recordings played in turn, each with its own offset, level, plays and gap,\n"
+                      "looped forever or a set number of times");
         p.mode = (GenMode)mode;
         ImGui::EndTable();
     }
@@ -338,6 +354,8 @@ void App::drawSigGenWaveform() {
         }
     } else if (p.mode == GenMode::Playback) {
         drawSigGenPlayback();
+    } else if (p.mode == GenMode::Chain) {
+        drawSigGenChain();
     } else {
         if (ImGui::CollapsingHeader("Pulse", ImGuiTreeNodeFlags_DefaultOpen) && beginForm("##sgpulse", 8.5f)) {
             row("PRI / PRF", "Pulse repetition interval, or its inverse, the repetition frequency");
@@ -629,6 +647,8 @@ void App::drawSigGenPreview() {
 
     if (!r->sweepF.empty()) {
         drawSweepPreview(*r);
+    } else if (r->req.p.mode == GenMode::Chain) {
+        drawChainPreview(*r);
     } else if (ImPlot::BeginPlot("##sgtime", ImVec2(-1, fs * 9), ImPlotFlags_NoMenus)) {
         ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
         ImPlot::SetupAxisFormat(ImAxis_X1, formatValueSI, (void*)kUnitS);
@@ -721,6 +741,7 @@ void App::drawSigGenFile() {
             ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6);
             const char* bys[] = {"Duration", sg_.mode == GenMode::Pulsed ? "Pulses"
                                              : sg_.mode == GenMode::CW   ? "Sweeps"
+                                             : sg_.mode == GenMode::Chain ? "Passes"
                                              : playOnce                  ? "One play"
                                                                          : "Repeats"};
             if (ImGui::Combo("##sgby", &by, bys, 2)) sgByPulses_ = by == 1;
@@ -743,8 +764,10 @@ void App::drawSigGenFile() {
         }
         if (counted && c.rec.sigmf) {
             row("Annotations");
-            ImGui::Checkbox(("Mark each " + std::string(eventName(sg_)) + "##sgann").c_str(), &c.annotatePulses);
-            tooltipAlways("Adds a SigMF annotation (start and length) for every pulse, sweep or play of the recording, up to 10000.");
+            ImGui::Checkbox(("Mark each " + std::string(sg_.mode == GenMode::Chain ? "item" : eventName(sg_)) + "##sgann").c_str(),
+                            &c.annotatePulses);
+            tooltipAlways("Adds a SigMF annotation (start and length) for every pulse, sweep, play of the recording\n"
+                          "or chain item, up to 10000.");
         }
         ImGui::EndTable();
     }
@@ -752,7 +775,13 @@ void App::drawSigGenFile() {
 
     const bool byPulses = sgByPulses_ && counted;
     double secs = c.seconds;
-    if (byPulses && sg_.mode == GenMode::CW) {
+    const double pass = sgPrev_ && sgPrev_->req.p.chain == sg_.chain ? sgPrev_->passSeconds : 0;
+    if (sg_.mode == GenMode::Chain) {
+        const int64_t passes = byPulses ? std::max<int64_t>(1, c.pulses) : 0;
+        const int64_t limit = sg_.chainLoops > 0 ? (passes ? std::min<int64_t>(passes, sg_.chainLoops) : sg_.chainLoops) : passes;
+        secs = limit ? sg_.startDelay + (double)limit * pass : c.seconds;
+        if (!byPulses) secs = std::min(secs, c.seconds);
+    } else if (byPulses && sg_.mode == GenMode::CW) {
         secs = (double)std::max<int64_t>(1, c.pulses) * (double)sg_.sweepSamples() / sg_.rate;
     } else if (byPulses && sg_.mode == GenMode::Pulsed) {
         secs = (double)std::max<int64_t>(1, c.pulses) * sg_.meanPri() + sg_.startDelay;
@@ -813,6 +842,13 @@ void App::drawSigGenLoopback() {
         }
         ImGui::EndDisabled();
         tooltipAlways(liveRecording() ? "Stop the recording first" : "Stop streaming into the live view");
+        if (sg_.mode == GenMode::Chain) {
+            const int n = sigGenBus().chainPasses();
+            if (sigGenBus().chainFinished())
+                ImGui::TextDisabled("The chain finished after %d %s: the loopback is silent", n, n == 1 ? "pass" : "passes");
+            else if (n > 0)
+                ImGui::TextDisabled("Pass %d%s", n, sg_.chainLoops > 0 ? (" of " + std::to_string(sg_.chainLoops)).c_str() : "");
+        }
     } else {
         ImGui::BeginDisabled(!sgReady_ || liveRecording());
         if (ImGui::Button("Start loopback")) startLoopback();
@@ -891,6 +927,8 @@ void App::drawSigGenTx() {
         ImGui::Text("sent %s   underflows %lld   lost packets %lld", fmtSI((double)s.tx.sent, "S", 4).c_str(),
                     (long long)s.tx.underflows, (long long)s.tx.seqErrors);
         if (!s.notes.empty()) ImGui::TextColored(kColWarn, "%s", s.notes.c_str());
+        if (sg_.mode == GenMode::Chain && s.chainPasses > 0)
+            ImGui::Text("Pass %d%s", s.chainPasses, sg_.chainLoops > 0 ? (" of " + std::to_string(sg_.chainLoops)).c_str() : "");
         if (!sgReady_) ImGui::TextColored(kColWarn, "Still transmitting the last valid settings.");
     }
 

@@ -1,6 +1,6 @@
 # Signal generator: chain playback (issue #27)
 
-Status: plan (2026-10-20), decisions in §7. Not started.
+Status: implemented (2026-10-20) on `27-siggen-chain`; decisions in §7, notes in §8.
 
 ## 1. Goal
 
@@ -146,7 +146,7 @@ int chainLoops = 0;                  // 0 = forever
 - **CLI:**
   ```
   --chain FILE.wvtchain.json       open the chain (implies Chain mode)
-  --chain-add PATH[@OFFSET][xN]    add an item (repeatable), e.g. b13.sigmf-meta@250k x3
+  --chain-add PATH[@OFFSET][:N]    add an item (repeatable), e.g. b13.sigmf-meta@250k:3
   --chain-loops N                  0 = forever (default)
   ```
   - This works with `--gen-out` (with `--gen-pulses N` for N passes), with `--tx` and with the
@@ -223,3 +223,60 @@ int chainLoops = 0;                  // 0 = forever
 3. The USRP stops transmitting when a finite chain ends.
 4. Chains can be saved and loaded as `.wvtchain.json`, with a small JSON reader.
 5. Items are preloaded with a 1 GiB budget. Streaming from disk is left for later.
+
+## 8. Implementation notes (2026-10-20)
+
+The branch starts from `28-siggen-sweep` (PR #30): both change the generator's files.
+
+**Files**
+
+| File | Change |
+|---|---|
+| `src/siggen.h/.cpp` | `ChainItem`, `GenMode::Chain`, the chain fields, checks, description, metadata; `chainItemParams`, `makeChainItem`, `saveChain` / `loadChain`; the generator's chain schedule, per-item offset and gain, `chainPasses` / `endSample` / `finished`; the cache as a budgeted map (`kPlayCacheBudget`, `playbackCacheSamples`, `setPlaybackCacheBudget`); chain progress on `BusSigGen` and the bus |
+| `src/siggen_out.h/.cpp` | `preload()` for file and transmit; file length in passes, item annotations, the file ending with a finite chain; `TxEngine::Stats::finished`; the chain preview |
+| `src/json.h/.cpp` (new) | JSON reader and `jsonQuote` |
+| `src/app_chain.cpp` (new), `src/app.h` | the Chain section: table, row editor, add shortcuts, loop, chain file, totals; the preview with shaded items |
+| `src/app_siggen.cpp` | Chain mode, readiness and loading progress, Passes / Mark each item, chain status for loopback and transmit, the transmitter stopping at the end |
+| `src/main.cpp` | `--chain`, `--chain-add`, `--chain-loops`; the CLI transmitter stops at the end; the loopback device takes the generator's rate and center when -r / -c aren't given |
+| `tools/siggen_check.cpp` | 24 chain, cache and JSON checks |
+| `README.md` | Chain row and section, outputs, CLI, file table |
+
+**Differences from the plan**
+
+- `--chain-add` takes `PATH[@OFFSET][:N]` (`:3` for 3 plays) rather than `xN`, which ran into the
+  file extension.
+- "Repeats" is labelled **Plays** in the window.
+- Changing an item's plays or gap does not restart the chain; only the recordings themselves
+  (adding, removing, reordering, file, format, rate, segment) do. Before anything has played,
+  any change starts from the first item, so the start delay holds.
+- A finite chain ends after the last item's gap, so N loops last exactly N passes, the same as a
+  file of N passes.
+- A larger loop count revives a chain that has ended (or is ending), from where it would have
+  gone on.
+- The transmitter's stop at the end of the chain is a normal message ("The chain finished after N
+  passes"), not an error.
+- The noise for Playback now refers to the played peak (the amplitude), as for the other modes.
+  Before, it referred to the scaled recording, so the SNR was off by the recording's peak level.
+- With `--device siggen`, the loopback now listens at the generator's center and rate unless -c
+  and -r are given (this also helps `--play`).
+
+**Verification**
+
+- `siggen_check` passes, with the new checks:
+  - order, repeats and gaps to the sample;
+  - samples played unchanged "as recorded";
+  - a dBFS level and an offset per item;
+  - the parameter checks;
+  - 3 loops ending after the delay plus 3 passes, then silence;
+  - a larger loop count playing on;
+  - a reorder taking effect after the current item, and a level change at once;
+  - a 2-pass file with 8 item annotations, and a 1-loop file ending by itself;
+  - the bus stream reporting the end;
+  - the chain file round trip with relative paths, and a missing file;
+  - the cache budget dropping only unused waveforms;
+  - the JSON reader and quoting.
+- The other self-tests pass.
+- From the command line: a 2-loop chain of three generated files (one at 1 MS/s, resampled)
+  writes exactly 2 passes with one annotation per play, and a hand-written `.wvtchain.json` plays.
+- Screenshots under Xvfb: the window at 1600 and 1100 px with a 3-item chain, a selected row's
+  details, and the loopback live view showing a tone, a sweep and a tone looping at their offsets.
