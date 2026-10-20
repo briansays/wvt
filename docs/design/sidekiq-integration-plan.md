@@ -128,7 +128,7 @@ Expected limits (to check on hardware):
 | NV100 | ADRV9002 | 16 bits | about 61.44 MS/s |
 
 Rates above 20 MS/s need the GPU build for "FFT sees 100%" in live mode (see
-`docs/cuda-gpu-plan.md`). Rates above 100 MS/s are more than the GPU path analyzes. The
+`docs/design/cuda-gpu-plan.md`). Rates above 100 MS/s are more than the GPU path analyzes. The
 recorder must write at 4 bytes × rate. At 245.76 MS/s, that is about 1 GB/s. The README
 must tell the user to record to a fast NVMe disk, or to use a lower rate.
 

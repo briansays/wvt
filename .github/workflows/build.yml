@@ -1,5 +1,5 @@
 # Builds wvt on pushes to main and on pull requests (issue #3, step 3 of
-# docs/cuda-gpu-plan.md). Pushes to other branches build through their pull
+# docs/design/cuda-gpu-plan.md). Pushes to other branches build through their pull
 # request only, so each commit builds once; run it by hand with "Run workflow".
 # GitHub's runners have no GPU: the CUDA jobs only check that the GPU code
 # compiles and that a CUDA build runs on the CPU.
@@ -74,3 +74,16 @@ jobs:
           done
           ./build/wvt --list-devices
           if ./build/wvt --no-log-file --gpu on; then echo "--gpu on should fail without a GPU"; exit 1; fi
+
+  docs:
+    name: Documentation (Sphinx)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Sphinx
+        run: pip install -r docs/requirements.txt
+      - name: Build (warnings are errors)
+        run: sphinx-build -W --keep-going -b html docs build/docs

@@ -1,5 +1,5 @@
 // Region export window and waterfall selection (issue #18,
-// docs/region-export-plan.md): pick a time range and a band, check what will
+// docs/design/region-export-plan.md): pick a time range and a band, check what will
 // be written, and export it in the background.
 #include <algorithm>
 #include <cfloat>

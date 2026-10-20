@@ -1,5 +1,5 @@
 // CUDA GPU backend: device discovery and the file waterfall (spectrogram).
-// See docs/cuda-gpu-plan.md.
+// See docs/design/cuda-gpu-plan.md.
 #include <cuda_runtime.h>
 #include <cufft.h>
 
