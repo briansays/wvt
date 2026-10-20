@@ -2,8 +2,9 @@
 
 Branch: `21-apple-gpu`, from `main` at `dea9c20` (after the CUDA work, PR #20, and the
 region export, PR #22).
-Status: **plan only**. No code yet. The numbers in §2 come from throwaway prototypes in the
-session scratch folder; they are not in the repository.
+Status: **steps 0–6 implemented** (2026-10-20); step 7 (macOS CI) dropped. The GUI on screen
+is still to test (§11). The numbers in §2 come from throwaway prototypes in the session
+scratch folder; they are not in the repository.
 
 ## 1. Goal
 
@@ -201,3 +202,76 @@ VkFFT is the route to cover every vendor with one backend.
 4. **cf64:** decoded on the CPU, chunk by chunk.
 5. **macOS CI job:** skipped (step 7 is dropped).
 6. **AMD / Intel:** a separate issue, #24.
+
+## 11. Implementation notes
+
+### Change of plan: a hybrid FFT
+
+With MPSGraph for every FFT, the GPU waterfall was only **1.0–1.4×** the CPU per sample on the
+M5. The CPU had just become 2–2.4× faster with vDSP (step 1), and the MPSGraph pipeline moves
+each sample through memory four times: decode, FFT in, FFT out, sum. A prototype kernel that
+decodes, windows, transforms and squares one FFT in threadgroup memory ran at
+**4.1–4.5 GS/s** (2.5–3× the CPU), but only up to N 4096 (32 KB of threadgroup memory). The
+user chose the hybrid (2026-10-20):
+
+- **N ≤ 4096:** our one-pass kernel `fftPower` (radix-2 in threadgroup memory; the fftshifted
+  powers of each FFT go out), then `accumulatePower` sums them per row.
+- **N 8192–65536:** `decodeWindow`, the MPSGraph FFT and `accumulate`, in one command buffer.
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/dsp.h`, `src/dsp.cpp` | `FFT` uses vDSP on macOS (a split-complex scratch per thread). |
+| `src/gpu_metal.mm` | The Metal backend: device probe and list, the kernels (MSL source compiled at run time, safe math mode), no-copy buffers over the file mapping (up to 1 GB per chunk), the waterfall (hybrid), the live spectrum, the channel filter (64-bit fixed-point phase, taps in threadgroup memory up to 8192). cf64 is decoded on the CPU. |
+| `src/gpu.h`, `src/gpu_backend.h`, `src/gpu_common.cpp` | `GpuInfo::backend`; `gpuBackendName`, `gpuBackendImplements` (the jobs a backend runs), `GpuLimits` / `gpuBackendLimits` (budgets and the job sizes below which the CPU is faster). |
+| `src/gpu_cuda.cu`, `src/gpu_stub.cpp` | The new backend functions; CUDA keeps its limits. Neutral "built without GPU support". |
+| `src/engine.cpp`, `src/live.cpp` | The budgets and minimums come from `gpuLimits()`. |
+| `CMakeLists.txt` | `WVT_WITH_METAL`, `OBJCXX`, the frameworks; Accelerate for every target on macOS. |
+| `tools/gpu_check.cpp` | The FFT against a direct DFT; the backend name; why a comparison is skipped; the bench shows the GPU budget and minimum. |
+| `README.md` | The GPU section covers Metal; options and the file table. |
+
+### Limits for Metal (`gpuBackendLimits`)
+
+| Limit | Metal | CUDA | Reason |
+|---|---|---|---|
+| Waterfall budget | 512 MS | 2 GS | At about 2–3.6 GS/s, 512 MS takes about the time the CPU needs for its 256 MS. |
+| Waterfall minimum | 16 MS of FFT input | 0 | Below it the GPU is no faster (0.9–1.1×). |
+| Live rate | 100 MS/s | 100 MS/s | |
+| Live minimum | 128 k samples per row | 0 | A small row is as fast on one CPU core. |
+| Channel filter minimum | 2·10⁷ multiply-adds | 2·10⁷ | |
+
+### Results on the M5 (`gpu_check`, `gpu_check --bench`)
+
+- **Correctness**, GPU against CPU:
+  - waterfall: every format, big-endian, swapped I/Q, header, edges and long rows, within
+    0.0002 dB;
+  - live: within 0.0002 dB;
+  - channel filter: within 1.1e-6 of the peak (the limit is 1e-4).
+
+  Cancel and the forced failure work on all three paths.
+- **vDSP CPU FFT:** waterfall 2.0–2.4× faster than before, live row 2.3×.
+- **GPU waterfall:**
+  - N 1024 at 100× zoom: 39 ms against 61 ms on the CPU (1.6×), the same FFTs.
+  - N 8192 and 65536 (MPSGraph): 1.2–1.4× per sample. Wide views get more coverage for
+    about the same time.
+- **Live row**, N 2048: 0.72 / 1.76 / 2.86 ms on the GPU against 2.43 / 4.88 / 7.26 ms on one
+  CPU core, at 20 / 40 / 61.44 MS/s.
+- **Channel filter** (8 MS in, decimation 8, with the demodulation on the CPU): 1.8× (255
+  taps), 3.7× (2047), **6.2×** (8191).
+- **Acceptance (§7):**
+  - item 1 (`gpu_check` on the GPU), item 4 (fallback) and item 5 (OFF and Linux builds): met;
+  - item 3 (≥ 5× for 8191 taps): met;
+  - item 2 (≥ 3× at N 8192): **not met**. N 8192 uses MPSGraph, about 1.2×. A multi-pass FFT
+    of our own (the third option of decision 2) would be needed for that.
+
+### Checks
+
+- The macOS build has no warnings; all 6 self-tests pass.
+- `-DWVT_WITH_METAL=OFF`: builds the stub ("built without GPU support").
+- The CUDA 12.8 container build still compiles with no warnings, and its self-tests pass.
+
+### GUI: still to test on screen
+
+The status bar `GPU Apple M5`, the GPU checkbox, `(GPU)` in live mode (`--device sim` at a high
+rate), a region export with a band, and `WVT_GPU_FORCE_FAIL=1`.

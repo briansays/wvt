@@ -1133,7 +1133,7 @@ void App::drawStatusBar() {
 }
 
 // "GPU <model>" or "CPU": where the waterfall (file) or the live spectrum
-// was computed. Empty in a build without CUDA, so those builds look as before.
+// was computed. Empty in a build without a GPU backend, so those builds look as before.
 std::string App::gpuTag(bool live) const {
     const GpuInfo& g = gpuInfo();
     if (!g.built) return "";
