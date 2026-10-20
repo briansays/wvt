@@ -359,9 +359,10 @@ static void usage() {
         "      --offset HZ      carrier offset from the center (default 100k)\n"
         "      --amp DBFS       peak amplitude (default -6)\n"
         "      --drift HZ       CW frequency drift per second\n"
-        "      --sweep FROM:TO  CW frequency sweep, offsets from the center (e.g. -400k:400k)\n"
+        "      --sweep FROM:TO  frequency sweep, offsets from the center (e.g. -400k:400k); CW or,\n"
+        "                       with --gen pulsed, pulse to pulse\n"
         "      --sweep-shape up|down|tri   --sweep-step HZ:DWELL (stepped)   --sweep-time S (period)\n"
-        "      --level-sweep FROM:TO   CW level sweep in dBFS over the same period\n"
+        "      --level-sweep FROM:TO   level sweep in dBFS over the same period (CW or pulsed)\n"
         "      --level-shape up|down|tri   (sweeps repeat until stopped)\n"
         "      --pri S | --prf HZ   pulse repetition interval / frequency\n"
         "      --pw S           pulse width, edges included\n"
@@ -722,8 +723,8 @@ int main(int argc, char** argv) {
     scale = std::clamp(scale, 0.5f, 4.f);
     if (ov.haveFc) gp.fc = txc.fc = ov.fc;
     if (ov.haveRate) gp.rate = ov.rate;
-    if (haveSweep && gp.mode != GenMode::CW) {
-        LOG_ERROR("main", "the sweep options need --gen cw");
+    if (haveSweep && gp.mode != GenMode::CW && gp.mode != GenMode::Pulsed) {
+        LOG_ERROR("main", "the sweep options need --gen cw or --gen pulsed");
         return 2;
     }
     if (!playFile.empty()) {

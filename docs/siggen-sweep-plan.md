@@ -1,6 +1,6 @@
 # Signal generator: frequency and amplitude sweep (issue #28)
 
-Status: implemented (2026-10-20) on `28-siggen-sweep`; decisions in §6, notes in §7.
+Status: implemented (2026-10-20) on `28-siggen-sweep`; decisions in §6, notes in §7, pulsed sweeps in §8.
 
 ## 1. Goal
 
@@ -127,8 +127,7 @@ double aFrom = -40, aTo = -6;        // dBFS, over the same period
   transients make it a separate job.
 - **Log sweeps.** The band is at most a few tens of MHz, so linear covers the practical cases.
   `SweepShape` leaves room to add it.
-- **Level sweeps on pulsed and playback signals** (for example antenna scan modulation). The level
-  code is written so it could be shared later.
+- **Sweeps on playback signals.** (Pulsed sweeps were added later: §8.)
 
 ## 4. Steps
 
@@ -205,3 +204,58 @@ Answered in §6.
 - The other self-tests (audio, log, segment, gpu, extract) pass.
 - Screenshots under Xvfb: the window at 1600 and 1100 px (triangle, stepped, level ramp), and the
   loopback live view showing a 2 s ramp with a level triangle in the waterfall.
+
+## 8. Pulsed sweeps (2026-10-20)
+
+The user asked for the same frequency and level sweeps in pulsed mode.
+
+**Design**
+
+- Each pulse takes the sweep's frequency and level at the sample where it starts, and keeps them
+  for the whole pulse. The pulse shape, the edges and any chirp or Barker code stay intact.
+- This models pulse-to-pulse frequency agility, stepped-frequency trains and scan-like amplitude
+  modulation. A continuously swept carrier under each pulse would instead add a small chirp to
+  every pulse.
+- The sweep clock runs on samples, independently of the PRI schedule (`sweepT0_`), so stagger,
+  jitter and bursts sample the sweep where their pulses fall.
+- Between pulses the carrier keeps the last pulse's frequency, so the phase stays continuous.
+- The events are still pulses: the file length counts pulses, and the annotations mark pulses.
+- The settings, CLI options (`--sweep...` now also work with `--gen pulsed`), the description and
+  the metadata are shared with CW. The metadata's `sweep` object adds `"per_pulse": true`.
+
+**Checks**
+
+- The swept frequency plus half a chirp must stay inside the band; past the edge it warns, as a
+  plain chirp does.
+- It warns when the sweep period is shorter than two PRIs.
+- It warns when a stepped sweep's dwell is shorter than the PRI, because then some steps get no
+  pulse.
+
+**Window**
+
+- The Pulse section is followed by a **Sweep** section with the same rows as CW
+  (`drawSweepRows`). It opens by itself when a sweep is on.
+- The preview shows the sweep curves above the one-pulse or pulse-train plot.
+- The spectrum is a max-hold of blocks spread over the period, with a pulse centred in each block
+  (`seekSweep(k, pulseIn)`).
+
+**Also**
+
+- The noise reference (`noiseAmp_`) is now separate from the carrier gain, so noise doesn't follow
+  the level of each pulse. With a level sweep it refers to the sweep's peak.
+- As a side effect, Playback's noise now refers to its played peak (the amplitude), not to the
+  scaled recording.
+
+**Verification**
+
+- `siggen_check` has 8 new checks:
+  - each pulse's frequency and level match the sweep at its start (within 0.001 Hz and 1e-6 dB);
+  - silence between pulses;
+  - a stepped sweep with 3 pulses per step;
+  - a chirp centred on the swept frequency;
+  - the short-period warning;
+  - the description and metadata;
+  - the preview's max-hold covering the band.
+- All self-tests pass.
+- Screenshots: the Pulsed window with a stepped frequency sweep and a triangle level sweep, and
+  the loopback showing a pulse train sweeping in triangle with a rising level.

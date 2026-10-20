@@ -337,7 +337,7 @@ The window floats over the main window. It works in File mode and in Device mode
 |---|---|
 | Carrier | sample rate, center frequency, offset from center, peak amplitude (dBFS), start phase |
 | CW | a steady tone, with an optional drift (Hz/s). Retuning keeps the phase continuous |
-| Sweeps | CW only. A frequency sweep (ramp up, ramp down, triangle, or stepped with a step and dwell) between two offsets, and a level sweep (ramp or triangle, linear in dB) between two dBFS levels. Both share one period and repeat until the output stops |
+| Sweeps | CW and pulsed. A frequency sweep (ramp up, ramp down, triangle, or stepped with a step and dwell) between two offsets, and a level sweep (ramp or triangle, linear in dB) between two dBFS levels. Both share one period and repeat until the output stops |
 | Pulsed | PRI or PRF, pulse width or duty cycle (the width includes the edges) |
 | Edges | rectangular, linear, raised cosine or Gaussian, with separate rise and fall times |
 | PRI pattern | fixed, stagger (a list of PRIs used in turn), or jitter (+-%, repeatable with a seed) |
@@ -354,9 +354,12 @@ spectrum. For a sweep it shows the frequency and the level over one period, and 
 of the swept band.
 
 **Sweeps.** While the frequency sweeps, it replaces the Offset (and the Drift). While the level
-sweeps, it replaces the Amplitude. The phase stays continuous through the wraps and the steps.
-Changing a sweep setting while an output runs starts the period again. Noise (SNR) is set from the
-peak of the level sweep.
+sweeps, it replaces the Amplitude. A CW tone follows the sweep continuously, and its phase stays
+continuous through the wraps and the steps. In pulsed mode (the **Sweep** section under Pulse),
+each pulse takes the frequency and level the sweep has when the pulse starts and keeps them for the
+whole pulse: pulse-to-pulse frequency agility, stepped-frequency trains, or scan-like amplitude
+modulation. A chirp or Barker code is centred on the swept frequency. Changing a sweep setting
+while an output runs starts the period again. Noise (SNR) is set from the peak of the level sweep.
 
 **Playback** plays a recording. The recording can be a file from the generator, a wvt recording,
 or any SigMF or raw IQ capture. **Load** reads the format, rate and frequency from the SigMF
@@ -416,6 +419,7 @@ wvt --device siggen --gen cw --offset 250k -c 915M -r 2M                        
 wvt --device siggen --sweep -400k:400k --sweep-shape tri --sweep-time 2 -c 915M -r 2M  # sweep, loopback
 wvt --sweep -1M:1M --sweep-time 10m --level-sweep -40:-6 -r 5M -c 915M --gen-out ~/caps/sw --gen-pulses 20
 wvt --sweep -200k:200k --sweep-step 25k:5m -r 1M -c 915M --tx --tx-gain 10        # stepped, transmit
+wvt --gen pulsed --pri 1m --pw 20u --sweep -2M:2M --sweep-step 500k:10m --level-sweep -30:-6 -r 10M -c 915M  # agile pulses
 wvt --gen cw --offset 100k -c 915M -r 1M --tx --tx-gain 10 --gen-duration 5         # transmit 5 s
 wvt --play ~/caps/b13_*.sigmf-meta --play-gap 5m --gen-out ~/caps/b13x10 --gen-pulses 10  # 10 plays
 wvt --play capture.cs16 --play-rate 2.4M -r 10M -c 915M --play-segment 1.5:0.2 --tx    # replay a burst

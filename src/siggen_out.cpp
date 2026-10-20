@@ -247,17 +247,20 @@ std::shared_ptr<SigPreviewRes> computeSigPreview(const SigPreviewReq& r, const C
     }
 
     // --- time domain ---
-    int64_t n = 0;
     if (p.sweeping()) {
         // One period of the sweep, from the parameters: a long sweep costs nothing.
         const int64_t P = p.sweepSamples();
         const int pts = (int)std::min<int64_t>(P, kMaxPoints);
         for (int j = 0; j <= pts; ++j) {
             const int64_t k = std::min(P - 1, (int64_t)((double)j * (double)P / pts));
-            res->t.push_back((double)k / rate);
+            res->sweepT.push_back((double)k / rate);
             res->sweepF.push_back(p.fc + p.sweepOffsetAt(k));
             res->sweepDb.push_back(p.sweepLevelAt(k));
         }
+    }
+    int64_t n = 0;
+    if (p.mode == GenMode::CW && p.sweeping()) {
+        // (a CW sweep shows only its curves)
     } else if (p.mode == GenMode::CW) {
         n = p.offset != 0 ? std::llround(10 * rate / std::fabs(p.offset)) : 1024;  // about 10 cycles
         n = std::clamp<int64_t>(n, 64, 4096);
@@ -329,7 +332,8 @@ std::shared_ptr<SigPreviewRes> computeSigPreview(const SigPreviewReq& r, const C
     SigGen g(p);
     for (int s = 0; s < segs; ++s) {
         if (cancelled()) return nullptr;
-        if (hold) g.seekSweep((int64_t)((double)s * (double)p.sweepSamples() / segs));
+        // (Pulsed: a pulse in the middle of each block, at that point of the sweep.)
+        if (hold) g.seekSweep((int64_t)((double)s * (double)p.sweepSamples() / segs), nfft / 2 - std::llround(p.pw * rate) / 2);
         g.generate(seg.data(), nfft);
         for (int k = 0; k < nfft; ++k) seg[k] *= win[k];
         fft->forward(seg.data());

@@ -138,6 +138,7 @@ private:
     void drawSigGenWaveform();
     void drawSigGenPreview();
     void drawSweepPreview(const SigPreviewRes& r);
+    void drawSweepRows(WaveformParams& p);
     void drawSigGenFile();
     void drawSigGenLoopback();
     void drawSigGenTx();

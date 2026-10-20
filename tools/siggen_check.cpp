@@ -803,6 +803,84 @@ int main(int argc, char** argv) {
               "preview: the max-hold spectrum covers the swept band", fmt("%g of %g bins", lit, inside));
     }
 
+    // --- Pulsed sweeps: each pulse takes the sweep's frequency and level at its start ---
+    {
+        WaveformParams p;
+        p.mode = GenMode::Pulsed;
+        p.rate = 2e6;
+        p.pri = 100e-6;  // 200 samples
+        p.pw = 20e-6;    // 40 samples
+        p.fSweep = SweepShape::RampUp;
+        p.fFrom = -400e3;
+        p.fTo = 400e3;
+        p.sweepPeriod = 1e-3;  // 2000 samples: 10 pulses per sweep
+        p.aSweep = SweepShape::RampUp;
+        p.aFrom = -30;
+        p.aTo = -6;
+        check(checkParams(p).ok(), "pulsed sweep is valid");
+        auto v = gen(p, 4000);
+        double fe = 0, le = 0;
+        for (int j = 0; j < 20; ++j) {
+            const size_t a = (size_t)(200 * j);
+            const int64_t k = (int64_t)(200 * j) % 2000;
+            fe = std::max(fe, std::fabs(meanFreq(v, a, a + 40, p.rate) - p.sweepOffsetAt(k)));
+            double pk = 0;
+            for (size_t i = a; i < a + 40; ++i) pk = std::max(pk, (double)std::abs(v[i]));
+            le = std::max(le, std::fabs(20 * std::log10(pk) - p.sweepLevelAt(k)));
+        }
+        check(fe < 1, "each pulse sits at the sweep's frequency when it starts", fmt("worst %.3g Hz", fe));
+        check(le < 0.01, "each pulse has the sweep's level when it starts", fmt("worst %.3g dB", le));
+        bool quiet = true;
+        for (int j = 0; j < 20; ++j)
+            for (size_t i = (size_t)(200 * j + 40); i < (size_t)(200 * j + 200); ++i) quiet &= std::abs(v[i]) == 0;
+        check(quiet, "pulsed sweep: silence between pulses");
+        // Stepped: 5 steps of 600 samples; pulses every 200 samples take 3 pulses per step.
+        p.aSweep = SweepShape::Off;
+        p.fSweep = SweepShape::Stepped;
+        p.fFrom = -200e3;
+        p.fTo = 200e3;
+        p.fStep = 100e3;
+        p.fDwell = 300e-6;
+        v = gen(p, 3000);
+        fe = 0;
+        for (int j = 0; j < 15; ++j)
+            fe = std::max(fe, std::fabs(meanFreq(v, (size_t)(200 * j), (size_t)(200 * j + 40), p.rate) - (-200e3 + 100e3 * (j / 3))));
+        check(fe < 1, "pulsed stepped sweep: 3 pulses per step", fmt("worst %.3g Hz", fe));
+        // A chirp centred on the swept frequency.
+        p.intra = IntraMod::LfmUp;
+        p.chirpBw = 200e3;
+        v = gen(p, 1400);
+        // Pulse 6 is on step 2 (0 Hz): the same as an unswept chirp at offset 0.
+        WaveformParams fixed = p;
+        fixed.fSweep = SweepShape::Off;
+        fixed.offset = 0;
+        const auto u = gen(fixed, 1400);
+        const double df = meanFreq(v, 1200, 1240, p.rate) - meanFreq(u, 1200, 1240, p.rate);
+        check(std::fabs(df) < 1, "a chirp is centred on the swept frequency", fmt("%.3g Hz apart", df));
+        p.intra = IntraMod::None;
+        WaveformParams c = p;
+        c.fSweep = SweepShape::RampUp;
+        c.sweepPeriod = 150e-6;
+        check(!checkParams(c).warnings.empty(), "warns when the sweep is shorter than two PRIs");
+        check(describeParams(p).find("stepped") != std::string::npos && paramsJson(p).find("\"per_pulse\": true") != std::string::npos,
+              "pulsed sweep description and metadata");
+        // Preview: the max-hold spectrum covers the swept band.
+        p.fSweep = SweepShape::Triangle;
+        p.fFrom = -400e3;
+        p.fTo = 400e3;
+        p.sweepPeriod = 0.2;
+        p.fc = 0;
+        auto pr = computeSigPreview({p, false}, [] { return false; });
+        int lit = 0, inside = 0;
+        for (size_t i = 0; pr && i < pr->f.size(); ++i)
+            if (std::fabs(pr->f[i]) < 380e3) {
+                ++inside;
+                lit += pr->db[i] > -70;
+            }
+        check(pr && pr->hold && !pr->sweepF.empty() && !pr->t.empty() && lit > inside * 0.9,
+              "pulsed sweep preview: the pulse, the sweep curves and a max-hold over the band", fmt("%g of %g bins", lit, inside));
+    }
+
     printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "all checks passed", failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;
 }

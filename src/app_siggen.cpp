@@ -251,13 +251,13 @@ void App::drawSigGenWaveform() {
         tooltipAlways("RF center frequency: the transmit tuning and the file's frequency.\n"
                       "The signal itself sits at center + offset.");
 
-        const bool fSweep = p.mode == GenMode::CW && p.fSweep != SweepShape::Off;
-        const bool aSweep = p.mode == GenMode::CW && p.aSweep != SweepShape::Off;
+        const bool fSweep = p.sweeping() && p.fSweep != SweepShape::Off;
+        const bool aSweep = p.sweeping() && p.aSweep != SweepShape::Off;
         row("Offset");
         ImGui::BeginDisabled(fSweep);
         InputSI("##sgoff", &p.offset, "Hz", -FLT_MIN);
         ImGui::EndDisabled();
-        tooltipAlways(fSweep ? "The frequency sweep sets the frequency (CW section)"
+        tooltipAlways(fSweep ? "The frequency sweep sets the frequency (Sweep rows)"
                              : "Carrier offset from the center frequency, inside +-rate/2.\n"
                                "A non-zero offset keeps the signal away from the USRP's LO leakage at the center.");
 
@@ -265,7 +265,7 @@ void App::drawSigGenWaveform() {
         ImGui::BeginDisabled(aSweep);
         ImGui::InputDouble("##sgamp", &p.ampDb, 1, 6, "%.1f dBFS");
         ImGui::EndDisabled();
-        tooltipAlways(aSweep ? "The level sweep sets the amplitude (CW section)" : "Peak amplitude relative to full scale (0 dBFS)");
+        tooltipAlways(aSweep ? "The level sweep sets the amplitude (Sweep rows)" : "Peak amplitude relative to full scale (0 dBFS)");
 
         row("Start phase");
         ImGui::InputDouble("##sgph", &p.phaseDeg, 15, 90, "%.1f deg");
@@ -284,50 +284,7 @@ void App::drawSigGenWaveform() {
 
     if (p.mode == GenMode::CW) {
         if (ImGui::CollapsingHeader("CW", ImGuiTreeNodeFlags_DefaultOpen) && beginForm("##sgcw", 8.5f)) {
-            const float half = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemInnerSpacing.x) / 2;
-            auto shapeCombo = [](const char* id, SweepShape& v, bool stepped) {
-                if (!ImGui::BeginCombo(id, sweepShapeName(v))) return;
-                for (int i = 0; i < (int)SweepShape::Count; ++i)
-                    if ((stepped || (SweepShape)i != SweepShape::Stepped) && ImGui::Selectable(sweepShapeName((SweepShape)i), (int)v == i))
-                        v = (SweepShape)i;
-                ImGui::EndCombo();
-            };
-            row("Freq sweep", "Ramp up: From to To, then again. Ramp down: To to From. Triangle: From to To and back.\n"
-                              "Stepped: From, From + step, ... up to To, each for one dwell. Repeats until the output stops.");
-            shapeCombo("##sgfsweep", p.fSweep, true);
-            if (p.fSweep != SweepShape::Off) {
-                row("From / to", "Sweep limits as offsets from the center frequency, inside +-rate/2");
-                InputSI("##sgffrom", &p.fFrom, "Hz", half);
-                ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
-                InputSI("##sgfto", &p.fTo, "Hz", -FLT_MIN);
-                if (p.fSweep == SweepShape::Stepped) {
-                    row("Step / dwell", "Frequency step, and how long each frequency is held");
-                    InputSI("##sgfstep", &p.fStep, "Hz", half);
-                    ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
-                    InputSI("##sgfdwell", &p.fDwell, "s", -FLT_MIN);
-                }
-            }
-            row("Level sweep", "Sweeps the amplitude in dB over the same period. Ramp up: From to To. Ramp down: To to From.\n"
-                               "Triangle: From to To and back.");
-            shapeCombo("##sgasweep", p.aSweep, false);
-            if (p.aSweep != SweepShape::Off) {
-                row("From / to", "Level limits, dBFS");
-                ImGui::SetNextItemWidth(half);
-                ImGui::InputDouble("##sgafrom", &p.aFrom, 0, 0, "%.1f dBFS");
-                ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
-                ImGui::SetNextItemWidth(-FLT_MIN);
-                ImGui::InputDouble("##sgato", &p.aTo, 0, 0, "%.1f dBFS");
-            }
-            if (p.sweeping()) {
-                row("Period", "The time of one sweep, shared by the frequency and level sweeps");
-                if (p.fSweep == SweepShape::Stepped) {
-                    ImGui::AlignTextToFramePadding();
-                    ImGui::TextDisabled("%s (%d steps x dwell)", fmtSI((double)p.sweepSamples() / p.rate, "s", 4).c_str(),
-                                        p.sweepSteps());
-                } else {
-                    InputSI("##sgsper", &p.sweepPeriod, "s", -FLT_MIN);
-                }
-            }
+            drawSweepRows(p);
             row("Drift");
             ImGui::BeginDisabled(p.fSweep != SweepShape::Off);
             InputSI("##sgdrift", &p.driftHzPerSec, "Hz/s", -FLT_MIN);
@@ -433,6 +390,11 @@ void App::drawSigGenWaveform() {
                 ImGui::TableSetColumnIndex(1);
                 ImGui::TextDisabled("time-bandwidth product %.4g", p.chirpBw * p.pw);
             }
+            ImGui::EndTable();
+        }
+        // Pulse-to-pulse frequency and level sweeps (frequency agility, scan modulation).
+        if (ImGui::CollapsingHeader("Sweep", p.sweeping() ? ImGuiTreeNodeFlags_DefaultOpen : 0) && beginForm("##sgpsweep", 8.5f)) {
+            drawSweepRows(p);
             ImGui::EndTable();
         }
     }
@@ -627,9 +589,8 @@ void App::drawSigGenPreview() {
     static const char* kUnitS = "s";
     static const char* kUnitHz = "Hz";
 
-    if (!r->sweepF.empty()) {
-        drawSweepPreview(*r);
-    } else if (ImPlot::BeginPlot("##sgtime", ImVec2(-1, fs * 9), ImPlotFlags_NoMenus)) {
+    if (!r->sweepF.empty()) drawSweepPreview(*r);
+    if (!r->t.empty() && ImPlot::BeginPlot("##sgtime", ImVec2(-1, fs * 9), ImPlotFlags_NoMenus)) {
         ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
         ImPlot::SetupAxisFormat(ImAxis_X1, formatValueSI, (void*)kUnitS);
         ImPlot::SetupLegend(ImPlotLocation_North, ImPlotLegendFlags_Horizontal | ImPlotLegendFlags_Outside);
@@ -660,7 +621,56 @@ void App::drawSigGenPreview() {
                         r->hold ? ", max-hold over the sweep" : "", stale ? "  (updating)" : "");
 }
 
-// One period of a CW sweep: the frequency (left axis) and the level (right axis).
+// The sweep rows of the CW and Pulse sections (inside their form table).
+void App::drawSweepRows(WaveformParams& p) {
+    const float half = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemInnerSpacing.x) / 2;
+    auto shapeCombo = [](const char* id, SweepShape& v, bool stepped) {
+        if (!ImGui::BeginCombo(id, sweepShapeName(v))) return;
+        for (int i = 0; i < (int)SweepShape::Count; ++i)
+            if ((stepped || (SweepShape)i != SweepShape::Stepped) && ImGui::Selectable(sweepShapeName((SweepShape)i), (int)v == i))
+                v = (SweepShape)i;
+        ImGui::EndCombo();
+    };
+    row("Freq sweep", "Ramp up: From to To, then again. Ramp down: To to From. Triangle: From to To and back.\n"
+                      "Stepped: From, From + step, ... up to To, each for one dwell. Repeats until the output stops.\n"
+                      "Pulsed: each pulse takes the frequency the sweep has when it starts.");
+    shapeCombo("##sgfsweep", p.fSweep, true);
+    if (p.fSweep != SweepShape::Off) {
+        row("From / to", "Sweep limits as offsets from the center frequency, inside +-rate/2");
+        InputSI("##sgffrom", &p.fFrom, "Hz", half);
+        ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+        InputSI("##sgfto", &p.fTo, "Hz", -FLT_MIN);
+        if (p.fSweep == SweepShape::Stepped) {
+            row("Step / dwell", "Frequency step, and how long each frequency is held");
+            InputSI("##sgfstep", &p.fStep, "Hz", half);
+            ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+            InputSI("##sgfdwell", &p.fDwell, "s", -FLT_MIN);
+        }
+    }
+    row("Level sweep", "Sweeps the amplitude in dB over the same period. Ramp up: From to To. Ramp down: To to From.\n"
+                       "Triangle: From to To and back. Pulsed: each pulse takes the level the sweep has when it starts.");
+    shapeCombo("##sgasweep", p.aSweep, false);
+    if (p.aSweep != SweepShape::Off) {
+        row("From / to", "Level limits, dBFS");
+        ImGui::SetNextItemWidth(half);
+        ImGui::InputDouble("##sgafrom", &p.aFrom, 0, 0, "%.1f dBFS");
+        ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::InputDouble("##sgato", &p.aTo, 0, 0, "%.1f dBFS");
+    }
+    if (p.sweeping()) {
+        row("Period", "The time of one sweep, shared by the frequency and level sweeps");
+        if (p.fSweep == SweepShape::Stepped) {
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextDisabled("%s (%d steps x dwell)", fmtSI((double)p.sweepSamples() / p.rate, "s", 4).c_str(),
+                                p.sweepSteps());
+        } else {
+            InputSI("##sgsper", &p.sweepPeriod, "s", -FLT_MIN);
+        }
+    }
+}
+
+// One period of a sweep: the frequency (left axis) and the level (right axis).
 void App::drawSweepPreview(const SigPreviewRes& r) {
     static const char* kUnitS = "s";
     static const char* kUnitHz = "Hz";
@@ -672,15 +682,15 @@ void App::drawSweepPreview(const SigPreviewRes& r) {
     if (fs) ImPlot::SetupAxisFormat(ImAxis_Y1, formatValueSI, (void*)kUnitHz);
     if (fs && as) ImPlot::SetupAxis(ImAxis_Y2, "dBFS", ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_Opposite);
     ImPlot::SetupLegend(ImPlotLocation_North, ImPlotLegendFlags_Horizontal | ImPlotLegendFlags_Outside);
-    const int n = (int)r.t.size();
+    const int n = (int)r.sweepT.size();
     if (fs) {
         ImPlot::SetNextLineStyle(kColI, 1.5f);
-        ImPlot::PlotLine("frequency", r.t.data(), r.sweepF.data(), n);
+        ImPlot::PlotLine("frequency", r.sweepT.data(), r.sweepF.data(), n);
     }
     if (as) {
         if (fs) ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
         ImPlot::SetNextLineStyle(kColEnv, 1.5f);
-        ImPlot::PlotLine("level", r.t.data(), r.sweepDb.data(), n);
+        ImPlot::PlotLine("level", r.sweepT.data(), r.sweepDb.data(), n);
     }
     ImPlot::EndPlot();
 }
