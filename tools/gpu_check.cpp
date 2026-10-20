@@ -155,7 +155,7 @@ void testSetup() {
     err.clear();
     check(gpuInit(GpuMode::Auto, -1, err), "auto always starts");
     const GpuInfo info = gpuInfo();
-    printf("  build: %s; GPU: %s\n", info.built ? "CUDA" : "no CUDA",
+    printf("  build: %s; GPU: %s\n", info.built ? info.backend.c_str() : "no GPU backend",
            info.available ? (info.name + ", " + info.version).c_str() : ("none, " + info.reason).c_str());
     check(info.available || !info.reason.empty(), "auto without a GPU gives the reason");
     check(gpuEnabled() == info.available, "auto: enabled when a GPU is usable");

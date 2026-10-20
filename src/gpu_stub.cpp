@@ -1,15 +1,17 @@
-// GPU backend for builds without CUDA: never available.
+// GPU backend for builds without CUDA or Metal: never available.
 #include "gpu_backend.h"
 
 bool gpuBackendBuilt() { return false; }
+const char* gpuBackendName() { return ""; }
+bool gpuBackendImplements(GpuJob) { return false; }
 
 void gpuBackendProbe(int, GpuInfo& info) {
     info.built = false;
     info.available = false;
-    info.reason = "built without CUDA";
+    info.reason = "built without GPU support";
 }
 
-std::vector<std::string> gpuBackendList() { return {"none (built without CUDA)"}; }
+std::vector<std::string> gpuBackendList() { return {"none (built without GPU support)"}; }
 
 GpuLiveImpl* gpuBackendLiveCreate() { return nullptr; }
 void gpuBackendLiveDestroy(GpuLiveImpl*) {}
