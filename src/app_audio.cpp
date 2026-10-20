@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "app.h"
+#include "ui_util.h"
 #include "log.h"
 #include "platform_x11.h"
 
@@ -25,27 +26,8 @@ double nowSec() {
     return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
-void tooltipAlways(const char* text) {
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("%s", text);
-}
 
-// Starts a "label | field" row in a two-column table; the field fills the column.
-void row(const char* label, const char* tip = nullptr) {
-    ImGui::TableNextRow();
-    ImGui::TableSetColumnIndex(0);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(label);
-    if (tip) tooltipAlways(tip);
-    ImGui::TableSetColumnIndex(1);
-    ImGui::SetNextItemWidth(-FLT_MIN);
-}
 
-bool beginForm(const char* id) {
-    if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingStretchProp)) return false;
-    ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 7.5f);
-    ImGui::TableSetupColumn("field", ImGuiTableColumnFlags_WidthStretch);
-    return true;
-}
 
 bool isFm(int mode) { return mode == (int)AudioMode::NFM || mode == (int)AudioMode::WFM; }
 
@@ -247,16 +229,8 @@ void App::playFrom(double t) {
 }
 
 // ---------------------------------------------------------------------------
-// Toolbar button & window
+// Window
 // ---------------------------------------------------------------------------
-void App::drawAudioButton() {
-    ImGui::SameLine();
-    const bool on = audio_ && audio_->running();
-    if (ImGui::Button(on ? "Audio *" : "Audio")) auOpen_ = !auOpen_;
-    tooltipAlways(on ? "Audio is playing. Click to open or close the audio window (Ctrl+D)."
-                     : "Open or close the audio window: demodulate and play a channel (Ctrl+D)");
-}
-
 void App::drawAudioWindow() {
     if (!auOpen_) return;
     const float fs = ImGui::GetFontSize();
@@ -329,7 +303,7 @@ void App::drawAudioWindow() {
 
     // --- demodulator ---
     ImGui::SeparatorText("Demodulator");
-    if (beginForm("##audem")) {
+    if (beginForm("##audem", 7.5f)) {
         row("Mode");
         if (ImGui::BeginCombo("##aumode", audioModeName((AudioMode)au_.mode))) {
             for (int i = 0; i < (int)AudioMode::Count; ++i)
@@ -389,7 +363,7 @@ void App::drawAudioWindow() {
 
     // --- output ---
     ImGui::SeparatorText("Output");
-    if (beginForm("##auout")) {
+    if (beginForm("##auout", 7.5f)) {
         row("Volume");
         ImGui::Checkbox("Mute", &auMute_);
         ImGui::SameLine();
@@ -436,7 +410,7 @@ void App::drawAudioWindow() {
 
     // --- WAV ---
     ImGui::SeparatorText("WAV (48 kHz, 16-bit mono)");
-    if (beginForm("##auwav")) {
+    if (beginForm("##auwav", 7.5f)) {
         row("File prefix", "Date, time, frequency and mode are added to the name");
         ImGui::InputText("##auprefix", auPrefix_, sizeof auPrefix_);
         ImGui::EndTable();

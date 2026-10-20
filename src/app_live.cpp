@@ -18,7 +18,11 @@ const ImVec4 kColErr(1.f, 0.42f, 0.36f, 1.f);
 const ImVec4 kColRec(1.f, 0.32f, 0.32f, 1.f);
 
 float fieldW(float chars) { return ImGui::GetFontSize() * chars * 0.55f + ImGui::GetStyle().FramePadding.x * 2; }
-float stepW(float chars) { return fieldW(chars) + 2 * (ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x); }
+// The colour scale's dB min and max fields, Auto and the options button
+float dbGroupW() {
+    const ImGuiStyle& st = ImGui::GetStyle();
+    return fieldW(5) * 2 + ImGui::GetFrameHeight() * 2 + st.ItemInnerSpacing.x * 5 + ImGui::CalcTextSize("Auto").x;
+}
 
 double nowSec() {
     return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -38,10 +42,6 @@ const char* driverName(const std::string& d) {
     return "Simulator";
 }
 
-// Tooltip that also shows over a disabled item.
-void tooltipAlways(const char* text) {
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("%s", text);
-}
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -49,8 +49,11 @@ void tooltipAlways(const char* text) {
 // ---------------------------------------------------------------------------
 bool App::liveRecording() const { return live_ && live_->recorder().active(); }
 
-void App::drawSourceSelector() {
-    label("Source", fieldW(8));
+// In the menu bar.
+void App::drawSourceSelector(float width) {
+    ImGui::TextDisabled("Source");
+    ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+    ImGui::SetNextItemWidth(width);
     int mode = liveMode_ ? 1 : 0;
     const char* names[] = {"File", "Device"};
     ImGui::BeginDisabled(liveRecording());
@@ -246,38 +249,45 @@ void App::drawDeviceToolbar() {
         }
     }
 
-    // --- driver-specific (these restart the stream) ---
+    // --- driver-specific, in the options popup (these restart the stream) ---
     bool restart = false;
-    ImGui::BeginDisabled(rec);
-    if (devCfg_.driver == "rtlsdr") {
-        flow(ImGui::GetFrameHeight() * 3.5f);
-        restart |= ImGui::Checkbox("Bias-T", &devCfg_.biasTee);
-        tooltipAlways("Sends 4.5 V up the antenna cable to power an LNA or active antenna.\nOnly enable it if your antenna side expects DC.");
-        label("Direct", fieldW(4));
-        const char* ds[] = {"Off", "I", "Q"};
-        restart |= ImGui::Combo("##ds", &devCfg_.directSampling, ds, 3);
-        tooltipAlways("Direct sampling for HF below 24 MHz. The RTL-SDR v3 uses the Q branch.");
-        label("PPM", stepW(4));
-        if (ImGui::InputInt("##ppm", &devCfg_.ppm)) {
-            devCfg_.ppm = std::clamp(devCfg_.ppm, -200, 200);
-            restart = true;
-        }
-        tooltipAlways("Frequency correction of the crystal (the RTL-SDR v3 TCXO is usually within 1-2 ppm)");
-    } else if (devCfg_.driver == "uhd") {
-        label("Antenna", fieldW(7));
-        if (ImGui::BeginCombo("##ant", antenna_[0] ? antenna_ : "RX2")) {
-            for (const char* a : {"RX2", "TX/RX"})
-                if (ImGui::Selectable(a, strcmp(a, antenna_) == 0)) {
-                    snprintf(antenna_, sizeof antenna_, "%s", a);
+    if (devCfg_.driver == "rtlsdr" || devCfg_.driver == "uhd") {
+        ImGui::SameLine(0, st.ItemInnerSpacing.x);
+        settingsButton("##devopts", devCfg_.driver == "rtlsdr" ? "Bias-T, direct sampling and frequency correction"
+                                                               : "Antenna and analog bandwidth");
+    }
+    if (ImGui::BeginPopup("##devopts")) {
+        ImGui::BeginDisabled(rec);
+        if (beginForm("##devform", 6.5f, 18)) {
+            if (devCfg_.driver == "rtlsdr") {
+                row("Bias-T", "Sends 4.5 V up the antenna cable to power an LNA or active antenna.\nOnly enable it if your antenna side expects DC.");
+                restart |= ImGui::Checkbox("##biast", &devCfg_.biasTee);
+                row("Direct", "Direct sampling for HF below 24 MHz. The RTL-SDR v3 uses the Q branch.");
+                const char* ds[] = {"Off", "I", "Q"};
+                restart |= ImGui::Combo("##ds", &devCfg_.directSampling, ds, 3);
+                row("PPM", "Frequency correction of the crystal (the RTL-SDR v3 TCXO is usually within 1-2 ppm)");
+                if (ImGui::InputInt("##ppm", &devCfg_.ppm)) {
+                    devCfg_.ppm = std::clamp(devCfg_.ppm, -200, 200);
                     restart = true;
                 }
-            ImGui::EndCombo();
+            } else if (devCfg_.driver == "uhd") {
+                row("Antenna");
+                if (ImGui::BeginCombo("##ant", antenna_[0] ? antenna_ : "RX2")) {
+                    for (const char* a : {"RX2", "TX/RX"})
+                        if (ImGui::Selectable(a, strcmp(a, antenna_) == 0)) {
+                            snprintf(antenna_, sizeof antenna_, "%s", a);
+                            restart = true;
+                        }
+                    ImGui::EndCombo();
+                }
+                row("Bandwidth", "Analog filter bandwidth, 200 kHz - 56 MHz. 0 = automatic (follows the sample rate).");
+                if (InputSI("##bw", &devCfg_.bandwidth, "Hz", ImGui::GetContentRegionAvail().x)) restart = true;
+            }
+            ImGui::EndTable();
         }
-        label("Bandwidth", fieldW(12));
-        if (InputSI("##bw", &devCfg_.bandwidth, "Hz", fieldW(12))) restart = true;
-        tooltipAlways("Analog filter bandwidth, 200 kHz - 56 MHz. 0 = automatic (follows the sample rate).");
+        ImGui::EndDisabled();
+        ImGui::EndPopup();
     }
-    ImGui::EndDisabled();
     if (restart && running) restartDevice();
 
     // --- start / stop ---
@@ -298,9 +308,7 @@ void App::drawDeviceToolbar() {
         ImGui::TextColored(kColErr, "%s", liveErr_.c_str());
     }
 
-    // --- row 2: recording ---
-    ImGui::Spacing();
-    flowBegin();
+    // --- recording (wraps to the next row when there is no room) ---
     drawRecordBar();
 }
 
@@ -308,43 +316,50 @@ void App::drawRecordBar() {
     const bool running = live_ && live_->running();
     const bool rec = liveRecording();
 
-    ImGui::BeginDisabled(rec);
-    label("Record to", fieldW(34));
-    ImGui::InputText("##recprefix", recPrefix_, sizeof recPrefix_);
-    tooltipAlways("Path prefix for recordings. Date, time, frequency and rate are appended,\ne.g. ~/wvt-recordings/wvt_20261016_142233_915.000MHz_2.4MSps.sigmf-data.\nMissing folders are created.");
-    label("Format", fieldW(7));
-    int fmt = recCfg_.sigmf ? 0 : 1;
-    const char* fmts[] = {"SigMF", "Raw"};
-    if (ImGui::Combo("##recfmt", &fmt, fmts, 2)) recCfg_.sigmf = fmt == 0;
-    tooltipAlways("SigMF: .sigmf-data + .sigmf-meta with rate, frequency, retunes and dropped-sample notes.\nRaw: bare samples; rate and frequency are in the file name.");
-    label("Samples", fieldW(12));
-    std::string native = "native";
-    if (running)
-        native += liveStats_.fmt == SampleFormat::CU8 ? " (cu8)" : liveStats_.fmt == SampleFormat::CF32 ? " (cf32)" : " (ci16)";
-    int smp = recCfg_.cf32 ? 1 : 0;
-    const char* smps[] = {native.c_str(), "cf32"};
-    if (ImGui::Combo("##recsmp", &smp, smps, 2)) recCfg_.cf32 = smp == 1;
-    tooltipAlways("native: exactly what the device sends (smallest, lossless).\ncf32: complex float32, 2-4x larger, for tools that only read float.");
-    label("Limit", fieldW(9));
-    InputSI("##reclim", &recCfg_.maxSeconds, "s", fieldW(9));
-    tooltipAlways("Stop recording after this long. 0 = no limit.");
-    ImGui::EndDisabled();
-
-    flow(ImGui::GetFrameHeight() * 5);
+    // Record / Stop, then the settings in the options popup.
+    flow(ImGui::CalcTextSize("Stop recording").x + ImGui::GetStyle().FramePadding.x * 2 + ImGui::GetFrameHeight() * 1.5f);
     if (!rec) {
         ImGui::BeginDisabled(!running);
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.55f, 0.12f, 0.12f, 1.f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.75f, 0.18f, 0.18f, 1.f));
-        if (ImGui::Button("Record")) {
+        if (redButton("Record")) {
             RecordConfig c = recCfg_;
             c.prefix = recPrefix_;
             startRecording(c);
         }
-        ImGui::PopStyleColor(2);
         ImGui::EndDisabled();
         tooltipAlways(running ? "Start recording the stream" : "Start a device first");
     } else if (ImGui::Button("Stop recording")) {
         live_->stopRecording();
+    }
+    ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+    settingsButton("##recopts", "Where and how to record: path, format, samples and time limit");
+    if (ImGui::BeginPopup("##recopts")) {
+        ImGui::BeginDisabled(rec);
+        if (beginForm("##recform", 5.5f, 30)) {
+            row("Record to", "Path prefix for recordings. Date, time, frequency and rate are appended,\ne.g. ~/wvt-recordings/wvt_20261016_142233_915.000MHz_2.4MSps.sigmf-data.\nMissing folders are created.");
+            ImGui::InputText("##recprefix", recPrefix_, sizeof recPrefix_);
+            row("Format", "SigMF: .sigmf-data + .sigmf-meta with rate, frequency, retunes and dropped-sample notes.\nRaw: bare samples; rate and frequency are in the file name.");
+            int fmt = recCfg_.sigmf ? 0 : 1;
+            const char* fmts[] = {"SigMF", "Raw"};
+            if (ImGui::Combo("##recfmt", &fmt, fmts, 2)) recCfg_.sigmf = fmt == 0;
+            row("Samples", "native: exactly what the device sends (smallest, lossless).\ncf32: complex float32, 2-4x larger, for tools that only read float.");
+            std::string native = "native";
+            if (running)
+                native += liveStats_.fmt == SampleFormat::CU8 ? " (cu8)" : liveStats_.fmt == SampleFormat::CF32 ? " (cf32)" : " (ci16)";
+            int smp = recCfg_.cf32 ? 1 : 0;
+            const char* smps[] = {native.c_str(), "cf32"};
+            if (ImGui::Combo("##recsmp", &smp, smps, 2)) recCfg_.cf32 = smp == 1;
+            row("Limit", "Stop recording after this long. 0 = no limit.");
+            InputSI("##reclim", &recCfg_.maxSeconds, "s", ImGui::GetContentRegionAvail().x);
+            ImGui::EndTable();
+        }
+        ImGui::EndDisabled();
+        ImGui::EndPopup();
+    }
+    if (!rec) {
+        std::string where = std::string(recPrefix_) + (recCfg_.sigmf ? " (SigMF" : " (raw") + (recCfg_.cf32 ? ", cf32)" : ")");
+        flow(ImGui::CalcTextSize(where.c_str()).x);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextDisabled("%s", where.c_str());
     }
 
     const Recorder::Status rs = live_ ? live_->recorder().status() : Recorder::Status{};
@@ -526,6 +541,7 @@ float App::liveValueAt(double ago, double f) const {
 // Spectrum + scrolling waterfall
 // ---------------------------------------------------------------------------
 void App::drawLiveLeft() {
+    // The main settings on the row, the rest in the options popup.
     flowBegin();
     label("FFT", fieldW(7));
     char nf[16];
@@ -544,53 +560,53 @@ void App::drawLiveLeft() {
             if (ImGui::Selectable(windowName((WindowType)i), i == liveParams_.window)) liveParams_.window = i;
         ImGui::EndCombo();
     }
-    label("Avg", fieldW(8));
-    ImGui::SliderInt("##lavg", &liveParams_.avg, 0, 64, liveParams_.avg == 0 ? "auto" : "%d");
-    ImGui::SetItemTooltip("FFTs averaged into each waterfall row.\nauto: all samples since the previous row (up to 20 MS/s,\nor 100 MS/s on the GPU), so nothing is missed at RTL-SDR rates. Lower values show short bursts more sharply.");
-    label("Rows/s", stepW(4));
-    if (ImGui::InputDouble("##lrps", &liveParams_.rowsPerSec, 5, 10, "%.0f"))
-        liveParams_.rowsPerSec = std::clamp(liveParams_.rowsPerSec, 1.0, 100.0);
-    ImGui::SetItemTooltip("Waterfall scroll speed (rows per second)");
-    label("History", stepW(5));
-    if (ImGui::InputInt("##lhist", &liveHistory_, 100, 500)) liveHistory_ = std::clamp(liveHistory_, 64, 4096);
-    ImGui::SetItemTooltip("Waterfall rows kept");
-    label("Cols", stepW(5));
-    if (ImGui::InputInt("##lcols", &liveParams_.maxCols, 256, 1024))
-        liveParams_.maxCols = std::clamp(liveParams_.maxCols, 64, 8192);
-    ImGui::SetItemTooltip("Maximum waterfall columns; FFT bins beyond this are max-pooled");
-    drawGpuCheckbox();
-    label("Spec avg", stepW(4));
-    if (ImGui::InputInt("##lsavg", &specAvgRows_)) specAvgRows_ = std::clamp(specAvgRows_, 1, 200);
-    ImGui::SetItemTooltip("Spectrum averaging time constant, in rows");
-    label("dB min", stepW(5));
-    if (ImGui::InputFloat("##ldbmin", &dbMin_, 1, 10, "%.0f")) liveAutoDb_ = false;
-    label("dB max", stepW(5));
-    if (ImGui::InputFloat("##ldbmax", &dbMax_, 1, 10, "%.0f")) liveAutoDb_ = false;
-    flow(ImGui::GetFrameHeight() * 3);
+    label("dB", dbGroupW());
+    ImGui::SetNextItemWidth(fieldW(5));
+    if (ImGui::InputFloat("##ldbmin", &dbMin_, 0, 0, "%.0f")) liveAutoDb_ = false;
+    ImGui::SetItemTooltip("Bottom of the colour scale (dB)");
+    ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+    ImGui::SetNextItemWidth(fieldW(5));
+    if (ImGui::InputFloat("##ldbmax", &dbMax_, 0, 0, "%.0f")) liveAutoDb_ = false;
+    ImGui::SetItemTooltip("Top of the colour scale (dB)");
+    ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
     ImGui::Checkbox("Auto", &liveAutoDb_);
     ImGui::SetItemTooltip("Auto-range the color scale to the waterfall history");
-    label("Colormap", fieldW(10));
-    if (ImGui::BeginCombo("##lcmap", ImPlot::GetColormapName(cmap_))) {
-        for (int i = 0; i < ImPlot::GetColormapCount(); ++i)
-            if (ImGui::Selectable(ImPlot::GetColormapName(i), i == cmap_)) cmap_ = i;
-        ImGui::EndCombo();
-    }
-    flow(ImGui::GetFrameHeight() * 9);
-    ImGui::Checkbox("Peak", &showPeak_);
     ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
-    if (ImGui::SmallButton("reset")) livePeakLin_ = liveAvgLin_;
-    ImGui::SetItemTooltip("Restart the peak hold");
-    ImGui::SameLine();
-    ImGui::Checkbox("Freq markers", &fMarkers_);
-    ImGui::SetItemTooltip("Two draggable frequency cursors (F)");
-    ImGui::SameLine();
-    ImGui::Checkbox("Rel. freq", &relFreq_);
-    ImGui::SetItemTooltip("Label frequency axes relative to the center frequency");
+    settingsButton("##lopts", "Averaging, scroll speed, history, image size, colormap and peak hold");
+    if (ImGui::BeginPopup("##lopts")) {
+        if (beginForm("##lform", 5.5f, 20)) {
+            row("Avg", "FFTs averaged into each waterfall row.\nauto: all samples since the previous row (up to 20 MS/s,\nor 100 MS/s on the GPU), so nothing is missed at RTL-SDR rates. Lower values show short bursts more sharply.");
+            ImGui::SliderInt("##lavg", &liveParams_.avg, 0, 64, liveParams_.avg == 0 ? "auto" : "%d");
+            row("Rows/s", "Waterfall scroll speed (rows per second)");
+            if (ImGui::InputDouble("##lrps", &liveParams_.rowsPerSec, 5, 10, "%.0f"))
+                liveParams_.rowsPerSec = std::clamp(liveParams_.rowsPerSec, 1.0, 100.0);
+            row("History", "Waterfall rows kept");
+            if (ImGui::InputInt("##lhist", &liveHistory_, 100, 500)) liveHistory_ = std::clamp(liveHistory_, 64, 4096);
+            row("Cols", "Maximum waterfall columns; FFT bins beyond this are max-pooled");
+            if (ImGui::InputInt("##lcols", &liveParams_.maxCols, 256, 1024))
+                liveParams_.maxCols = std::clamp(liveParams_.maxCols, 64, 8192);
+            row("Spec avg", "Spectrum averaging time constant, in rows");
+            if (ImGui::InputInt("##lsavg", &specAvgRows_)) specAvgRows_ = std::clamp(specAvgRows_, 1, 200);
+            row("Colormap");
+            if (ImGui::BeginCombo("##lcmap", ImPlot::GetColormapName(cmap_))) {
+                for (int i = 0; i < ImPlot::GetColormapCount(); ++i)
+                    if (ImGui::Selectable(ImPlot::GetColormapName(i), i == cmap_)) cmap_ = i;
+                ImGui::EndCombo();
+            }
+            row("Peak hold", "Show the peak-hold trace in the spectrum");
+            ImGui::Checkbox("##lpeak", &showPeak_);
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Reset")) livePeakLin_ = liveAvgLin_;
+            ImGui::SetItemTooltip("Restart the peak hold");
+            ImGui::EndTable();
+        }
+        ImGui::EndPopup();
+    }
 
     ImVec2 avail = ImGui::GetContentRegionAvail();
-    const float cbW = ImGui::GetFontSize() * 4.5f;
+    const float cbW = colorbarWidth();
     const float plotW = avail.x - cbW - ImGui::GetStyle().ItemSpacing.x;
-    float specH = std::max(80.f, avail.y * specFrac_);
+    float specH = std::max(ImGui::GetFontSize() * 7, avail.y * specFrac_);
     float wfH = std::max(80.f, avail.y - specH - 6);
 
     // --- spectrum ---
@@ -682,7 +698,7 @@ void App::drawLiveLeft() {
         ImPlot::EndPlot();
     }
     ImGui::SameLine();
-    ImPlot::ColormapScale("##lcbar", dbMin_, dbMax_, ImVec2(cbW, wfH - 6), "%g dB", 0, cmap_);
+    colorbar("##lcbar", dbMin_, dbMax_, wfH - 6, cmap_);
 }
 
 // ---------------------------------------------------------------------------
@@ -705,8 +721,6 @@ void App::drawLiveStatusBar() {
         s = status_;
     }
     if (fMarkers_) s += "   | dF=" + fmtSI(std::fabs(fm2_ - fm1_), "Hz", 6);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(s.c_str());
 
     std::string right;
     if (live_ && live_->running()) {
@@ -725,13 +739,12 @@ void App::drawLiveStatusBar() {
     }
     char fps[64];
     snprintf(fps, sizeof fps, "%s | %.0f fps", win_.usingGL() ? "GLX" : "software", ImGui::GetIO().Framerate);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(elideMiddle(s, statusLeftW(right + " | ", fps, true)).c_str());
     drawStatusRight(right + " | ", fps, true);
 }
 
 void App::handleLiveShortcuts() {
     if (ImGui::IsKeyPressed(ImGuiKey_F, false)) fMarkers_ = !fMarkers_;
-    if (ImGui::IsKeyPressed(ImGuiKey_A, false)) {
-        fmin_ = fc_ - fs_ / 2;
-        fmax_ = fc_ + fs_ / 2;
-    }
+    if (ImGui::IsKeyPressed(ImGuiKey_A, false)) showAll();
 }

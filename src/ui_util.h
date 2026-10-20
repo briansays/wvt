@@ -28,4 +28,23 @@ int formatValueSI(double value, char* buf, int size, void* unit);
 bool ScrollbarH(const char* id, double total, double& start, double span, float width, float height);
 
 void HelpMarker(const char* text);
+
+// Tooltip that also shows over a disabled item.
+void tooltipAlways(const char* text);
+// Two-column "label | field" forms: beginForm opens the table (labelEm = the
+// label column width in font sizes; widthEm = the table width, needed inside a
+// popup, 0 = the available width), row starts a row whose field fills the column.
+bool beginForm(const char* id, float labelEm, float widthEm = 0);
+void row(const char* label, const char* tip = nullptr);
+// A button in the transmit / record red.
+bool redButton(const char* label, const ImVec2& size = ImVec2(0, 0));
+// A square button with a gear that opens the popup `popupId` (call
+// ImGui::BeginPopup(popupId) after it). Returns true when it was clicked.
+bool settingsButton(const char* popupId, const char* tip);
+// The dB colour scale beside a waterfall, with a tighter padding than the
+// plots. colorbarWidth() is its width ("%g dB" labels down to -999 dB).
+float colorbarWidth();
+void colorbar(const char* id, float dbMin, float dbMax, float height, int cmap);
+// Shortens text in the middle ("/a/b/…/name.sigmf-data") to fit maxW pixels.
+std::string elideMiddle(const std::string& text, float maxW);
 void SetupStyle(float scale);

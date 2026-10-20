@@ -95,7 +95,7 @@ analyze every sample at USRP rates. The results look the same as on the CPU.
 At run time, `--gpu auto|on|off` (or `WVT_GPU`) chooses: `auto` uses a usable GPU, `on` stops
 if there is none, `off` never touches the driver. `--list-devices` lists the GPUs, and
 `--gpu-device N` picks one. In the window, the status bar shows `GPU <model>` or `CPU`, and
-the **GPU** checkbox in the waterfall and live settings switches the GPU off and on.
+**Tools → Use the GPU** switches the GPU off and on.
 
 If a GPU error occurs, that part of wvt goes back to the CPU for the rest of the session, and
 the log and the status-bar tooltip say why. `build/gpu_check` compares the GPU results with
@@ -200,7 +200,7 @@ rasterizer. Thus wvt also works over `ssh -X`, in Xvfb, and in VNC sessions with
 On a large file, the first view of the whole file can be slow. The waterfall reads samples from
 all of the file, and past its work budget it analyzes only part of them ("FFT sees" below 100 %).
 To work on part of the file only, type a start and an end time, in seconds, in the **Segment**
-boxes of toolbar row 1:
+boxes of the file row:
 
 - Type the times before you open the file, or change them after. Press Enter to apply a change.
   wvt then shows the new segment and computes all the plots again.
@@ -222,7 +222,7 @@ wvt big.sigmf-meta --segment 40:50 --chan 300k:200k --audio wfm --audio-out seg.
 
 ### Export a region to a new file
 
-**Export** in toolbar row 1 (or **Ctrl+E**) opens the export window. It writes a time range of
+**File → Export region…** (or **Ctrl+E**) opens the export window. It writes a time range of
 the file, and optionally a frequency band, to a new SigMF or raw file.
 
 - **Fill from:** **View** (the view's time range, full band), **Channel** (the channel filter's
@@ -259,7 +259,8 @@ wvt cap.sigmf-meta --extract 10:20 --extract-band 100.2M:100.4M --extract-out fm
 
 ## Live devices
 
-Select **Source → Device** in the toolbar, or start wvt with `--device`. Select the device, set
+Select **Device** in the **Source** drop-down on the right of the menu bar, or start wvt with
+`--device`. Select the device, set
 the center frequency, sample rate and gain, and press **Start**. Each wvt window streams from one
 device only.
 
@@ -275,17 +276,18 @@ wvt --device sim -c 100M -r 2.4M                         # built-in simulator, n
 | Tuning | 24 MHz - 1.766 GHz. HF below 24 MHz with direct sampling (Q) | 70 MHz - 6 GHz |
 | Sample rate | 225-300 kS/s or 0.9-3.2 MS/s (2.4 MS/s or less is reliable) | up to 56 MS/s (USB 3) |
 | Gain | 0-49.6 dB in tuner steps, or AGC | 0-76 dB, or AGC |
-| Extras | bias-tee, PPM correction | antenna RX2 / TX/RX, analog bandwidth |
+| Extras (⚙ next to AGC) | bias-tee, direct sampling, PPM correction | antenna RX2 / TX/RX, analog bandwidth |
 | Samples | cu8 | ci16 (sc16) |
 
 - You can change **frequency and gain** while the device streams. A change to the rate or to a
   device option restarts the stream.
 - The **waterfall** scrolls with the newest row at the top. Its vertical axis shows seconds ago.
+  The **FFT**, **Window** and **dB** range are on the settings row; the rest is behind its ⚙ button.
   *Rows/s* sets the scroll speed, and *History* sets how many rows wvt keeps. *Avg* `auto` averages
   all samples received since the previous row, up to 20 MS/s (100 MS/s on the GPU). The status bar shows the fraction of
   the samples that the FFT sees. Lower *Avg* to see short bursts more sharply.
 - The **spectrum** shows a running average and a peak hold. *Spec avg* sets the time constant of
-  the average, in rows. *reset* restarts the peak hold.
+  the average, in rows. *Reset* (next to *Peak hold* in the ⚙ options) restarts the peak hold.
 - The **status bar** shows the device, the actual rate and frequency, and all overflows. Devices
   may adjust the rate and frequency that you set. An overflow is a group of samples that the device
   produced but the computer did not receive in time.
@@ -294,7 +296,7 @@ wvt --device sim -c 100M -r 2.4M                         # built-in simulator, n
 
 ### Recording
 
-The second toolbar row records the live stream. **Record to** is a path prefix. wvt adds the date,
+**Record** (on the device row) records the live stream; its ⚙ button sets where and how. **Record to** is a path prefix. wvt adds the date,
 time, frequency and rate to it, for example
 `~/wvt-recordings/wvt_20261016_142233_915.000MHz_2.4MSps.sigmf-data`. wvt also creates missing folders.
 
@@ -324,7 +326,7 @@ wvt --device uhd:type=b200 -c 915M -r 10M --record ~/caps/ism --record-duration 
 
 ## Signal generator
 
-Open it with the **Signal gen** toolbar button or **Ctrl+G**, or start wvt with `--siggen` or `--gen`.
+Open it with **Tools → Signal generator** or **Ctrl+G**, or start wvt with `--siggen` or `--gen`.
 The window floats over the main window. It works in File mode and in Device mode.
 
 **Waveform**
@@ -374,7 +376,7 @@ viewer. **Viewer's markers** plays only the part between the time markers of the
   one annotation for each pulse. **Open in viewer** opens the result.
 - **Loopback** streams the waveform into the live spectrum and waterfall, in Device mode with the
   device *Signal generator loopback*. The live view shows the waveform as a receiver tuned to the
-  center frequency shows it. Changes apply while you make them. The main toolbar can record the
+  center frequency shows it. Changes apply while you make them. The main window can record the
   loopback stream.
 - **USRP transmit** transmits the waveform from the TX/RX port of a B200 / B205mini, tuned to the
   center frequency. You can change the frequency, the gain and all waveform settings while the
@@ -387,7 +389,7 @@ Transmit safety:
   3. In the dialog, press **Transmit**. The dialog shows the frequency, rate and gain.
 
   The arm setting resets after each transmission.
-- TX gain starts at 0 dB. While wvt transmits, the window title, the toolbar (**TX ON**) and a
+- TX gain starts at 0 dB. While wvt transmits, the window title, the menu bar (**TX ON**) and a
   large **STOP TRANSMITTING** button show it. If you close the generator window or quit wvt, the
   transmission stops.
 - Transmit only into a dummy load or an attenuated cable, or where you have a license. To monitor
@@ -408,7 +410,7 @@ wvt --play capture.cs16 --play-rate 2.4M -r 10M -c 915M --play-segment 1.5:0.2 -
 
 ## Audio
 
-Open the audio window with the **Audio** toolbar button or **Ctrl+D**, or start wvt with `--audio MODE`.
+Open the audio window with **Tools → Audio** or **Ctrl+D**, or start wvt with `--audio MODE`.
 The window floats over the main window. It works in File mode and in Device mode.
 
 **Channel.** With **Follow viewer channel** on (the default), the audio uses the channel of the
@@ -465,12 +467,13 @@ between blocks, so the audio is continuous. `build/audio_check` tests each mode 
 
 | Area | Contents |
 |---|---|
-| **Toolbar row 1** | Source, signal generator, audio and export windows, file path, segment (start / end time to load), sample format, sample rate, center frequency, header bytes, I/Q swap, endianness |
-| **Toolbar row 2** | Start / back a page / back 10% / forward 10% / forward a page / end, zoom in/out/all, span presets, start-time and span entry boxes, jump to sample index, bookmarks, time and frequency markers, relative-frequency axis labels |
-| **Overview strip** | Power over the whole file (or the segment). The white box is the current view: drag it to move, drag its edges to resize, or click anywhere to jump there |
+| **Menu bar** | **File** (open, export region, quit), **View** (time and frequency markers, relative frequency, peak hold, the overview strip, which time plots show, show everything), **Tools** (signal generator, audio, use the GPU), **Help** (keyboard and mouse, about). On the right: **TX ON**, **REC**, a running audio or export, and the **Source** (File / Device) |
+| **File row** | File path, **Format** (a drop-down with the sample format, I/Q swap, big endian and header bytes), sample rate, center frequency, segment (start / end time to load), file size |
+| **Navigation row** | Start / back a page / back 10% / forward 10% / forward a page / end, zoom in/out/all, span presets and span, start time, and **Go to** (a sample index, *Add bookmark* and the bookmarks) |
+| **Overview strip** | Power over the whole file (or the segment). The white box is the current view: drag it to move, drag its edges to resize, or click anywhere to jump there. Hidden from **View**, and by itself when the window is short |
 | **Scrollbar** | Scrolls the view through the file (drag the thumb, click the track to move a page, or use the wheel) |
-| **Left** | Waterfall settings (FFT size, window, overlap, averaging, rows/cols, dB range/auto, colormap) above the spectrum of the current view, the waterfall, and its color bar |
-| **Right** | Channel settings, then scrollable I/Q, AM, FM and PM plots, each with its own settings and a readout of measurements |
+| **Left** | Waterfall settings (FFT size, window, dB range / auto; ⚙ for overlap, averaging, rows / cols, colormap and peak hold) above the spectrum of the current view, the waterfall, and its color bar |
+| **Right** | Channel settings (on / off, offset, bandwidth, to peak; ⚙ for taps, decimation, squelch, max points and plot height), then scrollable I/Q, AM, FM and PM plots. Each plot's header has its show checkbox, a ⚙ button for its options (also on a right-click of the plot) and its measurement readout, so nothing is drawn over the traces |
 | **Status bar** | Values under the cursor (t, sample #, f, dB, AM/FM/PM), marker ΔT, 1/ΔT and ΔF, `GPU <model>` or `CPU` (builds with CUDA or Metal), renderer, and a busy indicator |
 
 ### Linked views
@@ -486,10 +489,12 @@ between blocks, so the audio is continuous. `build/audio_check` tests each mode 
 | Zoom | Mouse wheel (hover an axis to zoom only that axis) |
 | Zoom to a region | Right-drag a box (Alt / Shift limit it to one axis) |
 | Export a region | Right-click the waterfall, or `Ctrl+E` |
+| Plot options | Right-click a time plot (I/Q, AM, FM, PM), or its ⚙ button |
 | Fit to data | Double-click |
 | Tune the channel | Ctrl+click the spectrum or waterfall, or drag the cyan lines (center line moves it, edge lines change bandwidth) |
 | Play audio from a point | Shift+click a time plot or the waterfall |
 | Signal generator / audio / export window | `Ctrl+G` / `Ctrl+D` / `Ctrl+E` |
+| Quit | `Ctrl+Q` |
 | Pan the view | `←` `→` (10%), `PgUp` `PgDn` (one page) |
 | Zoom the time axis | `+` / `-` |
 | Jump to start / end | `Home` / `End` |
@@ -497,6 +502,8 @@ between blocks, so the audio is continuous. `build/audio_check` tests each mode 
 | Toggle markers | `T` time markers, `F` frequency markers |
 | Toggle channel filter | `C` |
 | Add bookmark | `B` |
+
+**Help → Keyboard and mouse** shows these in the window.
 
 ## Signal processing
 
@@ -533,6 +540,7 @@ Try `wvt out.sigmf-meta --chan 300k:150k --view 0.5:0.505`.
 | `src/platform_x11.*` | Xlib window, input, clipboard, GLX or software presentation |
 | `src/sw_renderer.*` | Software rasterizer for ImGui draw data |
 | `src/app.*` | UI: toolbar, linked plots, parameter panels |
+| `src/app_menu.cpp` | Menu bar, keyboard help and About windows |
 | `src/engine.*` | Worker threads, and the waterfall, channelizer/demodulator and overview computations |
 | `src/dsp.*` | FFT (Accelerate vDSP on macOS), windows, FIR design, parallel-for, smoothing |
 | `src/gpu.h`, `src/gpu_common.cpp` | GPU interface, `--gpu` rules, fallback to the CPU |
@@ -540,7 +548,7 @@ Try `wvt out.sigmf-meta --chan 300k:150k --view 0.5:0.505`.
 | `src/gpu_metal.mm` | Metal backend (macOS): device setup, one-pass FFT kernels, MPSGraph FFT, channel filter |
 | `src/gpu_stub.cpp`, `src/gpu_backend.h` | Backend for builds without a GPU backend; the backend interface |
 | `src/iq_file.*` | mmap reader for all sample formats, plus SigMF and filename detection |
-| `src/ui_util.*` | SI-unit inputs and formatters, scrollbar widget, style |
+| `src/ui_util.*` | SI-unit inputs and formatters, scrollbar widget, forms, gear button, colour bar, style |
 | `src/app_live.cpp` | Live mode UI: device and recording toolbar, live spectrum and scrolling waterfall |
 | `src/live.*` | Live engine: owns the device, sample ring, recorder and spectrum thread |
 | `src/sample_ring.h` | Ring buffer between the device thread, the spectrum thread and the recorder |

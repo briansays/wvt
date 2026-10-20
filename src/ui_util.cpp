@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cfloat>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -189,9 +190,90 @@ void SetupStyle(float scale) {
     c[ImGuiCol_ButtonHovered] = ImVec4(0.26f, 0.38f, 0.52f, 1.f);
     s.ScaleAllSizes(scale);
     ImPlotStyle& ps = ImPlot::GetStyle();
-    ps.PlotPadding = ImVec2(18 * scale, 6 * scale);
-    ps.LabelPadding = ImVec2(4, 2);
+    // Room on the right for half of the last tick label, and around the plot area.
+    ps.PlotPadding = ImVec2(24 * scale, 10 * scale);
+    ps.LabelPadding = ImVec2(5 * scale, 3 * scale);
     ps.FitPadding = ImVec2(0, 0.08f);
     ps.LineWeight = 1.2f;
     ps.Colors[ImPlotCol_PlotBg] = ImVec4(0.05f, 0.05f, 0.06f, 1.f);
 }
+
+void tooltipAlways(const char* text) {
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("%s", text);
+}
+
+bool beginForm(const char* id, float labelEm, float widthEm) {
+    if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingStretchProp, ImVec2(ImGui::GetFontSize() * widthEm, 0))) return false;
+    ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * labelEm);
+    ImGui::TableSetupColumn("field", ImGuiTableColumnFlags_WidthStretch);
+    return true;
+}
+
+void row(const char* label, const char* tip) {
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(0);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(label);
+    if (tip) tooltipAlways(tip);
+    ImGui::TableSetColumnIndex(1);
+    ImGui::SetNextItemWidth(-FLT_MIN);
+}
+
+bool redButton(const char* label, const ImVec2& size) {
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.55f, 0.12f, 0.12f, 1.f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.75f, 0.18f, 0.18f, 1.f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.85f, 0.22f, 0.22f, 1.f));
+    bool r = ImGui::Button(label, size);
+    ImGui::PopStyleColor(3);
+    return r;
+}
+
+bool settingsButton(const char* popupId, const char* tip) {
+    // The font has no gear glyph, so the gear is drawn: a ring with 8 teeth.
+    const float h = ImGui::GetFrameHeight();
+    ImGui::PushID(popupId);
+    const bool clicked = ImGui::Button("##gear", ImVec2(h, h));
+    ImGui::PopID();
+    if (tip) tooltipAlways(tip);
+    const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+    const ImVec2 c((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f);
+    const float r = h * 0.24f;
+    const ImU32 col = ImGui::GetColorU32(ImGuiCol_Text);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    for (int i = 0; i < 8; ++i) {
+        const float ang = i * 3.14159265f / 4, ca = std::cos(ang), sa = std::sin(ang);
+        dl->AddLine(ImVec2(c.x + ca * r, c.y + sa * r), ImVec2(c.x + ca * r * 1.45f, c.y + sa * r * 1.45f), col, h * 0.11f);
+    }
+    dl->AddCircle(c, r, col, 16, h * 0.09f);
+    dl->AddCircleFilled(c, r * 0.35f, col, 12);
+    if (clicked) ImGui::OpenPopup(popupId);
+    return clicked;
+}
+
+namespace {
+float colorbarPadX() { return ImGui::GetFontSize() * 0.3f; }
+}  // namespace
+
+float colorbarWidth() {
+    // ImPlot's bar is 20 px wide; the rest is the tick labels and the padding.
+    return 20 + ImPlot::GetStyle().LabelPadding.x + ImGui::CalcTextSize("-888 dB").x + 2 * colorbarPadX() + 2;
+}
+
+void colorbar(const char* id, float dbMin, float dbMax, float height, int cmap) {
+    ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(colorbarPadX(), ImPlot::GetStyle().PlotPadding.y));
+    ImPlot::ColormapScale(id, dbMin, dbMax, ImVec2(colorbarWidth(), height), "%g dB", 0, cmap);
+    ImPlot::PopStyleVar();
+}
+
+std::string elideMiddle(const std::string& text, float maxW) {
+    if (ImGui::CalcTextSize(text.c_str()).x <= maxW) return text;
+    const char* dots = "...";
+    // Keep the end (a file name) a little longer than the start.
+    for (size_t keep = text.size(); keep > 0; --keep) {
+        const size_t head = keep * 2 / 5, tail = keep - head;
+        std::string t = text.substr(0, head) + dots + text.substr(text.size() - tail);
+        if (ImGui::CalcTextSize(t.c_str()).x <= maxW) return t;
+    }
+    return dots;
+}
+

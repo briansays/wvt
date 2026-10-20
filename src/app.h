@@ -33,6 +33,8 @@ public:
     bool openFile(const std::string& path, const CliOverrides& o = {});
     void frame();
     bool busy() const;
+    // File > Quit or Ctrl+Q
+    bool quitRequested() const { return quit_; }
     void setView(double t0, double t1);
     // Loads only [t0, t1) seconds of the file; -1 = file start / end. Kept for
     // the next file. Returns false (and keeps the old segment) on a bad value.
@@ -62,21 +64,24 @@ public:
 
 private:
     // UI sections
+    void drawMenuBar();      // app_menu.cpp
+    void drawHelpWindows();  // keyboard help and About (app_menu.cpp)
     void drawToolbar();
     void drawOverview(float h);
     void drawLeft();
     void drawRight();
     void drawStatusBar();
     void handleShortcuts();
-    // GPU (issue #3): only in a CUDA build
-    void drawGpuCheckbox();
+    // GPU (issue #3): only in a GPU build
     std::string gpuTag(bool live) const;
     void drawStatusRight(const std::string& lead, const std::string& rest, bool live);
+    float statusLeftW(const std::string& lead, const std::string& rest, bool live) const;
 
     // plot helpers
     bool beginTimePlot(const char* id, const char* ylabel, float h, bool autoY, ImPlotFormatter yfmt = nullptr,
                        void* yud = nullptr, bool legend = false);
-    void endTimePlot(const char* overlay = nullptr);
+    void endTimePlot();
+    void plotHeader(const char* name, bool* show, const ImVec4& col, const char* readout);
     void drawChannelOverlay(bool vertical);
     void drawFreqMarkers();
     void drawTimeMarkersVertical();
@@ -97,6 +102,9 @@ private:
     void setFs(double fs);
     void setFc(double fc);
     void pan(double frac);
+    void showAll();       // the whole file (or segment) and the full band; live: the full band
+    void toggleExport();
+    void addBookmark();  // opens (with the view) or closes the export window
     void zoom(double factor);
     void submitRequests();
     void pollResults();
@@ -107,7 +115,7 @@ private:
     bool workersBusy() const;
 
     // live mode (app_live.cpp)
-    void drawSourceSelector();
+    void drawSourceSelector(float width);
     void drawDeviceToolbar();
     void drawRecordBar();
     void drawLiveLeft();
@@ -126,7 +134,6 @@ private:
     bool liveRecording() const;
 
     // signal generator (app_siggen.cpp)
-    void drawSigGenButton();
     void drawSigGenWindow();
     void drawSigGenWaveform();
     void drawSigGenPreview();
@@ -143,7 +150,6 @@ private:
     void stopTx(const std::string& why);
 
     // region export (app_export.cpp, issue #18)
-    void drawExportButton();
     void drawExportWindow();
     void drawExportRegion(bool waterfall);  // the region on the waterfall, or the time range on a time plot
     void waterfallExportInput(bool& openMenu);  // crosshair selection on the waterfall
@@ -154,7 +160,6 @@ private:
     void pollExport();
 
     // audio (app_audio.cpp)
-    void drawAudioButton();
     void drawAudioWindow();
     void drawAudioOverlay();
     void drawPlayhead(bool vertical);
@@ -257,6 +262,10 @@ private:
     std::vector<uint32_t> rgba_;
 
     bool flowFirst_ = true;
+    bool focusPath_ = false;  // File > Open: put the cursor in the path box
+    bool quit_ = false;
+    bool helpOpen_ = false, aboutOpen_ = false;
+    bool showOverview_ = true;
 
     // --- live device mode ---
     bool liveMode_ = false;

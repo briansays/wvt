@@ -22,27 +22,8 @@ double nowSec() {
     return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
-void tooltipAlways(const char* text) {
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("%s", text);
-}
 
-// Starts a "label | field" row in a two-column table; the field fills the column.
-void row(const char* label, const char* tip = nullptr) {
-    ImGui::TableNextRow();
-    ImGui::TableSetColumnIndex(0);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(label);
-    if (tip) tooltipAlways(tip);
-    ImGui::TableSetColumnIndex(1);
-    ImGui::SetNextItemWidth(-FLT_MIN);
-}
 
-bool beginForm(const char* id) {
-    if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingStretchProp)) return false;
-    ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 6.5f);
-    ImGui::TableSetupColumn("field", ImGuiTableColumnFlags_WidthStretch);
-    return true;
-}
 
 std::string baseName(const std::string& p) { return p.substr(p.find_last_of('/') + 1); }
 }  // namespace
@@ -146,23 +127,8 @@ void App::pollExport() {
 }
 
 // ---------------------------------------------------------------------------
-// Toolbar button & window
+// Window
 // ---------------------------------------------------------------------------
-void App::drawExportButton() {
-    if (liveMode_) return;
-    ImGui::SameLine();
-    const bool busy = exportBusy();
-    ImGui::BeginDisabled(!file_);
-    if (ImGui::Button(busy ? "Export *" : "Export")) {
-        exOpen_ = !exOpen_;
-        if (exOpen_ && exT1_ <= exT0_) exportFrom(FillView);
-    }
-    ImGui::EndDisabled();
-    tooltipAlways(busy ? "An export is running. Click to open or close the export window (Ctrl+E)."
-                       : "Export a time range and a band of the file to a new file (Ctrl+E).\n"
-                         "Right-click the waterfall to select the region with the mouse.");
-}
-
 void App::drawExportWindow() {
     pollExport();
     if (!exOpen_ || liveMode_) return;
@@ -200,7 +166,7 @@ void App::drawExportWindow() {
     if (ImGui::Button("Select...")) exSelecting_ = true;
     tooltipAlways("Drag a box on the waterfall (Esc cancels)");
 
-    if (beginForm("##exform")) {
+    if (beginForm("##exform", 6.5f)) {
         // --- time ---
         const char* tTip = "Time range in seconds of file time, inside the loaded segment.";
         if (exInSamples_) {
@@ -379,7 +345,6 @@ void App::waterfallExportInput(bool& openMenu) {
         const ImU32 col = ImGui::GetColorU32(kColRegion);
         dl->AddLine(ImVec2(lo.x, pm.y), ImVec2(lo.x + sz.x, pm.y), col);
         dl->AddLine(ImVec2(pm.x, lo.y), ImVec2(pm.x, lo.y + sz.y), col);
-        if (!exDragging_) dl->AddText(ImVec2(lo.x + 8, lo.y + 6), col, "Drag a box to export; Esc cancels");
         if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
             exDragging_ = true;
             exDragT_ = m.y;
@@ -416,11 +381,7 @@ void App::drawWaterfallMenu() {
     if (ImGui::MenuItem("Export the channel...", nullptr, false, demod_.chanEnable)) exportFrom(FillChannel);
     ImGui::EndDisabled();
     ImGui::Separator();
-    if (ImGui::MenuItem("Show everything", "A")) {
-        setView(tBegin(), tEnd());
-        fmin_ = fc_ - fs_ / 2;
-        fmax_ = fc_ + fs_ / 2;
-    }
+    if (ImGui::MenuItem("Show everything", "A")) showAll();
     ImGui::EndPopup();
 }
 

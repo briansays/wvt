@@ -86,6 +86,7 @@ add_executable(wvt
   src/log.cpp
   src/extract.cpp
   src/app_export.cpp
+  src/app_menu.cpp
   ${FONT_CPP})
 target_include_directories(wvt PRIVATE src ${PLATFORM_INCLUDES})
 target_link_libraries(wvt PRIVATE imgui_implot ${PLATFORM_LIBS} Threads::Threads)
