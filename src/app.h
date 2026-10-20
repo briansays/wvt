@@ -5,6 +5,7 @@
 
 #include "audio_engine.h"
 #include "engine.h"
+#include "extract.h"
 #include "imgui.h"
 #include "implot.h"
 #include "live.h"
@@ -53,6 +54,11 @@ public:
     void setAudioOutput(const std::string& device, double volumeDb);
     // Playing or exporting: the main loop keeps running (the playhead moves).
     bool audioBusy() const;
+    // A region export is running (issue #18).
+    bool exportBusy() const;
+    // Opens the export window with the channel's band when the channel
+    // filter is on, else with the view.
+    void openExport() { exportFrom(demod_.chanEnable ? 1 : 0); }
 
 private:
     // UI sections
@@ -136,6 +142,17 @@ private:
     bool startTx();
     void stopTx(const std::string& why);
 
+    // region export (app_export.cpp, issue #18)
+    void drawExportButton();
+    void drawExportWindow();
+    void drawExportRegion(bool waterfall);  // the region on the waterfall, or the time range on a time plot
+    void waterfallExportInput(bool& openMenu);  // crosshair selection on the waterfall
+    void drawWaterfallMenu();
+    void exportFrom(int what);  // ExportFill
+    ExtractConfig exportConfig() const;
+    void startExport(bool overwrite);
+    void pollExport();
+
     // audio (app_audio.cpp)
     void drawAudioButton();
     void drawAudioWindow();
@@ -196,6 +213,23 @@ private:
     bool showIQ_ = true, showAM_ = true, showFM_ = true, showPM_ = true;
     bool autoY_[4] = {true, true, true, true};
     float plotH_ = 0;  // 0 = fit to window
+
+    // region export
+    bool exOpen_ = false;
+    double exT0_ = 0, exT1_ = 0, exLo_ = 0, exHi_ = 0;  // seconds, absolute Hz
+    bool exFullBand_ = true, exCi16_ = false, exSigmf_ = true, exInSamples_ = false, exCenterBw_ = false;
+    char exPath_[1024] = {};
+    bool exPathAuto_ = true;  // the name follows the region until it is edited
+    std::unique_ptr<ExtractJob> exJob_;
+    ExtractJob::Status exSt_;
+    ExtractConfig exPlanCfg_;  // the config exPlan_ was made for
+    ExtractPlan exPlan_;
+    double exPlanAt_ = 0;
+    std::string exMsg_;
+    bool exMsgErr_ = false;
+    bool exSelecting_ = false, exDragging_ = false;
+    double exDragT_ = 0, exDragF_ = 0;
+    double fileStart_ = 0;  // SigMF start time of the open file (s since 1970), 0 = unknown
 
     // markers & hover
     bool tMarkers_ = false, fMarkers_ = false;

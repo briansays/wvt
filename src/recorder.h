@@ -23,6 +23,12 @@ struct RecordConfig {
     double maxSeconds = 0;  // 0 = no limit
     double maxBytes = 0;    // 0 = no limit
     std::string description;
+    // Instead of the prefix, time, frequency and rate: the output path without
+    // its extension (a file export picks its own name).
+    std::string exactPath;
+    // Start time of the first sample for core:datetime (seconds since 1970,
+    // UTC); 0 = now, negative = unknown (no core:datetime).
+    double startTime = 0;
     // Extra "global" members for the SigMF metadata, as JSON text:
     // "\"ns:key\": value" pairs separated by commas (no trailing comma).
     std::string extraGlobal;
@@ -114,3 +120,5 @@ private:
 std::string expandHome(const std::string& path);
 // mkdir -p
 bool makeDirs(const std::string& dir, std::string& err);
+// Extension of a raw recording in format f, e.g. ".cs16"
+const char* rawFileExt(SampleFormat f);

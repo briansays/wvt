@@ -127,6 +127,8 @@ const char* rawExt(SampleFormat f) {
 
 }  // namespace
 
+const char* rawFileExt(SampleFormat f) { return rawExt(f); }
+
 bool makeDirs(const std::string& dir, std::string& err) { return mkdirs(dir, err); }
 
 std::string expandHome(const std::string& path) {
@@ -155,7 +157,8 @@ bool Recorder::start(std::shared_ptr<SampleRing> ring, const RecordSource& src, 
     strftime(stamp, sizeof stamp, "%Y%m%d_%H%M%S", &tm);
     std::string rate = src.rate >= 1e6 ? trimmed(src.rate / 1e6, 0) + "MSps" : trimmed(src.rate / 1e3, 0) + "kSps";
     std::string prefix = expandHome(cfg.prefix.empty() ? "wvt" : cfg.prefix);
-    std::string base = prefix + "_" + stamp + "_" + trimmed(src.fc / 1e6, 3) + "MHz_" + rate;
+    std::string base = cfg.exactPath.empty() ? prefix + "_" + stamp + "_" + trimmed(src.fc / 1e6, 3) + "MHz_" + rate
+                                             : expandHome(cfg.exactPath);
     size_t sl = base.find_last_of('/');
     if (sl != std::string::npos && !mkdirs(base.substr(0, sl), err)) {
         LOG_DEBUG("record", "start failed: %s", err.c_str());
@@ -175,7 +178,7 @@ bool Recorder::start(std::shared_ptr<SampleRing> ring, const RecordSource& src, 
         metaPath_ = cfg.sigmf ? base + ".sigmf-meta" : "";
         stopReason_.clear();
         failed_ = false;
-        captures_ = {{0, src.fc, isoTime(startWall_)}};
+        captures_ = {{0, src.fc, cfg.startTime < 0 ? "" : isoTime(cfg.startTime > 0 ? cfg.startTime : startWall_)}};
         annotations_.clear();
         extraAnnotations_ = 0;
         metaDirty_ = false;
@@ -387,7 +390,9 @@ bool Recorder::writeMeta(std::string& err) {
         for (size_t i = 0; i < captures_.size(); ++i) {
             const auto& c = captures_[i];
             j += std::string(i ? "," : "") + "\n    {\"core:sample_start\": " + std::to_string(c.start) +
-                 ", \"core:frequency\": " + num(c.fc) + ", \"core:datetime\": \"" + c.datetime + "\"}";
+                 ", \"core:frequency\": " + num(c.fc);
+            if (!c.datetime.empty()) j += ", \"core:datetime\": \"" + c.datetime + "\"";
+            j += "}";
         }
         j += "\n  ],\n  \"annotations\": [";
         // SigMF wants annotations ordered by sample_start.

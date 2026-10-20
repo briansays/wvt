@@ -60,7 +60,9 @@ struct FileMetaGuess {
     double rate = 0;
     bool haveFc = false;
     double fc = 0;
+    double startTime = 0;  // SigMF core:datetime of the first capture (s since 1970, UTC); 0 = unknown
     std::string source;  // human-readable note of where the guess came from
 };
 FileMetaGuess guessMeta(const std::string& path);
+double parseIsoTime(const std::string& s);  // SigMF core:datetime -> s since 1970 (0 = bad)
 bool parseFormatName(const std::string& s, SampleFormat& fmt, bool& bigEndian);

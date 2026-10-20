@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cerrno>
 #include <cstring>
+#include <ctime>
 #include <fstream>
 #include <regex>
 #include <sstream>
@@ -233,6 +234,22 @@ static bool jsonValue(const std::string& text, const std::string& key, std::stri
     return !out.empty();
 }
 
+// "2026-10-20T13:50:22.125Z" (SigMF core:datetime, UTC) -> seconds since
+// 1970; 0 when it does not parse.
+double parseIsoTime(const std::string& s) {
+    int y, mo, d, h, mi;
+    double sec;
+    if (sscanf(s.c_str(), "%d-%d-%dT%d:%d:%lf", &y, &mo, &d, &h, &mi, &sec) != 6) return 0;
+    struct tm tm{};
+    tm.tm_year = y - 1900;
+    tm.tm_mon = mo - 1;
+    tm.tm_mday = d;
+    tm.tm_hour = h;
+    tm.tm_min = mi;
+    const time_t t = timegm(&tm);
+    return t == (time_t)-1 ? 0 : (double)t + sec;
+}
+
 static FileMetaGuess guessMetaImpl(const std::string& path) {
     FileMetaGuess g;
     g.dataPath = path;
@@ -258,6 +275,7 @@ static FileMetaGuess guessMetaImpl(const std::string& path) {
             if (jsonValue(text, "core:datatype", v) && parseFormatName(v, g.fmt, g.bigEndian)) g.haveFmt = true;
             if (jsonValue(text, "core:sample_rate", v)) { g.rate = atof(v.c_str()); g.haveRate = g.rate > 0; }
             if (jsonValue(text, "core:frequency", v)) { g.fc = atof(v.c_str()); g.haveFc = true; }
+            if (jsonValue(text, "core:datetime", v)) g.startTime = parseIsoTime(v);
             g.source = "SigMF metadata";
             return g;
         }

@@ -160,6 +160,14 @@ audio (--chan OFF:BW sets the channel; without it: 0 Hz and the default width of
       --audio-out FILE.wav   demodulate to WAV and exit (the file or --segment, or the --view range;
                              with --device: the live stream until Ctrl+C or --record-duration)
       --audio-device NAME  --list-audio-devices  --volume DB  --squelch DBFS
+
+export (the --segment limits it; --record-format sigmf|raw sets the file type):
+      --extract-out PATH     write the region to PATH (without the extension) and exit
+      --extract T0:T1        time range in seconds (default: the whole segment)
+      --extract-band LO:HI   only this band (absolute Hz); without it the samples are copied
+      --extract-format cf32|ci16   band output format (default cf32)
+      --extract-overwrite    replace existing output files
+      --export-window        open the export window (the --chan band, or the view)
 ```
 
 wvt gets the format, sample rate and center frequency from these sources, in this order:
@@ -197,6 +205,43 @@ boxes of toolbar row 1:
 wvt big.sigmf-meta --segment 40:50                 # 40 s to 50 s
 wvt big.sigmf-meta --segment 80:-1 --view 90:91    # 80 s to the end, start with a 1 s view at 90 s
 wvt big.sigmf-meta --segment 40:50 --chan 300k:200k --audio wfm --audio-out seg.wav   # export 10 s
+```
+
+### Export a region to a new file
+
+**Export** in toolbar row 1 (or **Ctrl+E**) opens the export window. It writes a time range of
+the file, and optionally a frequency band, to a new SigMF or raw file.
+
+- **Fill from:** **View** (the view's time range, full band), **Channel** (the channel filter's
+  band over the view), **Markers** (the time and frequency markers), or **Select…**, which lets
+  you drag a box on the waterfall. You can also type or adjust each value: start and end in
+  seconds or samples, the band as low / high or center / width.
+- **Right-click the waterfall** (without dragging) for the same choices: *Select a region to
+  export…*, *Export this view…*, *Export the channel…*. In select mode, drag a box with the left
+  button (the view does not pan meanwhile); **Esc** cancels. Right-drag still zooms to a box.
+- While the window is open, the region shows on the waterfall: drag the box to move it, or its
+  edges and corners to resize it (a full-band region shows as two time lines). The time
+  range is shaded on the I/Q, AM, FM and PM plots.
+- **Full band:** the samples are copied unchanged: same format, rate and center frequency. A
+  big-endian or I/Q-swapped file is written in the standard order.
+- **A band:** wvt mixes the band center to 0 Hz, low-pass filters with the band as the
+  passband (flat to the edges, 25 % transition band on each side, about 74 dB stopband), and
+  decimates to `fs / D` with `D = ⌊fs / 1.25·BW⌋`. The window shows the output rate, center
+  frequency, taps, decimation, size and file name before you export. The output is cf32, or
+  ci16 at half the size (values above full scale are clipped and counted). With a GPU the
+  filter runs there.
+- The export stays inside the loaded segment. It runs in the background with a progress bar.
+  **Cancel** deletes the partial file. An existing file is replaced only after you confirm.
+  wvt checks the free disk space first.
+- The SigMF metadata has the rate, the center frequency, `core:datetime` (the source's start
+  time plus the start of the range, when the source has one), and a `wvt:extract` object with
+  the source file, sample range, band and filter. The default name, such as
+  `capture_12.5s_100.3MHz_200kSps`, carries the rate and frequency, so a raw export opens in
+  wvt without options.
+
+```sh
+wvt cap.sigmf-meta --extract 10:20 --extract-out part                  # 10 s, copied unchanged
+wvt cap.sigmf-meta --extract 10:20 --extract-band 100.2M:100.4M --extract-out fm   # a 200 kHz band
 ```
 
 ## Live devices
@@ -407,7 +452,7 @@ between blocks, so the audio is continuous. `build/audio_check` tests each mode 
 
 | Area | Contents |
 |---|---|
-| **Toolbar row 1** | File path, segment (start / end time to load), sample format, sample rate, center frequency, header bytes, I/Q swap, endianness |
+| **Toolbar row 1** | Source, signal generator, audio and export windows, file path, segment (start / end time to load), sample format, sample rate, center frequency, header bytes, I/Q swap, endianness |
 | **Toolbar row 2** | Start / back a page / back 10% / forward 10% / forward a page / end, zoom in/out/all, span presets, start-time and span entry boxes, jump to sample index, bookmarks, time and frequency markers, relative-frequency axis labels |
 | **Overview strip** | Power over the whole file (or the segment). The white box is the current view: drag it to move, drag its edges to resize, or click anywhere to jump there |
 | **Scrollbar** | Scrolls the view through the file (drag the thumb, click the track to move a page, or use the wheel) |
@@ -427,10 +472,11 @@ between blocks, so the audio is continuous. `build/audio_check` tests each mode 
 | Pan | Left-drag |
 | Zoom | Mouse wheel (hover an axis to zoom only that axis) |
 | Zoom to a region | Right-drag a box (Alt / Shift limit it to one axis) |
+| Export a region | Right-click the waterfall, or `Ctrl+E` |
 | Fit to data | Double-click |
 | Tune the channel | Ctrl+click the spectrum or waterfall, or drag the cyan lines (center line moves it, edge lines change bandwidth) |
 | Play audio from a point | Shift+click a time plot or the waterfall |
-| Signal generator / audio window | `Ctrl+G` / `Ctrl+D` |
+| Signal generator / audio / export window | `Ctrl+G` / `Ctrl+D` / `Ctrl+E` |
 | Pan the view | `←` `→` (10%), `PgUp` `PgDn` (one page) |
 | Zoom the time axis | `+` / `-` |
 | Jump to start / end | `Home` / `End` |
@@ -503,4 +549,7 @@ Try `wvt out.sigmf-meta --chan 300k:150k --view 0.5:0.505`.
 | `tools/siggen_check.cpp` | Self-test for the generator (`build/siggen_check`, no hardware needed) |
 | `tools/audio_check.cpp` | Self-test for the audio demodulator (`build/audio_check`, no hardware needed) |
 | `tools/segment_check.cpp` | Self-test for the time segment rules (`build/segment_check`) |
+| `src/extract.*` | Region export: checks, filter design, the background job (copy, or mix + filter + decimate) |
+| `src/app_export.cpp` | Export window, waterfall right-click menu, region selection |
+| `tools/extract_check.cpp` | Self-test for the region export (`build/extract_check`) |
 | `tools/gpu_check.cpp` | GPU self-test (GPU against CPU) and benchmark (`build/gpu_check [--bench]`) |

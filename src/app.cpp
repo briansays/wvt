@@ -65,7 +65,7 @@ App::~App() {
 bool App::workersBusy() const { return wfWorker_->busy() || dmWorker_->busy() || ovWorker_->busy(); }
 
 // While a device streams, the main loop keeps running at frame rate.
-bool App::busy() const { return workersBusy() || (live_ && live_->running()) || sigGenBusy(); }
+bool App::busy() const { return workersBusy() || (live_ && live_->running()) || sigGenBusy() || exportBusy(); }
 
 // ---------------------------------------------------------------------------
 // Source / view management
@@ -85,6 +85,8 @@ bool App::openFile(const std::string& path, const CliOverrides& o) {
     if (g.haveFmt) { fp_.fmt = g.fmt; fp_.bigEndian = g.bigEndian; }
     if (g.haveRate) fs_ = g.rate;
     if (g.haveFc) fc_ = g.fc;
+    fileStart_ = g.startTime;
+    exT0_ = exT1_ = 0;  // a new file: the export region starts from its view
     if (o.haveFmt) { fp_.fmt = o.fmt; fp_.bigEndian = o.bigEndian; }
     if (o.haveRate) fs_ = o.rate;
     if (o.haveFc) fc_ = o.fc;
@@ -406,10 +408,15 @@ void App::frame() {
     drawStatusBar();
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_G)) sgOpen_ = !sgOpen_;
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_D)) auOpen_ = !auOpen_;
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_E) && !liveMode_ && file_) {
+        exOpen_ = !exOpen_;
+        if (exOpen_ && exT1_ <= exT0_) exportFrom(0);
+    }
     handleShortcuts();
     ImGui::End();
     drawSigGenWindow();
     drawAudioWindow();
+    drawExportWindow();
 
     hoverT_ = nextHoverT_;
     hoverF_ = nextHoverF_;
@@ -427,6 +434,7 @@ void App::drawToolbar() {
     drawSourceSelector();
     drawSigGenButton();
     drawAudioButton();
+    drawExportButton();
     if (liveMode_) {
         drawDeviceToolbar();
         return;
@@ -805,13 +813,17 @@ void App::drawLeft() {
     if (ImGui::IsItemActive()) specFrac_ = std::clamp(specFrac_ + ImGui::GetIO().MouseDelta.y / std::max(1.f, avail.y), 0.08f, 0.8f);
 
     // --- waterfall ---
+    // The right-click menu is wvt's (drawWaterfallMenu); right-drag stays the box zoom.
+    // While a region is being selected, the axes are locked so that a drag does not pan.
+    bool openWfMenu = false;
+    const ImPlotAxisFlags lock = exSelecting_ ? ImPlotAxisFlags_Lock : 0;
     if (ImPlot::BeginPlot("##waterfall", ImVec2(avail.x - cbW - ImGui::GetStyle().ItemSpacing.x, wfH - 6),
-                          ImPlotFlags_NoTitle | ImPlotFlags_NoLegend)) {
-        ImPlot::SetupAxis(ImAxis_X1, nullptr, ImPlotAxisFlags_NoLabel);
+                          ImPlotFlags_NoTitle | ImPlotFlags_NoLegend | ImPlotFlags_NoMenus)) {
+        ImPlot::SetupAxis(ImAxis_X1, nullptr, ImPlotAxisFlags_NoLabel | lock);
         ImPlot::SetupAxisFormat(ImAxis_X1, formatAxisSI, &fFmt_);
         ImPlot::SetupAxisLinks(ImAxis_X1, &fmin_, &fmax_);
         ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, fc_ - fs_, fc_ + fs_);
-        ImPlot::SetupAxis(ImAxis_Y1, nullptr, ImPlotAxisFlags_Invert);
+        ImPlot::SetupAxis(ImAxis_Y1, nullptr, ImPlotAxisFlags_Invert | lock);
         ImPlot::SetupAxisFormat(ImAxis_Y1, formatAxisSI, &tFmt_);
         ImPlot::SetupAxisLinks(ImAxis_Y1, &tmin_, &tmax_);
         const double len = tEnd() - tBegin();
@@ -827,6 +839,7 @@ void App::drawLeft() {
         drawAudioOverlay();
         drawFreqMarkers();
         drawTimeMarkersHorizontal();
+        drawExportRegion(true);
         drawPlayhead(false);
         ImPlot::SetNextLineStyle(kColHover);
         if (std::isfinite(hoverT_)) ImPlot::PlotInfLines("##ht", &hoverT_, 1, (int)ImPlotItemFlags_NoFit | (int)ImPlotInfLinesFlags_Horizontal);
@@ -842,8 +855,11 @@ void App::drawLeft() {
             }
             if (ImGui::GetIO().KeyShift && ImGui::IsMouseClicked(0)) playFrom(m.y);
         }
+        waterfallExportInput(openWfMenu);
         ImPlot::EndPlot();
     }
+    if (openWfMenu) ImGui::OpenPopup("##wfmenu");
+    drawWaterfallMenu();
     ImGui::SameLine();
     ImPlot::ColormapScale("##cbar", dbMin_, dbMax_, ImVec2(cbW, wfH - 6), "%g dB", 0, cmap_);
 }
@@ -871,6 +887,7 @@ bool App::beginTimePlot(const char* id, const char* ylabel, float h, bool autoY,
 
 void App::endTimePlot(const char* overlay) {
     drawTimeMarkersVertical();
+    drawExportRegion(false);
     drawPlayhead(true);
     if (overlay && *overlay) {
         // measurement readout in the plot's top-left corner
