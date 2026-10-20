@@ -387,6 +387,7 @@ static void usage() {
         "                            decimated; without it the samples are copied unchanged\n"
         "      --extract-format cf32|ci16   band output format (default cf32)\n"
         "      --extract-overwrite   replace existing output files\n"
+        "      --export-window       open the export window (Ctrl+E): the --chan band, or the view\n"
         "\n"
         "audio (the channel comes from --chan OFFSET:BW; without it: 0 Hz, the mode's width):\n"
         "      --audio am|nfm|wfm|usb|lsb|cw   open the audio window and play\n"
@@ -402,10 +403,11 @@ static void usage() {
         "\n"
         "mouse:  drag = pan, wheel = zoom (over an axis: zoom that axis only),\n"
         "        right-drag = box zoom, double-click = fit, Ctrl+click spectrum/waterfall = tune channel\n"
+        "        right-click the waterfall = export a region (view, channel or a box you drag)\n"
         "        Shift+click a time plot or the waterfall = play audio from there\n"
         "keys:   Left/Right pan, PgUp/PgDn page, +/- zoom, Home/End, A all, T/F markers,\n"
         "        Z zoom to time markers, C channel on/off, B bookmark,\n"
-        "        Ctrl+G signal generator, Ctrl+D audio window\n");
+        "        Ctrl+G signal generator, Ctrl+D audio window, Ctrl+E export window\n");
 }
 
 int main(int argc, char** argv) {
@@ -414,7 +416,7 @@ int main(int argc, char** argv) {
     bool software = false;
     bool haveChan = false, haveView = false, haveSeg = false;
     std::string extractOut;
-    bool haveExtract = false, haveExtractBand = false, extractCi16 = false, extractOverwrite = false;
+    bool haveExtract = false, haveExtractBand = false, extractCi16 = false, extractOverwrite = false, openExportWin = false;
     double extract0 = 0, extract1 = 0, extractLo = 0, extractHi = 0;
     double chanOff = 0, chanBw = 0, view0 = 0, view1 = 0, seg0 = -1, seg1 = -1;
     auto parsePair = [](const char* s, double& a, double& b) {
@@ -503,6 +505,7 @@ int main(int argc, char** argv) {
             if (v != "cf32" && v != "ci16") { LOG_ERROR("main", "--extract-format wants cf32 or ci16"); return 2; }
             extractCi16 = v == "ci16";
         } else if (a == "--extract-overwrite") extractOverwrite = true;
+        else if (a == "--export-window") openExportWin = true;
         else if (a == "--software") software = true;
         else if (a == "--gpu") {
             const char* v = next("--gpu");
@@ -809,6 +812,7 @@ int main(int argc, char** argv) {
             app.openFile(path, ov);  // logs the reason on failure
             if (haveView) app.setView(view0, view1);
             if (haveChan) app.setChannel(chanOff, chanBw);
+            if (openExportWin) app.openExport();
         }
         if (haveAudio) {
             if (haveDevice && haveChan) app.setChannel(chanOff, chanBw);

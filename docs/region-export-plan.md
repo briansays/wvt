@@ -1,7 +1,8 @@
 # Plan: export a region of a file (issue #18)
 
-Branch: `18-region-export`, from `main` at `8896568`.
-Status: **plan only**. No code yet.
+Branch: `18-region-export`, from `main` at `8896568`, rebased on `2c3c7cd` (after the GPU
+merge, PR #20).
+Status: **steps 1–9 implemented** (2026-10-20). The GUI still needs a test on screen (§8).
 
 ## 1. Goal
 
@@ -143,3 +144,70 @@ the same way as in the window. It is for tests and scripts.
 5. **Cancel** deletes the partial file. Agreed?
 6. **GPU**: CPU first, and the GPU after #20 is merged?
 7. **Range**: inside the loaded segment only, or anywhere in the file?
+
+## 7. Decisions (2026-10-20)
+
+The user said to go with the recommendations:
+
+1. **Full band:** the bytes are copied unchanged.
+2. **Output rate:** integer decimation only (`fs / D`).
+3. **Filter:** the band is the passband, with a 25 % transition band.
+4. **Right-click on the waterfall:** wvt's menu replaces ImPlot's; right-drag keeps the box
+   zoom.
+5. **Cancel** deletes the partial file.
+6. **GPU:** #20 is merged, so the export uses `ChanJob` / `gpuChannelize` from the start, with
+   `channelizeCpu` as the fallback.
+7. **Range:** inside the loaded segment only.
+
+## 8. Implementation notes
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/extract.h`, `src/extract.cpp` | `ExtractConfig`, `ExtractPlan`, `planExtract`, `defaultExtractPath`, `ExtractJob`. |
+| `src/app_export.cpp` | The export window, the fill buttons, the waterfall menu, the crosshair selection, the region on the plots. |
+| `src/app.h`, `src/app.cpp` | Export state, the **Export** button, Ctrl+E, `NoMenus` and the axis lock on the waterfall, the region in the time plots, `fileStart_`, `busy()` includes the export. |
+| `src/recorder.h`, `src/recorder.cpp` | `RecordConfig::exactPath`, `RecordConfig::startTime` (negative: no `core:datetime`), `rawFileExt`. |
+| `src/iq_file.h`, `src/iq_file.cpp` | `FileMetaGuess::startTime` from `core:datetime`; `parseIsoTime`. |
+| `src/main.cpp` | `--extract-out`, `--extract`, `--extract-band`, `--extract-format`, `--extract-overwrite`, `--export-window`; usage text. |
+| `tools/extract_check.cpp` | Self-test (§5). |
+| `README.md` | "Export a region to a new file", the options, the layout and key tables, the file table. |
+
+### Differences from the plan
+
+- **Filter length:** `N = ⌈5.5 · fs / (0.25 · BW)⌉ | 1` and cutoff `0.625 · BW / fs`, as planned.
+  In the test, the band edges are 0.002 dB down and a tone outside the band is 92.8 dB down.
+- **Full band, big-endian or swapped I/Q:** the copy puts the bytes in the standard order
+  (byte and I/Q swaps only), because the SigMF and raw names describe little-endian data in
+  I/Q order.
+- **No source start time:** the export leaves out `core:datetime` instead of writing the time of
+  the export.
+- **Crosshair:** the X11 layer does not change the system cursor, so selection mode draws a
+  crosshair and a hint inside the waterfall.
+- **The region box:** ImPlot's `DragRect` moves the whole box when you drag inside it, so the
+  view does not pan inside the box while the export window is open. Pan outside it.
+- **`--export-window`:** opens the window at start (the `--chan` band, or the view). It is used
+  for the screenshots below.
+- **Default name:** `<source name>_<t0>s_<fc>MHz_<rate>Sps`. The rate and frequency already in
+  the source name are removed, because `guessMeta` takes the first match.
+- **Window position:** on the right, left of the audio window when that is open.
+
+### Verification (macOS)
+
+- The build has no warnings. `extract_check` (40 checks), `gpu_check`, `segment_check`,
+  `siggen_check`, `audio_check` and `log_check` pass.
+- `--help` differs from `main` only by the new lines. A signal-generator file (`--gen-out`)
+  has the same data as `main`, and the same metadata apart from `core:datetime`.
+- Headless: `iqgen` capture, `--extract 0.5:1.5 --extract-band 100.25M:100.35M` gives 125 000
+  samples at 125 kS/s, 100.3 MHz; an NFM WAV export of that file plays the tone. A second
+  export to the same name fails with status 2.
+- Screenshots (Xvfb in a container, `--export-window`): the window with the view (full band,
+  the two time lines on the waterfall) and with `--chan 300k:150k` (band 100.225–100.375 MHz,
+  200 kS/s, 295 taps, decimation 10, the box on the waterfall).
+
+### GUI: still to test on screen
+
+The right-click menu, right-drag still zooming, select mode (drag, Esc), moving and resizing
+the box, the shaded range on the time plots, each "Fill from" button, Export with progress and
+Cancel, the "Replace?" question, and an export of a large file.
