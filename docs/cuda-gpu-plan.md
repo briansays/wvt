@@ -450,8 +450,9 @@ self-tests pass, the GPU comparisons are skipped there.
 
 ### Step 3: CI
 
-`.github/workflows/build.yml`, on every push and pull request (a newer push to the same
-branch cancels the running one):
+`.github/workflows/build.yml`, on pushes to `main` and on pull requests, or by hand (a
+newer push to the same branch cancels the running one). Pushes to other branches build only
+through their pull request, so each commit builds once. `actions/checkout@v5` (Node.js 24).
 
 | Job | What it does |
 |---|---|
