@@ -15,3 +15,8 @@ bool gpuBackendBuilt();  // true in the CUDA build
 // or info.reason when no GPU can be used.
 void gpuBackendProbe(int device, GpuInfo& info);
 std::vector<std::string> gpuBackendList();
+
+// The spectrogram on the device chosen by gpuInit. On Failed, err says why
+// and oom is true when the GPU ran out of memory.
+GpuStatus gpuBackendSpectrogram(const SpecJob& job, float* lin, const std::function<bool()>& cancelled, std::string& err,
+                                bool& oom);

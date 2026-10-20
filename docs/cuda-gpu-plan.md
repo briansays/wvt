@@ -1,8 +1,9 @@
 # Plan: CUDA GPU acceleration (issue #3)
 
 Branch: `3-cuda-gpu`, from `main` at `29dca41` (after the logging merge, PR #15).
-Status: **steps 0–2 implemented** (2026-10-19). The CPU-only build is tested on macOS.
-The CUDA build is compiled and tested in CUDA 12.6 and 12.8 containers with no GPU (see §9).
+Status: **steps 0–2 and 4 implemented** (2026-10-19). The CPU-only build is tested on
+macOS. The CUDA build is compiled and tested in CUDA 12.6 and 12.8 containers with no GPU.
+**The GPU waterfall has not run on a GPU yet** (see §9).
 
 Earlier GPU work (`wvt-gpu-dev`, PR #5) is out of date. This plan starts again from `main`
 and does not use that branch.
@@ -314,3 +315,49 @@ The binary is 5.5 MB: no cuFFT function is called yet, so the static library add
 nothing. It grows in step 4.
 
 **Not done:** running on a real GPU (steps 4–7 need the Linux computer, §8 item 6).
+
+### Step 4: file waterfall on the GPU
+
+| File | Change |
+|---|---|
+| `src/gpu.h` | `SpecJob` (the plan's `GpuSpecReq`, shared by the CPU and the GPU), `specFftStart`, `GpuStatus` (`Ok`, `Cancelled`, `Unavailable`, `Failed`), `gpuSpectrogram`, `gpuSpectrogramUsable`. |
+| `src/gpu_common.cpp` | The fallback rules: after a failure other than "out of memory", the waterfall stays on the CPU until the next `gpuInit`; one WARN. Out of memory: WARN once, the path stays on. `WVT_GPU_FORCE_FAIL=1` forces a failure. |
+| `src/gpu_cuda.cu` | `gpuBackendSpectrogram`, below. `CUDA_TRY` / `CUFFT_TRY` now return `Failed` with the message instead of logging. |
+| `src/engine.h`, `src/engine.cpp` | `computeWaterfall` keeps the geometry and tries the GPU first (budget 2 G samples); on any result other than `Ok` or `Cancelled` it computes `avg` again with the CPU budget and runs `spectrogramCpu`, the old loop moved out unchanged. `WaterfallRes::gpu` says which one ran. |
+| `src/iq_file.h` | `IqFile::data()`: the mapped bytes, for the upload. |
+| `CMakeLists.txt` | CUDA C++20 (the headers use defaulted `operator==`). Static cuFFT needs `CUDA_SEPARABLE_COMPILATION` and `CUDA_RESOLVE_DEVICE_SYMBOLS` on `wvt_gpu` (device link). `segment_check` links `wvt_gpu`. |
+| `tools/gpu_check.cpp` | GPU against CPU in all 6 formats, big-endian, swapped I/Q, a 3-byte header, FFTs before and after the file, rows longer than one chunk, `computeWaterfall`, cancel, and the forced failure. `--bench` adds GPU columns. |
+
+How the GPU path works:
+
+- The work goes in chunks of up to 8 M samples (`kChunkSamples`). A chunk holds whole
+  rows, or, when one row needs more, part of one row; the row sums go on in a device
+  buffer.
+- The CPU threads copy the raw bytes of each FFT from the mapped file into one of two
+  pinned buffers. The copy of chunk k+1 runs while the GPU works on chunk k (a CUDA event
+  per buffer). The plan's "contiguous span at 100 % coverage" shortcut is not done: each
+  FFT is copied on its own, so 50 % overlap copies each sample twice. Measure first.
+- Kernels: `decodeWindowKernel` (the `decodeSamples` rules, the window, zero outside the
+  file), batched in-place `cufftExecC2C`, `accumulateKernel` (|X|² with fftshift, summed
+  per row, no atomics), `poolKernel` (scale and max over the bins of each column).
+- Each thread has its own stream, buffers and up to 4 cached cuFFT plans. The batch is a
+  power of two, so few plans are made. The buffers stay allocated between calls.
+- Cancel is checked before each chunk.
+
+Checks:
+
+- macOS: the CPU waterfall is **bit-identical** to before the change (checksums of 24
+  waterfalls: 6 formats × 4 views, compared with a build from before the split).
+  All self-tests pass, with no warnings.
+- CUDA 12.8 container, static cuFFT: builds with no warnings, the self-tests pass, and
+  `gpu_check` skips the comparison ("no NVIDIA driver").
+- CUDA 12.6 container, `-DWVT_CUDA_STATIC=OFF`: the same; `wvt` loads `libcudart.so.12`
+  and `libcufft.so.11`.
+- Binary size: **272 MB** with static cuFFT and the 6 default GPU targets, 4.7 MB with
+  shared cuFFT. This is more than the 100–200 MB in §8 item 3. Fewer targets
+  (`-DCMAKE_CUDA_ARCHITECTURES=89`) make it smaller.
+
+**Still to do on the GPU computer:** `gpu_check` (the comparisons above must pass at
+0.05 dB) and `gpu_check --bench --samples 1G`. Then set the GPU budget (2 G samples now)
+from the times. The budget is wall time, not only FFT work: a wide view reads up to 8× more
+of the file than on the CPU.

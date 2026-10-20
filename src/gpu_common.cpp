@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cstdlib>
 
 #include "gpu_backend.h"
 #include "log.h"
@@ -14,6 +15,8 @@ GpuInfo g_info = [] {
     return i;
 }();
 std::atomic<bool> g_enabled{false};
+std::atomic<bool> g_specBroken{false};  // the waterfall path failed: CPU from now on
+std::atomic<bool> g_specOomLogged{false};
 }  // namespace
 
 bool parseGpuMode(const char* s, GpuMode& out) {
@@ -38,6 +41,8 @@ const char* gpuModeName(GpuMode m) {
 bool gpuInit(GpuMode mode, int device, std::string& err) {
     g_info = GpuInfo{};
     g_enabled = false;
+    g_specBroken = false;
+    g_specOomLogged = false;
     if (mode == GpuMode::Off) {
         // Off does not touch the driver at all.
         g_info.built = gpuBackendBuilt();
@@ -69,3 +74,29 @@ void gpuSetEnabled(bool on) {
 }
 
 std::vector<std::string> gpuListDevices() { return gpuBackendList(); }
+
+bool gpuSpectrogramUsable() { return gpuEnabled() && !g_specBroken; }
+
+GpuStatus gpuSpectrogram(const SpecJob& job, float* lin, const std::function<bool()>& cancelled) {
+    if (!gpuSpectrogramUsable()) return GpuStatus::Unavailable;
+    std::string err;
+    bool oom = false;
+    GpuStatus st;
+    if (const char* f = getenv("WVT_GPU_FORCE_FAIL"); f && *f && *f != '0') {
+        st = GpuStatus::Failed;
+        err = "forced by WVT_GPU_FORCE_FAIL";
+    } else {
+        st = gpuBackendSpectrogram(job, lin, cancelled, err, oom);
+    }
+    if (st != GpuStatus::Failed) return st;
+    if (oom) {
+        // Smaller views may still fit, so the path stays on.
+        if (!g_specOomLogged.exchange(true))
+            LOG_WARN("gpu", "waterfall: the GPU is out of memory (%s); such views use the CPU", err.c_str());
+        else
+            LOG_DEBUG("gpu", "waterfall: out of memory again (%s)", err.c_str());
+    } else if (!g_specBroken.exchange(true)) {
+        LOG_WARN("gpu", "waterfall on the GPU failed: %s; the waterfall uses the CPU from now on", err.c_str());
+    }
+    return st;
+}

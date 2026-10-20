@@ -11,6 +11,38 @@ static constexpr float kEps = 1e-20f;
 // ---------------------------------------------------------------------------
 // Waterfall
 // ---------------------------------------------------------------------------
+bool spectrogramCpu(const SpecJob& j, float* lin, const CancelFn& cancelled) {
+    const int n = j.n, cols = j.cols, avg = j.avg, binsPerCol = n / cols;
+    auto fft = getFFT(n);
+    std::atomic<bool> aborted{false};
+    parallelFor(j.rows, [&](int rb, int re) {
+        std::vector<cf> buf(n);
+        std::vector<float> pw(n);
+        for (int row = rb; row < re; ++row) {
+            if (cancelled()) { aborted = true; return; }
+            std::fill(pw.begin(), pw.end(), 0.f);
+            for (int a = 0; a < avg; ++a) {
+                if ((a & 63) == 63 && cancelled()) { aborted = true; return; }
+                j.file->read(j.fp, specFftStart(j, row, a), n, buf.data());
+                for (int i = 0; i < n; ++i) buf[i] *= j.win[i];
+                fft->forward(buf.data());
+                for (int i = 0; i < n; ++i) {
+                    int k = (i + n / 2) & (n - 1);  // fftshift
+                    pw[i] += std::norm(buf[k]);
+                }
+            }
+            float* out = &lin[(size_t)row * cols];
+            const float s = j.norm / avg;
+            for (int c = 0; c < cols; ++c) {
+                float mx = 0.f;
+                for (int b = 0; b < binsPerCol; ++b) mx = std::max(mx, pw[c * binsPerCol + b]);
+                out[c] = mx * s;
+            }
+        }
+    }, 4);
+    return !aborted;
+}
+
 std::shared_ptr<WaterfallRes> computeWaterfall(const WaterfallReq& r, const CancelFn& cancelled) {
     auto res = std::make_shared<WaterfallRes>();
     res->req = r;
@@ -25,68 +57,59 @@ std::shared_ptr<WaterfallRes> computeWaterfall(const WaterfallReq& r, const Canc
     rows = std::max(rows, 1);
     const double hop = (double)span / rows;
     const int cols = std::min(n, std::max(16, r.maxCols));
-    const int binsPerCol = n / cols;
     // Each row averages enough FFTs, at most the nominal hop apart, to cover its whole
     // time slice. Spacing them wider would skip samples, and short pulses falling
     // between FFTs would strobe (show in some rows and not others). A budget caps
-    // the work for very wide views; past it, coverage drops below 100%.
-    constexpr double kMaxInputSamples = 256e6;
+    // the work for very wide views; past it, coverage drops below 100%. The GPU
+    // gets a larger budget.
+    constexpr double kMaxInputSamples = 256e6, kGpuMaxInputSamples = 2e9;
     const int minAvg = std::clamp(r.avgPerRow, 1, 64);
     const int needed = (int)std::min(1e9, std::ceil(hop / hopUser));
-    const int budget = (int)std::max(1.0, std::floor(kMaxInputSamples / ((double)rows * n)));
-    const int avg = std::max(minAvg, std::min(needed, budget));
-    res->fftsPerRow = avg;
-    res->coverage = std::min(1.0, (double)avg * n / hop);
+    auto avgFor = [&](double maxInput) {
+        const int budget = (int)std::max(1.0, std::floor(maxInput / ((double)rows * n)));
+        return std::max(minAvg, std::min(needed, budget));
+    };
 
     res->rows = rows;
     res->cols = cols;
-    res->db.assign((size_t)rows * cols, -200.f);
     res->t0 = r.s0 / src.fs;
     res->t1 = r.s1 / src.fs;
     const double binHz = src.fs / n;
     res->f0 = src.fc + (-n / 2 - 0.5) * binHz;
     res->f1 = src.fc + (n / 2 - 0.5) * binHz;
 
-    auto fft = getFFT(n);
     const auto win = makeWindow((WindowType)r.window, n);
     double wsum = 0;
     for (float w : win) wsum += w;
-    const float norm = (float)(1.0 / (wsum * wsum));
 
     std::vector<float> linSum((size_t)rows * cols, 0.f);  // linear power per row for spectrum
-    std::atomic<bool> aborted{false};
+    SpecJob job;
+    job.file = src.file.get();
+    job.fp = src.fp;
+    job.s0 = (double)r.s0;
+    job.hop = hop;
+    job.rows = rows;
+    job.n = n;
+    job.cols = cols;
+    job.win = win.data();
+    job.norm = (float)(1.0 / (wsum * wsum));
 
-    parallelFor(rows, [&](int rb, int re) {
-        std::vector<cf> buf(n);
-        std::vector<float> pw(n);
-        for (int row = rb; row < re; ++row) {
-            if (cancelled()) { aborted = true; return; }
-            std::fill(pw.begin(), pw.end(), 0.f);
-            for (int a = 0; a < avg; ++a) {
-                if ((a & 63) == 63 && cancelled()) { aborted = true; return; }
-                double center = r.s0 + row * hop + (a + 0.5) * hop / avg;
-                int64_t start = (int64_t)std::llround(center) - n / 2;
-                src.file->read(src.fp, start, n, buf.data());
-                for (int i = 0; i < n; ++i) buf[i] *= win[i];
-                fft->forward(buf.data());
-                for (int i = 0; i < n; ++i) {
-                    int k = (i + n / 2) & (n - 1);  // fftshift
-                    pw[i] += std::norm(buf[k]);
-                }
-            }
-            float* out = &res->db[(size_t)row * cols];
-            float* lin = &linSum[(size_t)row * cols];
-            const float s = norm / avg;
-            for (int c = 0; c < cols; ++c) {
-                float mx = 0.f;
-                for (int b = 0; b < binsPerCol; ++b) mx = std::max(mx, pw[c * binsPerCol + b]);
-                mx *= s;
-                lin[c] = mx;
-                out[c] = 10.f * std::log10(mx + kEps);
-            }
-        }
-    }, 4);
-    if (aborted || cancelled()) return nullptr;
+    bool done = false;
+    if (gpuSpectrogramUsable()) {
+        job.avg = avgFor(kGpuMaxInputSamples);
+        const GpuStatus st = gpuSpectrogram(job, linSum.data(), cancelled);
+        if (st == GpuStatus::Cancelled) return nullptr;
+        done = res->gpu = st == GpuStatus::Ok;
+    }
+    if (!done) {
+        job.avg = avgFor(kMaxInputSamples);
+        if (!spectrogramCpu(job, linSum.data(), cancelled)) return nullptr;
+    }
+    if (cancelled()) return nullptr;
+    res->fftsPerRow = job.avg;
+    res->coverage = std::min(1.0, (double)job.avg * n / hop);
+    res->db.resize(linSum.size());
+    for (size_t i = 0; i < linSum.size(); ++i) res->db[i] = 10.f * std::log10(linSum[i] + kEps);
 
     // Average / peak spectrum over the rows
     res->specF.resize(cols);

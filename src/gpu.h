@@ -2,8 +2,13 @@
 // Optional NVIDIA GPU acceleration (issue #3). Plain C++: no CUDA headers.
 // In a build without CUDA every call reports "not available", and callers
 // use their CPU code. See docs/cuda-gpu-plan.md.
+#include <cmath>
+#include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
+
+#include "iq_file.h"
 
 enum class GpuMode : int { Auto = 0, On, Off };
 
@@ -27,6 +32,35 @@ bool gpuInit(GpuMode mode, int device, std::string& err);
 const GpuInfo& gpuInfo();
 bool gpuEnabled();            // available and not switched off
 void gpuSetEnabled(bool on);  // UI switch; no effect when not available
+
+// A spectrogram job: `rows` rows of `avg` FFTs of size n (a power of two).
+// FFT a of row r starts at specFftStart(job, r, a); samples outside the file
+// are zero. Each row's powers are summed over its FFTs, fftshifted, scaled by
+// norm / avg and max-pooled to `cols` columns. The file waterfall runs it on
+// the CPU (spectrogramCpu in engine.h) or on the GPU (gpuSpectrogram).
+struct SpecJob {
+    const IqFile* file = nullptr;
+    FormatParams fp;
+    double s0 = 0, hop = 1;  // first row start and row spacing, in samples
+    int rows = 0, avg = 1, n = 0, cols = 0;
+    const float* win = nullptr;  // n window values
+    float norm = 1;
+};
+inline int64_t specFftStart(const SpecJob& j, int row, int a) {
+    const double center = j.s0 + row * j.hop + (a + 0.5) * j.hop / j.avg;
+    return (int64_t)std::llround(center) - j.n / 2;
+}
+
+enum class GpuStatus : int { Ok = 0, Cancelled, Unavailable, Failed };
+
+// Runs the job on the GPU and writes rows * cols linear powers to lin.
+// Unavailable: no GPU, switched off, or this path failed earlier in the
+// session. Failed: a CUDA error (logged as WARN); the caller then uses the
+// CPU. After a failure other than "out of memory", it returns Unavailable
+// for the rest of the session. Setting WVT_GPU_FORCE_FAIL=1 makes every call
+// fail, to test the fallback.
+GpuStatus gpuSpectrogram(const SpecJob& job, float* lin, const std::function<bool()>& cancelled);
+bool gpuSpectrogramUsable();  // gpuSpectrogram would try the GPU
 
 // One line per CUDA device for --list-devices, or one line that says why
 // there are none.

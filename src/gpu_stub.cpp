@@ -10,3 +10,7 @@ void gpuBackendProbe(int, GpuInfo& info) {
 }
 
 std::vector<std::string> gpuBackendList() { return {"none (built without CUDA)"}; }
+
+GpuStatus gpuBackendSpectrogram(const SpecJob&, float*, const std::function<bool()>&, std::string&, bool&) {
+    return GpuStatus::Unavailable;
+}

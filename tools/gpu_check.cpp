@@ -2,9 +2,11 @@
 //
 //   gpu_check [--bench] [--samples N] [scratch_dir]
 //
-// --bench prints CPU times for the jobs a GPU could take over: the file
-// waterfall, the live spectrum row, the channel filter and the waterfall
-// colouring. The test file is a ci16 recording of N samples (default 64M,
+// Without --bench it checks the GPU setup rules and, when a GPU can be used,
+// compares the GPU waterfall with the CPU one in every sample format.
+// --bench also prints times for the jobs a GPU could take over: the file
+// waterfall (CPU and GPU), the live spectrum row, the channel filter and the
+// waterfall colouring. The test file is a ci16 recording of N samples (default 64M,
 // 256 MB) with tones, a chirp, short pulses and noise. Exit status 0 = all
 // checks passed. Use a larger --samples (e.g. 1G) to time wide views past the
 // CPU budget; smaller files clip them.
@@ -73,17 +75,24 @@ void makeSignal(int64_t first, int64_t n, double fs, cf* out) {
     }
 }
 
-bool writeTestFile(const std::string& path, int64_t n, double fs) {
+// Writes n samples of makeSignal in `fmt`, after `header` bytes of 0x5a.
+// bigEndian swaps the bytes of each I and Q value.
+bool writeTestFile(const std::string& path, int64_t n, double fs, SampleFormat fmt = SampleFormat::CI16,
+                   bool bigEndian = false, int header = 0) {
     FILE* f = fopen(path.c_str(), "wb");
     if (!f) return false;
+    for (int k = 0; k < header; ++k) fputc(0x5a, f);
+    const int bps = formatBytesPerSample(fmt), half = bps / 2;
     const int64_t block = 1 << 20;
     std::vector<cf> x(block);
-    std::vector<uint8_t> raw(block * 4);
+    std::vector<uint8_t> raw(block * bps);
     for (int64_t s = 0; s < n; s += block) {
         const int64_t m = std::min(block, n - s);
         makeSignal(s, m, fs, x.data());
-        encodeSamples(SampleFormat::CI16, x.data(), m, raw.data());
-        if (fwrite(raw.data(), 4, (size_t)m, f) != (size_t)m) {
+        encodeSamples(fmt, x.data(), m, raw.data());
+        if (bigEndian)
+            for (int64_t v = 0; v < m * 2; ++v) std::reverse(&raw[v * half], &raw[v * half] + half);
+        if (fwrite(raw.data(), bps, (size_t)m, f) != (size_t)m) {
             fclose(f);
             return false;
         }
@@ -129,11 +138,184 @@ void testSetup() {
     gpuInit(GpuMode::Auto, -1, err);
 }
 
+// --- GPU waterfall against the CPU --------------------------------------------
+// Largest dB difference on bins more than 20 dB above the median (the noise
+// floor). Bins that are zero on the CPU must be zero on the GPU.
+struct Diff {
+    double strongDb = 0;
+    int64_t compared = 0, zeroMismatch = 0;
+};
+Diff compareLin(const std::vector<float>& cpu, const std::vector<float>& gpu) {
+    Diff d;
+    std::vector<float> sorted(cpu);
+    std::nth_element(sorted.begin(), sorted.begin() + sorted.size() / 2, sorted.end());
+    const float floor = sorted[sorted.size() / 2];
+    for (size_t i = 0; i < cpu.size(); ++i) {
+        if (cpu[i] == 0.f) {
+            if (gpu[i] != 0.f) ++d.zeroMismatch;
+            continue;
+        }
+        if (cpu[i] < floor * 100.f) continue;
+        d.strongDb = std::max(d.strongDb, std::fabs(10.0 * std::log10((double)gpu[i] / cpu[i])));
+        ++d.compared;
+    }
+    return d;
+}
+
+std::string describeJob(const SpecJob& j) {
+    char b[160];
+    snprintf(b, sizeof b, "N %d, %d rows x %d FFTs, %d cols, start %.0f", j.n, j.rows, j.avg, j.cols, j.s0);
+    return b;
+}
+
+void compareJob(const std::string& what, SpecJob j, const std::vector<float>& win) {
+    j.win = win.data();
+    double wsum = 0;
+    for (float w : win) wsum += w;
+    j.norm = (float)(1.0 / (wsum * wsum));
+    CancelFn never = [] { return false; };
+    std::vector<float> cpu((size_t)j.rows * j.cols), gpu(cpu.size(), -1.f);
+    spectrogramCpu(j, cpu.data(), never);
+    const GpuStatus st = gpuSpectrogram(j, gpu.data(), never);
+    if (st != GpuStatus::Ok) {
+        check(false, what + ": GPU status " + std::to_string((int)st));
+        return;
+    }
+    const Diff d = compareLin(cpu, gpu);
+    char b[160];
+    snprintf(b, sizeof b, ": max %.4f dB on %lld strong bins", d.strongDb, (long long)d.compared);
+    check(d.strongDb <= 0.05 && d.zeroMismatch == 0,
+          what + " (" + describeJob(j) + ")" + b + (d.zeroMismatch ? ", nonzero outside the file" : ""));
+}
+
+void testSpectrogram(const std::string& dir) {
+    printf("\nGPU waterfall\n");
+    const double fs = 20e6;
+    CancelFn never = [] { return false; };
+    if (!gpuSpectrogramUsable()) {
+        SpecJob j;
+        std::vector<float> lin(1);
+        check(gpuSpectrogram(j, lin.data(), never) == GpuStatus::Unavailable, "no GPU: gpuSpectrogram is unavailable");
+        printf("  GPU against CPU comparison skipped: %s\n", gpuInfo().reason.c_str());
+        return;
+    }
+    struct FileCase {
+        const char* name;
+        SampleFormat fmt;
+        bool bigEndian, swapIQ;
+        int header;
+    };
+    const FileCase files[] = {
+        {"cf32", SampleFormat::CF32, false, false, 0}, {"cf64", SampleFormat::CF64, false, false, 0},
+        {"ci16", SampleFormat::CI16, false, false, 0}, {"ci32", SampleFormat::CI32, false, false, 0},
+        {"ci8", SampleFormat::CI8, false, false, 0},   {"cu8", SampleFormat::CU8, false, false, 0},
+        {"cf32_be", SampleFormat::CF32, true, false, 0}, {"ci16_be", SampleFormat::CI16, true, false, 0},
+        {"ci16 swap IQ", SampleFormat::CI16, false, true, 0}, {"ci16 header 3 bytes", SampleFormat::CI16, false, false, 3},
+    };
+    const int64_t n = 4'000'000;
+    const auto win1k = makeWindow(WindowType::BlackmanHarris, 1024), win8k = makeWindow(WindowType::Hann, 8192);
+    for (const auto& fc : files) {
+        const std::string path = dir + "/gpu_cmp.bin";
+        if (!writeTestFile(path, n, fs, fc.fmt, fc.bigEndian, fc.header)) {
+            check(false, std::string("write ") + fc.name);
+            continue;
+        }
+        std::string err;
+        auto file = IqFile::open(path, err);
+        SpecJob j;
+        j.file = file.get();
+        j.fp.fmt = fc.fmt;
+        j.fp.bigEndian = fc.bigEndian;
+        j.fp.swapIQ = fc.swapIQ;
+        j.fp.headerBytes = fc.header;
+        // Starts before the file, so the first FFTs are partly zero.
+        j.s0 = -3000;
+        j.rows = 256;
+        j.avg = 4;
+        j.n = 1024;
+        j.cols = 512;
+        j.hop = (double)n / j.rows;
+        compareJob(fc.name, j, win1k);
+        if (fc.fmt == SampleFormat::CI16 && !fc.bigEndian && !fc.swapIQ && !fc.header) {
+            // One FFT per row, many rows per chunk, no pooling.
+            j.s0 = 0;
+            j.rows = 1024;
+            j.avg = 1;
+            j.n = 8192;
+            j.cols = 8192;
+            j.hop = 3000;
+            compareJob("ci16 N 8192", j, win8k);
+            // Past the end of the file: all zero.
+            j.s0 = (double)n + 10000;
+            j.rows = 16;
+            compareJob("ci16 past the end", j, win8k);
+        }
+        file.reset();
+        unlink(path.c_str());
+    }
+
+    // Rows longer than one GPU chunk (8 M samples) are summed in pieces.
+    {
+        const std::string path = dir + "/gpu_long.ci16";
+        const int64_t m = 24'000'000;
+        writeTestFile(path, m, fs);
+        std::string err;
+        auto file = IqFile::open(path, err);
+        SpecJob j;
+        j.file = file.get();
+        j.fp.fmt = SampleFormat::CI16;
+        j.rows = 2;
+        j.avg = 300;
+        j.n = 65536;
+        j.cols = 2048;
+        j.hop = (double)m / j.rows;
+        compareJob("ci16 rows of 300 FFTs of 65536", j, makeWindow(WindowType::BlackmanHarris, 65536));
+
+        // The whole engine path: same image as the CPU, flagged as GPU.
+        WaterfallReq r;
+        r.src = Source{file, j.fp, fs, 0};
+        r.s0 = 1000;
+        r.s1 = 5'000'000;
+        r.nfft = 2048;
+        auto g = computeWaterfall(r, never);
+        gpuSetEnabled(false);
+        auto c = computeWaterfall(r, never);
+        gpuSetEnabled(true);
+        bool same = g && c && g->db.size() == c->db.size() && g->fftsPerRow == c->fftsPerRow;
+        double maxDb = 0;
+        if (same)
+            for (size_t i = 0; i < g->db.size(); ++i)
+                if (c->db[i] > c->p50 + 20) maxDb = std::max(maxDb, (double)std::fabs(g->db[i] - c->db[i]));
+        check(same && g->gpu && !c->gpu && maxDb <= 0.05, "computeWaterfall on the GPU matches the CPU (max " +
+                                                                std::to_string(maxDb) + " dB)");
+
+        // Cancel.
+        std::vector<float> lin((size_t)j.rows * j.cols);
+        const auto w = makeWindow(WindowType::Hann, j.n);
+        j.win = w.data();
+        check(gpuSpectrogram(j, lin.data(), [] { return true; }) == GpuStatus::Cancelled, "cancel stops the GPU job");
+
+        // A forced failure: the CPU takes over, and the path stays off.
+        setenv("WVT_GPU_FORCE_FAIL", "1", 1);
+        auto f = computeWaterfall(r, never);
+        unsetenv("WVT_GPU_FORCE_FAIL");
+        check(f && !f->gpu && f->db == c->db, "a GPU failure falls back to the CPU result");
+        check(!gpuSpectrogramUsable(), "after a failure the waterfall stays on the CPU");
+        std::string e2;
+        gpuInit(GpuMode::Auto, -1, e2);
+        check(gpuSpectrogramUsable(), "gpuInit turns the path on again");
+        file.reset();
+        unlink(path.c_str());
+    }
+}
+
 // --- File waterfall ---------------------------------------------------------
 // Zoom 1 = the span where one FFT per row at 50 % overlap covers the view.
 void benchWaterfall(const Source& src, int64_t nSamples) {
-    printf("\nfile waterfall (1024 rows, Blackman-Harris, 50 %% overlap, CPU budget 256 MS)\n");
-    printf("  %-7s %-6s %-10s %-6s %-9s %s\n", "N", "zoom", "span", "FFTs", "FFT sees", "time");
+    const bool gpu = gpuSpectrogramUsable();
+    printf("\nfile waterfall (1024 rows, Blackman-Harris, 50 %% overlap, budget CPU 256 MS%s)\n", gpu ? ", GPU 2 GS" : "");
+    printf("  %-7s %-6s %-10s %-6s %-9s %-11s", "N", "zoom", "span", "FFTs", "FFT sees", "CPU time");
+    printf(gpu ? "%-6s %-9s %-11s %s\n" : "\n", "FFTs", "FFT sees", "GPU time", "speed-up");
     CancelFn never = [] { return false; };
     for (int n : {1024, 8192, 65536})
         for (int zoom : {1, 10, 100}) {
@@ -143,14 +325,21 @@ void benchWaterfall(const Source& src, int64_t nSamples) {
             const int64_t span = std::min<int64_t>((int64_t)1024 * n / 2 * zoom, nSamples);
             r.s0 = 0;
             r.s1 = span;
-            std::shared_ptr<WaterfallRes> res;
+            std::shared_ptr<WaterfallRes> res, gres;
+            gpuSetEnabled(false);
             const double ms = timeIt(2, [&] { res = computeWaterfall(r, never); });
+            gpuSetEnabled(true);
             if (!res || res->rows < 128) check(false, "waterfall N " + std::to_string(n) + " gives an image");
             if (!res) continue;
             const bool clipped = span < (int64_t)1024 * n / 2 * zoom;
-            printf("  %-7d %-6s %-10s %-6d %7.1f %%  %8.1f ms%s\n", n, (std::to_string(zoom) + "x").c_str(),
-                   fmtSI((double)span, "S", 3).c_str(), res->fftsPerRow, 100 * res->coverage, ms,
-                   clipped ? "  (clipped to the file)" : "");
+            printf("  %-7d %-6s %-10s %-6d %7.1f %%  %8.1f ms ", n, (std::to_string(zoom) + "x").c_str(),
+                   fmtSI((double)span, "S", 3).c_str(), res->fftsPerRow, 100 * res->coverage, ms);
+            if (gpu) {
+                const double gms = timeIt(2, [&] { gres = computeWaterfall(r, never); });
+                if (!gres || !gres->gpu) check(false, "GPU waterfall N " + std::to_string(n));
+                if (gres) printf("%-6d %7.1f %%  %8.1f ms  %5.1fx", gres->fftsPerRow, 100 * gres->coverage, gms, ms / gms);
+            }
+            printf("%s\n", clipped ? "  (clipped to the file)" : "");
         }
 }
 
@@ -256,6 +445,7 @@ int main(int argc, char** argv) {
     }
 
     testSetup();
+    testSpectrogram(dir);
     const double fs = 20e6;
     if (bench) {
         const int64_t n = (int64_t)samples;
@@ -275,7 +465,8 @@ int main(int argc, char** argv) {
         FormatParams fp;
         fp.fmt = SampleFormat::CI16;
         const Source src{file, fp, fs, 0};
-        printf("CPU: %u threads\n", std::max(1u, std::thread::hardware_concurrency()));
+        printf("CPU: %u threads; GPU: %s\n", std::max(1u, std::thread::hardware_concurrency()),
+               gpuInfo().available ? gpuInfo().name.c_str() : gpuInfo().reason.c_str());
         benchWaterfall(src, n);
         // About 2.1 s at 61.44 MS/s / 30 rows/s, taken from the start of the file.
         std::vector<uint8_t> raw(std::min<int64_t>(n, 4 << 20) * 4);
