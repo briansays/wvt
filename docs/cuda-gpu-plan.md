@@ -1,7 +1,7 @@
 # Plan: CUDA GPU acceleration (issue #3)
 
 Branch: `3-cuda-gpu`, from `main` at `29dca41` (after the logging merge, PR #15).
-Status: **steps 0–2 and 4–6 implemented** (2026-10-19). The CPU-only build is tested on
+Status: **steps 0–2, 4–6 and 8 implemented** (2026-10-19). The CPU-only build is tested on
 macOS. The CUDA build is compiled and tested in CUDA 12.6 and 12.8 containers with no GPU.
 **The GPU code has not run on a GPU yet** (see §9).
 
@@ -415,3 +415,10 @@ Checks:
 and on computes the view again on the other side (the log has "GPU processing off / on");
 the live status shows `(GPU)`; with `WVT_GPU_FORCE_FAIL=1` the tag shows `CPU` and its
 tooltip has the fallback note.
+
+### Step 8: README
+
+"Optional: GPU acceleration" after "Optional: device support" (requirements, the CMake
+options, `--gpu`, the checkbox, the fallback, `gpu_check`). The options list, the live
+*Avg* text (100 MS/s on the GPU), the waterfall budget (2 G on the GPU), the status bar row
+and the source table are updated.
