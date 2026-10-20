@@ -47,6 +47,4 @@ float colorbarWidth();
 void colorbar(const char* id, float dbMin, float dbMax, float height, int cmap);
 // Shortens text in the middle ("/a/b/…/name.sigmf-data") to fit maxW pixels.
 std::string elideMiddle(const std::string& text, float maxW);
-// A thin vertical line between groups of controls on one row.
-void groupSeparator();
 void SetupStyle(float scale);

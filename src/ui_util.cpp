@@ -277,10 +277,3 @@ std::string elideMiddle(const std::string& text, float maxW) {
     return dots;
 }
 
-void groupSeparator() {
-    ImGui::SameLine();
-    const ImVec2 p = ImGui::GetCursorScreenPos();
-    const float h = ImGui::GetFrameHeight();
-    ImGui::GetWindowDrawList()->AddLine(ImVec2(p.x, p.y + 3), ImVec2(p.x, p.y + h - 3), ImGui::GetColorU32(ImGuiCol_Separator));
-    ImGui::Dummy(ImVec2(1, h));
-}

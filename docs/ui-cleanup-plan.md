@@ -228,7 +228,7 @@ right-click, readouts on the header rows, and the sample field moved off the row
 | `src/app.cpp`, `src/app.h` | File and navigation rows, waterfall settings row and ⚙, channel row and ⚙, time-plot headers, options popups and right-click, `showAll`, `toggleExport`, `addBookmark`, Ctrl+Q, status-bar path shortening |
 | `src/app_live.cpp` | Device ⚙ (RTL-SDR / USRP options), Record + ⚙, spectrum settings row and ⚙, source selector in the menu bar |
 | `src/app_siggen.cpp`, `src/app_audio.cpp`, `src/app_export.cpp` | Toolbar buttons removed; shared helpers used; preview legend outside; selection hint moved to the status bar |
-| `src/ui_util.*` | `tooltipAlways`, `beginForm` / `row`, `redButton` (moved from four files), `settingsButton` (a drawn gear: the font has no gear glyph), `colorbar` / `colorbarWidth`, `elideMiddle`, `groupSeparator`; plot padding 24×10 px |
+| `src/ui_util.*` | `tooltipAlways`, `beginForm` / `row`, `redButton` (moved from four files), `settingsButton` (a drawn gear: the font has no gear glyph), `colorbar` / `colorbarWidth`, `elideMiddle`; plot padding 24×10 px |
 | `src/main.cpp` | The loop ends on File → Quit / Ctrl+Q |
 | `README.md` | Screen layout, mouse and keyboard, and the places that named the old buttons |
 
@@ -243,8 +243,8 @@ right-click, readouts on the header rows, and the sample field moved off the row
 - **dB min / max** lost their −/+ step buttons to fit on one row; type the value, or use *Auto*.
 - **Peak hold** is in **View** and in the waterfall / live ⚙ options. **Use the GPU** moved to
   **Tools**.
-- **Group separators:** the helper exists but the rows use the wider flow gap instead; a line
-  looked busy next to the gear buttons.
+- **Group separators:** not added; the rows keep the wider flow gap between groups, which
+  reads clearly once each row has fewer controls.
 - **Minimum split widths** were not added: with fewer controls, each pane wraps to at most two
   rows at 900 px.
 - The live **record row** joined the device row (it wraps when there is no room).
