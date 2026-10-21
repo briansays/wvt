@@ -210,7 +210,7 @@ bool ExtractJob::start(const ExtractConfig& c, std::string& err) {
         rc.extraGlobal += ", \"band\": [" + jsonNumber(std::min(c.fLo, c.fHi)) + ", " + jsonNumber(std::max(c.fLo, c.fHi)) +
                           "], \"decimation\": " + std::to_string(plan_.decim) + ", \"taps\": " + std::to_string(plan_.taps) +
                           ", \"cutoff\": " + jsonNumber(plan_.cutoff) + ", \"filter\": \"Blackman windowed sinc\"";
-    rc.extraGlobal += "}";
+    rc.extraGlobal += '}';
     if (!rec_.start(ring_, rs, rc, err)) return false;
 
     LOG_INFO("extract", "export %s, %s, %s -> %s (%s, %s at %s, %s%s)", name.c_str(),

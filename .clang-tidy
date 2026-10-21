@@ -1,0 +1,48 @@
+# clang-tidy for wvt's own code (issue #54). CI runs it with clang-tidy
+# 23.1.3 (pip install clang-tidy==23.1.3) and fails on any warning.
+# third_party/ is not checked. tools/.clang-tidy relaxes a few checks for the
+# self-checks.
+#
+# The four families from the issue are on. The checks turned off below found
+# only intended code in wvt (reviewed when this file was added):
+#   bugprone-easily-swappable-parameters   the DSP functions take several doubles by design
+#   bugprone-narrowing-conversions         DSP code converts double / float / int on purpose
+#   bugprone-signed-bitwise                sample formats and X11 masks use bit operations on ints
+#   bugprone-integer-division              FFT bin centers (n even) and sweep steps round down on purpose
+#   bugprone-implicit-widening-of-multiplication-result,
+#   bugprone-misplaced-widening-cast       the products are small sizes and indices (far below 2^31)
+#   bugprone-branch-clone                  key and sample-format lookup switches
+#   bugprone-incorrect-roundings           the software renderer rounds non-negative colors with +0.5
+#   bugprone-invalid-enum-default-initialization
+#                                          C API structs (UHD, miniaudio) are zero-initialized with {}
+#   bugprone-exception-escape              an exception out of main() ends the program, as intended
+#   bugprone-throwing-static-initialization, cert-err58-cpp
+#                                          static regex / string tables; nothing can catch at startup
+#   cert-err33-c                           printf / snprintf results are not used
+#   cert-dcl50-cpp                         the logger is printf-style, checked by format attributes
+#   performance-enum-size                  a few bytes per enum do not matter here
+#   performance-no-int-to-ptr              X11 and ImGui pass texture ids as integers
+Checks: >
+  -*,
+  bugprone-*,
+  cert-*,
+  concurrency-*,
+  performance-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -bugprone-signed-bitwise,
+  -bugprone-integer-division,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-misplaced-widening-cast,
+  -bugprone-branch-clone,
+  -bugprone-incorrect-roundings,
+  -bugprone-invalid-enum-default-initialization,
+  -bugprone-exception-escape,
+  -bugprone-throwing-static-initialization,
+  -cert-err58-cpp,
+  -cert-err33-c,
+  -cert-dcl50-cpp,
+  -performance-enum-size,
+  -performance-no-int-to-ptr
+WarningsAsErrors: '*'
+HeaderFilterRegex: '.*/(src|tools)/[^/]*$'

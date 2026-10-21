@@ -1,0 +1,29 @@
+# The self-checks and test tools (issue #54): single-threaded test code.
+#   concurrency-mt-unsafe                  setenv / getenv / system() in single-threaded tests
+#   bugprone-command-processor, cert-env33-c
+#                                          tests clean up and inspect files with system()
+#   bugprone-random-generator-seed, cert-msc32-c, cert-msc51-cpp
+#                                          fixed seeds make the test signals repeatable
+#   bugprone-unchecked-string-to-number-conversion, cert-err34-c
+#                                          test inputs are fixed
+#   bugprone-unsafe-functions, cert-msc24-c, cert-msc33-c
+#                                          rewind() in a test is fine
+#   performance-inefficient-vector-operation, performance-unnecessary-value-param,
+#   performance-unnecessary-copy-initialization
+#                                          not worth it in test code
+InheritParentConfig: true
+Checks: >
+  -concurrency-mt-unsafe,
+  -bugprone-command-processor,
+  -cert-env33-c,
+  -bugprone-random-generator-seed,
+  -cert-msc32-c,
+  -cert-msc51-cpp,
+  -bugprone-unchecked-string-to-number-conversion,
+  -cert-err34-c,
+  -bugprone-unsafe-functions,
+  -cert-msc24-c,
+  -cert-msc33-c,
+  -performance-inefficient-vector-operation,
+  -performance-unnecessary-value-param,
+  -performance-unnecessary-copy-initialization

@@ -6,8 +6,18 @@
 // Before logInit() the logger prints WARN and up to stderr and has no file,
 // so the self-test tools work without setting it up.
 #include <cstdio>
+#include <cstdlib>
 #include <string>
+#include <system_error>
 #include <vector>
+
+// The text of an errno value. Unlike strerror(), safe on any thread (the
+// recorder, export and audio threads report file errors).
+inline std::string errnoText(int err) { return std::generic_category().message(err); }
+
+// getenv(). It is not thread safe only with a concurrent setenv(), and wvt
+// never calls setenv(); the tests do, from their only thread.
+inline const char* envVar(const char* name) { return getenv(name); }  // NOLINT(concurrency-mt-unsafe)
 
 enum class LogLevel { Debug, Info, Warn, Error, Off };
 

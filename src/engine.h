@@ -74,6 +74,7 @@ private:
                 std::unique_lock<std::mutex> lk(m_);
                 cv_.wait(lk, [&] { return quit_ || pending_.has_value(); });
                 if (quit_) return;
+                if (!pending_) continue;  // the wait guarantees a request; this says so to clang-tidy
                 req = std::move(*pending_);
                 pending_.reset();
                 myGen = gen_;

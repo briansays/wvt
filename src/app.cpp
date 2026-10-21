@@ -284,7 +284,7 @@ void App::submitRequests() {
         dmWorker_->submit(dr);
     }
     OverviewReq orq;
-    orq.src = src;
+    orq.src = std::move(src);
     orq.s0 = segS0_;
     orq.s1 = segS1_;
     ovWorker_->submit(orq);
@@ -308,8 +308,8 @@ void App::pollResults() {
         if (fitSpecY_) needRecolor_ = true;
         needRecolor_ = true;
     }
-    if (auto r = dmWorker_->take()) dm_ = r;
-    if (auto r = ovWorker_->take()) ov_ = r;
+    if (auto r = dmWorker_->take()) dm_ = std::move(r);
+    if (auto r = ovWorker_->take()) ov_ = std::move(r);
     if (lutCmap_ != cmap_) {
         buildLut();
         needRecolor_ = true;

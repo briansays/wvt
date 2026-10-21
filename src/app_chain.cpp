@@ -96,7 +96,7 @@ void App::drawSigGenChain() {
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
             ImGui::AlignTextToFramePadding();
-            char num[8];
+            char num[16];
             snprintf(num, sizeof num, "%d", i + 1);
             if (ImGui::Selectable(num, sgChainSel_ == i, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap,
                                   ImVec2(0, rowH)))
@@ -234,7 +234,7 @@ void App::drawSigGenChain() {
                 if (lockRate) q.rate = p.rate;
                 if (txOn) q.fc = p.fc;
                 const bool rateChanged = q.rate != p.rate;
-                p = q;
+                p = std::move(q);
                 if (rateChanged && sigGenLoopback()) startLoopback();
                 sgChainSel_ = -1;
                 sgChainNote_ = "Loaded " + std::to_string(p.chain.size()) + " recordings from " + baseName(trimmed(sgChainFile_));

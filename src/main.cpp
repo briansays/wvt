@@ -1,7 +1,9 @@
 // wvt - IQ waveform visualization tool (X11)
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <cmath>
+#include <climits>
 #include <csignal>
 #include <chrono>
 #include <cstdio>
@@ -345,7 +347,7 @@ int main(int argc, char** argv) {
     double audioVol = -6;
     float scale = 1.f;
     int winW = 1600, winH = 950;
-    if (const char* e = getenv("WVT_SCALE")) scale = (float)atof(e);
+    if (const char* e = envVar("WVT_SCALE")) scale = (float)strtod(e, nullptr);
     GpuMode gpuMode = GpuMode::Auto;
     int gpuDevice = -1;
 
@@ -359,7 +361,7 @@ int main(int argc, char** argv) {
         return 2;
     }
     logInit(lc);
-    if (const char* e = getenv("WVT_GPU"); e && *e && !parseGpuMode(e, gpuMode))
+    if (const char* e = envVar("WVT_GPU"); e && *e && !parseGpuMode(e, gpuMode))
         LOG_WARN("main", "WVT_GPU=%s is not auto, on or off; using auto", e);
     argc = (int)args.size();
     args.push_back(nullptr);
@@ -372,20 +374,32 @@ int main(int argc, char** argv) {
         return false;
     };
     // A number with SI suffixes into `dst`; `then` runs after a good value.
-    auto si = [&](const char* name, double& dst, std::function<void()> then = {}) -> CliParser::Handler {
+    auto si = [&](const char* name, double& dst, const std::function<void()>& then = {}) -> CliParser::Handler {
         return [&dst, name, then, &bad](const char* v) {
             if (!parseSI(v, dst)) return bad("bad value for %s", name);
             if (then) then();
             return true;
         };
     };
-    auto pair = [&](const char* msg, double& a, double& b, std::function<bool()> then = {}) -> CliParser::Handler {
+    auto pair = [&](const char* msg, double& a, double& b, const std::function<bool()>& then = {}) -> CliParser::Handler {
         return [&a, &b, msg, then, &parsePair, &bad](const char* v) {
             if (!parsePair(v, a, b)) return bad("%s", msg);
             return then ? then() : true;
         };
     };
     auto flag = [](bool& b) -> CliParser::Handler { return [&b](const char*) { return b = true; }; };
+    // A whole number in [lo, hi]. atoi() took "abc" as 0, and for some options
+    // 0 means "forever" (issue #54).
+    auto whole = [](const char* name, const char* v, long long lo, long long hi, long long& out) {
+        char* end = nullptr;
+        errno = 0;
+        out = strtoll(v, &end, 10);
+        if (end == v || *end || errno == ERANGE || out < lo || out > hi) {
+            LOG_ERROR("main", "%s wants a whole number from %lld to %lld (got '%s')", name, lo, hi, v);
+            return false;
+        }
+        return true;
+    };
     auto text = [](std::string& s) -> CliParser::Handler { return [&s](const char* v) { s = v; return true; }; };
 
     CliParser cli;
@@ -403,7 +417,9 @@ int main(int argc, char** argv) {
         return ov.haveFc = true;
     });
     cli.add("-H", "--header", "BYTES", "bytes to skip at the start of the file", [&](const char* v) {
-        ov.header = atoll(v);
+        long long n;
+        if (!whole("--header", v, 0, LLONG_MAX, n)) return false;
+        ov.header = n;
         return true;
     });
     cli.add(nullptr, "--swap-iq", nullptr, "swap I and Q", flag(ov.swapIQ));
@@ -419,11 +435,21 @@ int main(int argc, char** argv) {
             pair("--view wants T0:T1", view0, view1, [&] { return haveView = true; }));
     cli.add(nullptr, "--software", nullptr, "force the software renderer (no GLX)", flag(software));
     cli.add(nullptr, "--scale", "S", "UI scale factor (default 1, or $WVT_SCALE)", [&](const char* v) {
-        scale = (float)atof(v);
+        double x;
+        if (!parseSI(v, x)) return bad("bad --scale");
+        scale = (float)x;
         return true;
     });
     cli.add(nullptr, "--geometry", "WxH", "initial window size (default 1600x950)", [&](const char* v) {
-        if (sscanf(v, "%dx%d", &winW, &winH) != 2) return bad("bad geometry");
+        const std::string s = v;
+        const size_t x = s.find('x');
+        long long w, h;
+        if (x == std::string::npos) return bad("--geometry wants WxH, e.g. 1600x950");
+        if (!whole("--geometry width", s.substr(0, x).c_str(), 100, 16384, w) ||
+            !whole("--geometry height", s.substr(x + 1).c_str(), 100, 16384, h))
+            return false;
+        winW = (int)w;
+        winH = (int)h;
         return true;
     });
     cli.add(nullptr, "--screenshot", "F", "render, write a PPM screenshot to F and exit", text(shotPath));
@@ -471,7 +497,7 @@ int main(int argc, char** argv) {
     cli.add(nullptr, "--atten", "auto|0|10|20|30", "BB60 attenuator (default auto)", [&](const char* v) {
         const std::string s = v;
         if (s == "auto") dev.bbAtten = -1;
-        else if (s == "0" || s == "10" || s == "20" || s == "30") dev.bbAtten = atoi(v) / 10;
+        else if (s == "0" || s == "10" || s == "20" || s == "30") dev.bbAtten = s[0] - '0';
         else return bad("--atten wants auto, 0, 10, 20 or 30");
         return true;
     });
@@ -507,7 +533,9 @@ int main(int argc, char** argv) {
         return true;
     });
     cli.add(nullptr, "--ppm", "N", "RTL-SDR frequency correction", [&](const char* v) {
-        dev.ppm = atoi(v);
+        long long n;
+        if (!whole("--ppm", v, -1000, 1000, n)) return false;
+        dev.ppm = (int)n;
         return true;
     });
     cli.action(nullptr, "--list-devices", "print attached devices and GPUs, and exit", [&](const char*) {
@@ -551,7 +579,7 @@ int main(int argc, char** argv) {
         return haveGen = true;
     });
     // These set a generator value, so they also open the generator.
-    const auto gen = [&](const char* name, double& dst, std::function<void()> then = {}) {
+    const auto gen = [&](const char* name, double& dst, const std::function<void()>& then = {}) {
         return si(name, dst, [&, then] {
             if (then) then();
             haveGen = true;
@@ -633,13 +661,17 @@ int main(int argc, char** argv) {
     cli.add(nullptr, "--jitter", "PCT", "random PRI jitter in percent",
             gen("--jitter", gp.jitterPct, [&] { gp.priPattern = PriPattern::Jitter; }));
     cli.add(nullptr, "--seed", "N", "random seed for the jitter and the noise", [&](const char* v) {
-        gp.seed = (uint32_t)atol(v);
+        long long n;
+        if (!whole("--seed", v, 0, UINT32_MAX, n)) return false;
+        gp.seed = (uint32_t)n;
         return true;
     });
     cli.add(nullptr, "--burst", "N[:GAP]", "N pulses per burst, GAP seconds of extra silence after each", [&](const char* v) {
         const std::string s = v;
         const size_t c = s.find(':');
-        gp.burstPulses = atoi(s.substr(0, c).c_str());
+        long long n;
+        if (!whole("--burst", s.substr(0, c).c_str(), 0, INT_MAX, n)) return false;
+        gp.burstPulses = (int)n;
         if (c != std::string::npos && !parseSI(s.substr(c + 1).c_str(), gp.burstGap)) return bad("--burst wants N or N:GAP");
         return haveGen = true;
     });
@@ -654,8 +686,10 @@ int main(int argc, char** argv) {
         return haveGen = true;
     });
     cli.add(nullptr, "--barker", "N", "Barker phase code (2 3 4 5 7 11 13)", [&](const char* v) {
+        long long n;
+        if (!whole("--barker", v, 0, INT_MAX, n)) return false;
         gp.intra = IntraMod::Barker;
-        gp.barkerLen = atoi(v);
+        gp.barkerLen = (int)n;
         return haveGen = true;
     });
     cli.add(nullptr, "--play", "FILE",
@@ -686,8 +720,9 @@ int main(int argc, char** argv) {
                 return haveGen = true;
             });
     cli.add(nullptr, "--chain-loops", "N", "passes through the chain (default 0 = until stopped)", [&](const char* v) {
-        chainLoops = atoi(v);
-        if (chainLoops < 0) return bad("--chain-loops wants 0 (forever) or more");
+        long long n;
+        if (!whole("--chain-loops", v, 0, INT_MAX, n)) return false;
+        chainLoops = (int)n;
         return true;
     });
     cli.add(nullptr, "--snr", "DB", "add noise at this signal-to-noise ratio",
@@ -709,7 +744,9 @@ int main(int argc, char** argv) {
     });
     cli.add(nullptr, "--gen-duration", "T", "file length (default 1 s), or how long --tx transmits", si("--gen-duration", genSeconds));
     cli.add(nullptr, "--gen-pulses", "N", "file length in pulses, plays, sweeps or chain passes", [&](const char* v) {
-        gc.pulses = atoll(v);
+        long long n;
+        if (!whole("--gen-pulses", v, 0, LLONG_MAX, n)) return false;
+        gc.pulses = n;
         return true;
     });
     cli.add(nullptr, "--gen-annotate", nullptr, "SigMF: one annotation per pulse, play, sweep or chain item",
@@ -816,7 +853,7 @@ int main(int argc, char** argv) {
             const size_t x = path.find_last_of(':');
             if (x != std::string::npos && x + 1 < path.size() &&
                 path.find_first_not_of("0123456789", x + 1) == std::string::npos) {
-                reps = atoi(path.c_str() + x + 1);
+                reps = (int)std::min(strtol(path.c_str() + x + 1, nullptr, 10), (long)INT_MAX);
                 path.erase(x);
             }
             const size_t at = path.find_last_of('@');

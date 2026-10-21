@@ -1,13 +1,14 @@
 #include "wav_writer.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <cmath>
-#include <cstring>
 #include <ctime>
 #include <fcntl.h>
 #include <unistd.h>
 #include <vector>
 
+#include "log.h"
 #include "recorder.h"
 
 namespace {
@@ -15,9 +16,9 @@ void put16(unsigned char* p, unsigned v) { p[0] = v & 0xff; p[1] = (v >> 8) & 0x
 void put32(unsigned char* p, uint32_t v) { for (int i = 0; i < 4; ++i) p[i] = (v >> (8 * i)) & 0xff; }
 
 void header(unsigned char* h, int rate, uint32_t dataBytes) {
-    memcpy(h, "RIFF", 4);
+    std::copy_n("RIFF", 4, h);
     put32(h + 4, 36 + dataBytes);
-    memcpy(h + 8, "WAVEfmt ", 8);
+    std::copy_n("WAVEfmt ", 8, h + 8);
     put32(h + 16, 16);
     put16(h + 20, 1);  // PCM
     put16(h + 22, 1);  // mono
@@ -25,7 +26,7 @@ void header(unsigned char* h, int rate, uint32_t dataBytes) {
     put32(h + 28, rate * 2);
     put16(h + 32, 2);
     put16(h + 34, 16);
-    memcpy(h + 36, "data", 4);
+    std::copy_n("data", 4, h + 36);
     put32(h + 40, dataBytes);
 }
 }  // namespace
@@ -36,12 +37,12 @@ bool WavWriter::open(const std::string& path, int rate, std::string& err) {
     if (sl != std::string::npos && sl > 0 && !makeDirs(path.substr(0, sl), err)) return false;
     int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0644);
     if (fd < 0) {
-        err = "cannot create '" + path + "': " + strerror(errno);
+        err = "cannot create '" + path + "': " + errnoText(errno);
         return false;
     }
     f_ = fdopen(fd, "wb");
     if (!f_) {
-        err = "cannot open '" + path + "': " + strerror(errno);
+        err = "cannot open '" + path + "': " + errnoText(errno);
         ::close(fd);
         return false;
     }
@@ -51,7 +52,7 @@ bool WavWriter::open(const std::string& path, int rate, std::string& err) {
     unsigned char h[44];
     header(h, rate, 0);
     if (fwrite(h, 1, 44, f_) != 44) {
-        err = "cannot write '" + path + "': " + strerror(errno);
+        err = "cannot write '" + path + "': " + errnoText(errno);
         close();
         return false;
     }
@@ -71,7 +72,7 @@ bool WavWriter::write(const float* s, size_t n, std::string& err) {
         put16(&b[2 * i], (unsigned)(int16_t)std::lrint(x * 32767.f) & 0xffff);
     }
     if (fwrite(b.data(), 1, b.size(), f_) != b.size()) {
-        err = "cannot write '" + path_ + "': " + strerror(errno);
+        err = "cannot write '" + path_ + "': " + errnoText(errno);
         return false;
     }
     samples_ += (int64_t)n;

@@ -34,7 +34,7 @@ struct PathState {
 PathState g_spec{"waterfall"}, g_live{"live spectrum"}, g_chan{"channel filter"};
 
 bool forcedFail(std::string& err) {
-    const char* f = getenv("WVT_GPU_FORCE_FAIL");
+    const char* f = envVar("WVT_GPU_FORCE_FAIL");
     if (!f || !*f || *f == '0') return false;
     err = "forced by WVT_GPU_FORCE_FAIL";
     return true;

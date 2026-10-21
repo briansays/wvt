@@ -142,7 +142,7 @@ void testStream() {
     std::vector<int16_t> copy;
     {
         std::lock_guard<std::mutex> lk(m);
-        copy = got;
+        copy = std::move(got);
     }
     const double rate = copy.size() / 2 / secs;
     char b[96];

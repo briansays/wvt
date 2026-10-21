@@ -11,7 +11,6 @@
 #include <complex>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <ctime>
 
 #include "json.h"
@@ -55,7 +54,7 @@ bool mkdirs(const std::string& dir, std::string& err) {
         if (j == std::string::npos) j = dir.size();
         cur = dir.substr(0, j);
         if (!cur.empty() && mkdir(cur.c_str(), 0755) != 0 && errno != EEXIST) {
-            err = "cannot create directory '" + cur + "': " + strerror(errno);
+            err = "cannot create directory '" + cur + "': " + errnoText(errno);
             return false;
         }
         i = j + 1;
@@ -107,7 +106,7 @@ bool makeDirs(const std::string& dir, std::string& err) { return mkdirs(dir, err
 
 std::string expandHome(const std::string& path) {
     if (path == "~" || path.rfind("~/", 0) == 0) {
-        const char* home = getenv("HOME");
+        const char* home = envVar("HOME");
         if (home) return std::string(home) + path.substr(1);
     }
     return path;
@@ -142,7 +141,7 @@ bool Recorder::start(std::shared_ptr<SampleRing> ring, const RecordSource& src, 
     std::string dataPath = cfg.sigmf ? base + ".sigmf-data" : base + rawExt(outFmt);
     fd_ = ::open(dataPath.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0644);
     if (fd_ < 0) {
-        err = "cannot create '" + dataPath + "': " + strerror(errno);
+        err = "cannot create '" + dataPath + "': " + errnoText(errno);
         LOG_DEBUG("record", "start failed: %s", err.c_str());
         return false;
     }
@@ -295,7 +294,7 @@ void Recorder::run() {
                 ok = writeAll(fd_, raw.data(), (size_t)n * bps);
             }
             if (!ok) {
-                reason = std::string("write failed: ") + strerror(errno);
+                reason = std::string("write failed: ") + errnoText(errno);
                 failed = true;
                 break;
             }
@@ -326,7 +325,7 @@ void Recorder::run() {
     ring_->closeGate();
     handleGaps(true);
     if (::close(fd_) != 0 && !failed) {
-        reason = std::string("close failed: ") + strerror(errno);
+        reason = std::string("close failed: ") + errnoText(errno);
         failed = true;
     }
     fd_ = -1;
@@ -366,7 +365,7 @@ bool Recorder::writeMeta(std::string& err) {
             j += std::string(i ? "," : "") + "\n    {\"core:sample_start\": " + std::to_string(c.start) +
                  ", \"core:frequency\": " + jsonNumber(c.fc);
             if (!c.datetime.empty()) j += ", \"core:datetime\": " + jsonQuote(c.datetime);
-            j += "}";
+            j += '}';
         }
         j += "\n  ],\n  \"annotations\": [";
         // SigMF wants annotations ordered by sample_start.
@@ -378,7 +377,7 @@ bool Recorder::writeMeta(std::string& err) {
             if (a.count > 0) j += ", \"core:sample_count\": " + std::to_string(a.count);
             if (!a.label.empty()) j += ", \"core:label\": " + jsonQuote(a.label);
             if (!a.comment.empty()) j += ", \"core:comment\": " + jsonQuote(a.comment);
-            j += "}";
+            j += '}';
         }
         j += annotations_.empty() ? "]\n}\n" : "\n  ]\n}\n";
         metaDirty_ = false;
@@ -387,13 +386,13 @@ bool Recorder::writeMeta(std::string& err) {
     std::string tmp = metaPath + ".tmp";
     FILE* f = fopen(tmp.c_str(), "wb");
     if (!f) {
-        err = "cannot write '" + tmp + "': " + strerror(errno);
+        err = "cannot write '" + tmp + "': " + errnoText(errno);
         return false;
     }
     bool ok = fwrite(j.data(), 1, j.size(), f) == j.size();
     ok = (fclose(f) == 0) && ok;
     if (!ok || rename(tmp.c_str(), metaPath.c_str()) != 0) {
-        err = "cannot write '" + metaPath + "': " + strerror(errno);
+        err = "cannot write '" + metaPath + "': " + errnoText(errno);
         unlink(tmp.c_str());
         return false;
     }

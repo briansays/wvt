@@ -45,7 +45,7 @@ int formatBytesPerSample(SampleFormat f) {
 std::shared_ptr<IqFile> IqFile::open(const std::string& path, std::string& err) {
     int fd = ::open(path.c_str(), O_RDONLY);
     if (fd < 0) {
-        err = "cannot open '" + path + "': " + strerror(errno);
+        err = "cannot open '" + path + "': " + errnoText(errno);
         return nullptr;
     }
     struct stat st{};
@@ -60,7 +60,7 @@ std::shared_ptr<IqFile> IqFile::open(const std::string& path, std::string& err) 
     if (f->size_ > 0) {
         void* p = mmap(nullptr, f->size_, PROT_READ, MAP_PRIVATE, fd, 0);
         if (p == MAP_FAILED) {
-            err = "mmap failed for '" + path + "': " + strerror(errno);
+            err = "mmap failed for '" + path + "': " + errnoText(errno);
             ::close(fd);
             return nullptr;
         }
@@ -221,7 +221,8 @@ bool parseFormatName(const std::string& in, SampleFormat& fmt, bool& bigEndian) 
 double parseIsoTime(const std::string& s) {
     int y, mo, d, h, mi;
     double sec;
-    if (sscanf(s.c_str(), "%d-%d-%dT%d:%d:%lf", &y, &mo, &d, &h, &mi, &sec) != 6) return 0;
+    // The count checks the format; a field too long for an int only gives a wrong time.
+    if (sscanf(s.c_str(), "%d-%d-%dT%d:%d:%lf", &y, &mo, &d, &h, &mi, &sec) != 6) return 0;  // NOLINT(bugprone-unchecked-string-to-number-conversion,cert-err34-c)
     struct tm tm{};
     tm.tm_year = y - 1900;
     tm.tm_mon = mo - 1;
@@ -295,8 +296,8 @@ static FileMetaGuess guessMetaImpl(const std::string& path) {
         static const std::regex re(R"(gqrx_\d{8}_\d{6}_(\d+)_(\d+)_fc\.raw)", std::regex::icase);
         std::smatch m;
         if (std::regex_search(base, m, re)) {
-            g.fc = atof(m[1].str().c_str());
-            g.rate = atof(m[2].str().c_str());
+            g.fc = strtod(m[1].str().c_str(), nullptr);
+            g.rate = strtod(m[2].str().c_str(), nullptr);
             g.haveFc = g.haveRate = true;
             g.haveFmt = true;
             g.fmt = SampleFormat::CF32;
@@ -317,11 +318,11 @@ static FileMetaGuess guessMetaImpl(const std::string& path) {
             return 1.0;
         };
         if (std::regex_search(base, m, rateRe)) {
-            g.rate = atof(m[1].str().c_str()) * mult(m[2].str());
+            g.rate = strtod(m[1].str().c_str(), nullptr) * mult(m[2].str());
             g.haveRate = g.rate > 0;
         }
         if (std::regex_search(base, m, fcRe)) {
-            g.fc = atof(m[1].str().c_str()) * mult(m[2].str());
+            g.fc = strtod(m[1].str().c_str(), nullptr) * mult(m[2].str());
             g.haveFc = true;
         }
     }

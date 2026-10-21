@@ -102,6 +102,22 @@ cp -r tools/fuzz/corpus/chain /tmp/corpus-chain
 If the program finds a problem, it stops with a report and writes the input to a `crash-...` file.
 To run that input again, type `./build-fuzz/fuzz_chain crash-...`.
 
+## Static analysis
+
+clang-tidy checks the wvt code with the `bugprone`, `cert`, `concurrency` and `performance` check
+families. The configuration is in `.clang-tidy`. It turns off the checks that found only intended
+code in wvt, and gives the reason for each. `tools/.clang-tidy` turns off some more checks for the
+test programs. A finding is an error. To run it as CI does:
+
+```sh
+cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+pip install clang-tidy==23.1.3
+tools/run-clang-tidy.sh build
+```
+
+Use the same clang-tidy version as CI, because a different version can find different things. To
+accept one finding on purpose, put `// NOLINT(check-name)` and the reason on the line.
+
 ## Continuous integration
 
 GitHub Actions builds each pull request and each push to `main` (`.github/workflows/build.yml`):
@@ -112,5 +128,9 @@ GitHub Actions builds each pull request and each push to `main` (`.github/workfl
 | macOS (Apple silicon, Metal, RTL-SDR, UHD) | Builds on an Apple silicon runner with XQuartz, Accelerate, the Metal backend, the two device backends and the simulated BB60. Runs all self-checks and the same command-line runs as the Linux job |
 | Linux CUDA 12.0 and 12.8 | Builds the CUDA backend. The runners have no GPU, so the job makes sure that a CUDA build runs on the CPU |
 | Sanitizers (address, thread) | Builds with `WVT_SANITIZE=address` (ASan and UBSan) and with `WVT_SANITIZE=thread` (TSan), and runs all self-checks |
+| clang-tidy | Runs `tools/run-clang-tidy.sh` (clang-tidy 23.1.3). A finding causes the job to fail |
 | Fuzz the parsers | Builds the fuzz targets with clang, runs them on the seed inputs, then fuzzes each one for 60 s. If a fuzz target finds a problem, the job keeps the input as a `fuzz-crashes` artifact |
 | Documentation | Builds these pages with Sphinx. A warning causes the job to fail |
+
+The Linux, macOS and CUDA build jobs use [`WVT_WERROR=ON`](build.md#wvt_werror): a compiler warning in
+the wvt code causes the job to fail.

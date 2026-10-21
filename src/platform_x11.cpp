@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "imgui_impl_opengl2.h"
+#include "log.h"
 #include "sw_renderer.h"
 
 namespace {
@@ -256,7 +257,7 @@ bool X11Window::create(const char* title, int w, int h, bool forceSoftware, std:
     XInitThreads();
     d->dpy = XOpenDisplay(nullptr);
     if (!d->dpy) {
-        const char* disp = getenv("DISPLAY");
+        const char* disp = envVar("DISPLAY");
         err = std::string("cannot open X display '") + (disp ? disp : "(DISPLAY not set)") +
               "'. Start an X server (e.g. XQuartz on macOS) and set DISPLAY.";
         return false;

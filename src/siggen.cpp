@@ -5,10 +5,10 @@
 #include <cerrno>
 #include <climits>
 #include <cstdio>
-#include <cstring>
 
 #include "dsp.h"
 #include "json.h"
+#include "log.h"
 #include "recorder.h"
 #include "ui_util.h"
 
@@ -173,7 +173,7 @@ bool saveChain(const std::string& path, const WaveformParams& p, std::string& er
     j += "\n  ]\n}\n";
     FILE* f = fopen(full.c_str(), "wb");
     if (!f) {
-        err = "can't write " + full + ": " + strerror(errno);
+        err = "can't write " + full + ": " + errnoText(errno);
         return false;
     }
     const bool ok = fwrite(j.data(), 1, j.size(), f) == j.size();
@@ -188,7 +188,7 @@ bool loadChain(const std::string& path, WaveformParams& p, std::string& err) {
     const std::string full = expandHome(path);
     FILE* f = fopen(full.c_str(), "rb");
     if (!f) {
-        err = "can't open " + full + ": " + strerror(errno);
+        err = "can't open " + full + ": " + errnoText(errno);
         return false;
     }
     std::string text;
