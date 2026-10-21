@@ -285,9 +285,16 @@ For the self-checks, refer to [Self-checks and test signals](self-checks.md).
 
 ## Version information
 
-At configure time, CMake reads the git revision with `git describe --always --dirty`. wvt writes
-this revision to the start of each log file. If you change the source, configure again to update
-the revision.
+At each build, CMake reads two values from git:
+
+- **Build:** the short commit hash, for example `523ac6c`. If tracked files have changes that are
+  not committed, `-dirty` is added. Outside a git checkout (for example, a source archive), the
+  value is `unknown`.
+- **Version:** the version tag on that commit, for example `v1.1`. If the commit has no tag, the
+  value is blank.
+
+**Help > About wvt** shows the two values. wvt also writes them to the start of each log file.
+You do not have to configure again after a commit or a new tag: the next build updates the values.
 
 ## Build the documentation
 

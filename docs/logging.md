@@ -19,7 +19,7 @@ The file gets all messages, at all levels, also when you do not use `-v`. To wri
 The start of the file has:
 
 - The start time and the process ID.
-- The build: the git revision, and if RTL-SDR, UHD and audio are on or off.
+- The build: the git commit and version tag (see [Version information](build.md#version-information)), and if RTL-SDR, UHD and audio are on or off.
 - The operating system.
 - The full command line.
 

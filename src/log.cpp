@@ -11,10 +11,6 @@
 #include <ctime>
 #include <mutex>
 
-#ifndef WVT_GIT_HASH
-#define WVT_GIT_HASH "unknown"
-#endif
-
 namespace {
 
 std::mutex g_mutex;  // guards everything below except the two atomics
@@ -77,7 +73,7 @@ void writeHeader(const LogConfig& cfg) {
     char ts[40];
     stamp(ts, sizeof ts, true);
     fprintf(g_file, "# wvt log, started %s, pid %d\n", ts, (int)getpid());
-    fprintf(g_file, "# build: git %s, RTL-SDR %s, UHD %s, audio %s\n", WVT_GIT_HASH,
+    fprintf(g_file, "# build: git %s, RTL-SDR %s, UHD %s, audio %s\n", cfg.build.empty() ? "unknown" : cfg.build.c_str(),
 #ifdef WVT_HAVE_RTLSDR
             "on",
 #else

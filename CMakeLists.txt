@@ -125,13 +125,15 @@ target_include_directories(wvt PRIVATE src third_party/stb ${PLATFORM_INCLUDES})
 target_link_libraries(wvt PRIVATE imgui_implot ${PLATFORM_LIBS} Threads::Threads)
 target_compile_options(wvt PRIVATE ${WVT_WARNINGS})
 
-# The git revision goes into the log file header. It is read at configure time.
-execute_process(COMMAND git describe --always --dirty
-  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} OUTPUT_VARIABLE WVT_GIT_HASH
-  OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-if(WVT_GIT_HASH)
-  set_property(SOURCE src/log.cpp APPEND PROPERTY COMPILE_DEFINITIONS WVT_GIT_HASH="${WVT_GIT_HASH}")
-endif()
+# The git commit and version tag for the About window and the log file
+# header (issue #61). Read at every build, not only at configure time.
+set(BUILD_INFO_CPP ${CMAKE_BINARY_DIR}/build_info.cpp)
+add_custom_target(wvt_build_info
+  COMMAND ${CMAKE_COMMAND} -DSRC=${CMAKE_SOURCE_DIR} -DOUT=${BUILD_INFO_CPP} -P ${CMAKE_SOURCE_DIR}/cmake/build_info.cmake
+  BYPRODUCTS ${BUILD_INFO_CPP}
+  VERBATIM)
+target_sources(wvt PRIVATE ${BUILD_INFO_CPP})
+add_dependencies(wvt wvt_build_info)
 
 # ---------------------------------------------------------------------------
 # Optional SDR backends. AUTO uses a library if it is found, ON requires it.
