@@ -360,3 +360,10 @@ target_compile_options(gpu_check PRIVATE -Wall -Wextra -Wno-unused-parameter)
 add_executable(snapshot_check tools/snapshot_check.cpp src/snapshot.cpp)
 target_include_directories(snapshot_check PRIVATE src third_party/stb)
 target_compile_options(snapshot_check PRIVATE -Wall -Wextra -Wno-unused-parameter)
+
+# Device self-test (UHD search results, device arguments, sample rate rules)
+add_executable(device_check tools/device_check.cpp src/siggen.cpp src/siggen_out.cpp src/json.cpp src/recorder.cpp
+  src/sdr_device.cpp src/sdr_sim.cpp src/sdr_siggen.cpp src/iq_file.cpp src/dsp.cpp src/ui_util.cpp src/log.cpp)
+target_include_directories(device_check PRIVATE src)
+target_link_libraries(device_check PRIVATE imgui_implot Threads::Threads)
+target_compile_options(device_check PRIVATE -Wall -Wextra -Wno-unused-parameter)

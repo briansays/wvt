@@ -17,6 +17,7 @@ is correct.
 | [Signal generator sweeps](siggen-sweep-plan.md) | #28 | Implemented (PR #30) |
 | [Signal generator chains](siggen-chain-plan.md) | #27 | Implemented (PR #31) |
 | [Plot snapshots](plot-snapshot-plan.md) | #13 | Implemented |
+| [Other USRP models](usrp-models-plan.md) | #11 | Implemented. Needs network USRPs to verify |
 | [Signal Hound BB60](bb60-integration-plan.md) | #2 | Not merged. Needs the SDK and hardware |
 | [Epiq Sidekiq](sidekiq-integration-plan.md) | #4 | Plan only |
 
@@ -33,6 +34,7 @@ ui-cleanup-plan
 siggen-sweep-plan
 siggen-chain-plan
 plot-snapshot-plan
+usrp-models-plan
 bb60-integration-plan
 sidekiq-integration-plan
 ```

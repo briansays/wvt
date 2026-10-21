@@ -61,6 +61,7 @@ public:
     bool running() const { return dev_ != nullptr; }
     const StreamConfig& config() const { return cfg_; }
     GainRange gainRange() const;
+    DeviceCaps caps() const;  // of the open device
 
     bool setCenterFreq(double hz, std::string& err);
     bool setGain(bool agc, double db, std::string& err);

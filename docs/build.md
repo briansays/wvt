@@ -76,7 +76,8 @@ Output: `wvt: RTL-SDR support enabled (librtlsdr <version>)`.
 
 ### WVT_WITH_UHD
 
-Enables or disables the USRP backend (`src/sdr_uhd.cpp`). This backend receives and transmits.
+Enables or disables the USRP backend (`src/sdr_uhd.cpp`). This backend receives and transmits, with
+all USRPs that UHD supports: the USB B200 family and the network N3xx, X3xx and X4xx.
 
 - CMake finds UHD with `pkg-config` (the `uhd` module). If `pkg-config` does not find it, CMake
   uses the `UHDConfig.cmake` file of UHD.
@@ -198,6 +199,7 @@ cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
 | `segment_check` | Self-check for the time segment rules |
 | `extract_check` | Self-check for the region export |
 | `snapshot_check` | Self-check for the plot snapshots |
+| `device_check` | Self-check for the device list and the sample rate rules |
 | `gpu_check` | Compares the GPU results with the CPU results, and measures the speed |
 
 For the self-checks, refer to [Self-checks and test signals](self-checks.md).

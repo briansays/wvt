@@ -3,7 +3,7 @@
 The signal generator makes CW and pulsed waveforms: chirps, Barker codes, staggered or jittered
 PRIs, bursts, sweeps and impairments. It also plays back recordings as canned waveforms, one at a
 time or as a chain. The generator writes its waveforms to files, shows them in the live view
-(loopback), or transmits them with a USRP B200 / B205mini.
+(loopback), or transmits them with a USRP.
 
 ## Open the generator
 
@@ -187,9 +187,19 @@ apply while you make them. The main window can record the loopback stream.
 
 ### USRP transmit
 
-The generator transmits the waveform from the TX/RX port of a B200 / B205mini, tuned to the center
-frequency. You can change the frequency, the gain and all waveform settings while the USRP
-transmits.
+The generator transmits the waveform from a USRP, tuned to the center frequency. You can change
+the frequency, the gain and all waveform settings while the USRP transmits.
+
+| Setting | Function |
+|---|---|
+| Device args | The UHD device arguments, for example `serial=31A2B3C` or `addr=192.168.40.2`. Empty: the first USRP that UHD finds |
+| Antenna | The transmit port. Empty: the first transmit port of the channel (`TX/RX` on the B2xx and N3xx, `TX/RX0` on the X410) |
+| Channel | The transmit channel |
+| Reference | The clock and time reference (*internal*, *external* or *gpsdo*). It applies to the full device |
+| Bandwidth | The analog filter bandwidth. 0 sets it automatically |
+| TX gain | The transmit gain. While the USRP transmits, the slider shows the range of the device |
+
+If the live view receives from the same USRP, the receiver and the transmitter share it.
 
 :::{warning}
 Transmit only into a dummy load or an attenuated cable, or where you have a license.
@@ -217,8 +227,9 @@ Safety and limits:
   an end-of-burst to the USRP before it stops. This tells the USRP to stop transmitting.
 - To monitor your own signal on a receiver, put a minimum of 30 dB of attenuation between the
   ports.
-- On one B2xx, wvt can receive and transmit at the same time (full duplex). The two directions
-  then use the same sample rate, because the B2xx uses one clock for the two.
+- On one USRP, wvt can receive and transmit at the same time (full duplex). On a B2xx, the two
+  directions must use the same sample rate, because the B2xx uses one clock for the two. A network
+  USRP can use a different rate for each direction.
 - Between pulses, the USRP transmits zeros. Thus a small LO leakage stays at the center frequency.
   A non-zero offset keeps the signal away from this leakage.
 
@@ -263,7 +274,9 @@ Safety and limits:
 | `--gen-annotate` | SigMF: one annotation for each pulse, play, sweep or chain item |
 | `--tx` | Transmit with a USRP until Ctrl+C, or for `--gen-duration` |
 | `--tx-gain DB` | The transmit gain (default 0 dB) |
-| `--tx-args ARGS` | The UHD device arguments (default `type=b200`) |
+| `--tx-args ARGS` | The UHD device arguments. The default is the first USRP found |
+| `--tx-antenna NAME` | The transmit port. The default is the first transmit port of the channel |
+| `--usrp-channel N`, `--ref SRC` | The USRP channel and reference, as for the receiver |
 
 ### Examples
 

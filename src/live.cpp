@@ -25,9 +25,10 @@ bool LiveEngine::start(const StreamConfig& cfg, std::string& err) {
     auto dev = openDevice(cfg, err);
     if (!dev) return false;
     cfg_ = cfg;
-    // About 2 s of samples, between 16 MB and 256 MB.
+    // About 2 s of samples, between 16 MB and 1 GB (a network USRP at 250 MS/s
+    // fills 1 GB in a second).
     const int bps = formatBytesPerSample(dev->format());
-    const int64_t bytes = std::clamp<int64_t>((int64_t)(2.0 * dev->sampleRate()) * bps, 16 << 20, 256 << 20);
+    const int64_t bytes = std::clamp<int64_t>((int64_t)(2.0 * dev->sampleRate()) * bps, 16 << 20, 1 << 30);
     ring_ = std::make_shared<SampleRing>(bytes / bps, bps);
     auto ring = ring_;
     if (!dev->start([ring](const uint8_t* p, int64_t n) { ring->push(p, n); },
@@ -71,6 +72,8 @@ void LiveEngine::stop() {
 }
 
 GainRange LiveEngine::gainRange() const { return dev_ ? dev_->gainRange() : GainRange{}; }
+
+DeviceCaps LiveEngine::caps() const { return dev_ ? dev_->caps() : DeviceCaps{}; }
 
 bool LiveEngine::setCenterFreq(double hz, std::string& err) {
     if (!dev_) return false;

@@ -17,6 +17,46 @@ std::vector<std::string> sdrDrivers() {
     return d;
 }
 
+namespace {
+constexpr double kUsrpMaxRate = 500e6;
+}  // namespace
+
+std::vector<std::pair<std::string, std::string>> parseDeviceArgs(const std::string& args) {
+    std::vector<std::pair<std::string, std::string>> out;
+    size_t i = 0;
+    while (i < args.size()) {
+        size_t j = args.find(',', i);
+        if (j == std::string::npos) j = args.size();
+        const std::string kv = args.substr(i, j - i);
+        const size_t e = kv.find('=');
+        if (e != std::string::npos) out.emplace_back(kv.substr(0, e), kv.substr(e + 1));
+        else if (!kv.empty()) out.emplace_back(kv, "");
+        i = j + 1;
+    }
+    return out;
+}
+
+DeviceInfo uhdDeviceInfo(const std::string& found) {
+    std::string type, addr, serial, product, name;
+    for (const auto& [k, v] : parseDeviceArgs(found)) {
+        if (k == "type") type = v;
+        else if (k == "addr") addr = v;
+        else if (k == "serial") serial = v;
+        else if (k == "product") product = v;
+        else if (k == "name") name = v;
+    }
+    if (product.empty()) product = type.empty() ? "USRP" : type;
+    // A network device is reached by its address (a serial would make UHD search
+    // every interface again); a USB device by its serial.
+    std::string args = !addr.empty() ? "addr=" + addr : !serial.empty() ? "serial=" + serial : found;
+    std::string label = "USRP " + product, detail;
+    if (!addr.empty()) detail = addr;
+    if (!serial.empty()) detail += (detail.empty() ? "serial " : ", serial ") + serial;
+    if (!name.empty()) detail += (detail.empty() ? "" : ", ") + name;
+    if (!detail.empty()) label += " (" + detail + ")";
+    return {"uhd", args, label};
+}
+
 std::vector<DeviceInfo> enumerateDevices() {
     std::vector<DeviceInfo> out;
     // Undetected drivers still get an entry, so Start explains what is wrong.
@@ -28,7 +68,7 @@ std::vector<DeviceInfo> enumerateDevices() {
 #ifdef WVT_HAVE_UHD
     size_t beforeUhd = out.size();
     enumerateUhd(out);
-    if (out.size() == beforeUhd) out.push_back({"uhd", "type=b200", "USRP B200/B205 (none detected)"});
+    if (out.size() == beforeUhd) out.push_back({"uhd", "", "USRP (none detected)"});
 #endif
     out.push_back({"sim", "", "Simulator (synthetic test signals)"});
     out.push_back({"siggen", "", "Signal generator loopback"});
@@ -57,6 +97,8 @@ std::unique_ptr<SdrDevice> openDevice(const StreamConfig& cfg, std::string& err)
              fmtSI(cfg.fc, "Hz", 9).c_str(), cfg.agc ? "auto" : fmtSI(cfg.gain, "dB", 4).c_str(),
              cfg.antenna.empty() ? "default" : cfg.antenna.c_str(),
              cfg.bandwidth > 0 ? fmtSI(cfg.bandwidth, "Hz", 4).c_str() : "auto");
+    if (cfg.driver == "uhd")
+        LOG_DEBUG("device", "uhd options: channel %d, reference %s", cfg.channel, cfg.ref.empty() ? "default" : cfg.ref.c_str());
     if (cfg.driver == "rtlsdr")
         LOG_DEBUG("device", "rtlsdr options: bias-tee %s, direct sampling %d, ppm %d", cfg.biasTee ? "on" : "off",
                   cfg.directSampling, cfg.ppm);
@@ -97,11 +139,13 @@ bool checkSampleRate(const std::string& driver, double rate, std::string& err, s
         }
         if (rate > 2.4e6) warn = "RTL-SDR rates above 2.4 MS/s often drop samples";
     } else if (driver == "uhd") {
-        if (rate > 61.44e6) {
-            err = "USRP B200/B205 sample rate is limited to 61.44 MS/s";
+        // The fastest USRP (X410) streams 500 MS/s per channel; the model's own
+        // limit is checked when it opens.
+        if (rate > kUsrpMaxRate) {
+            err = "USRP sample rate is limited to " + fmtSI(kUsrpMaxRate, "S/s", 4);
             return false;
         }
-        if (rate > 8e6) warn = "rates above ~8 MS/s need the USRP on a USB 3 port";
+        if (rate > 100e6) warn = "rates above 100 MS/s need a 10 GbE (or faster) link and a fast host";
     } else if (driver == "sim" || driver == "siggen") {
         if (rate > 20e6) {
             err = std::string(driver == "sim" ? "simulator" : "loopback") + " sample rate is limited to 20 MS/s";
@@ -120,8 +164,8 @@ std::unique_ptr<SdrTx> openTx(const TxConfig& cfg, std::string& err) {
     }
 #ifdef WVT_HAVE_UHD
     if (cfg.driver == "uhd") {
-        if (cfg.rate > 61.44e6) {
-            err = "USRP B200/B205 sample rate is limited to 61.44 MS/s";
+        if (cfg.rate > kUsrpMaxRate) {
+            err = "USRP sample rate is limited to " + fmtSI(kUsrpMaxRate, "S/s", 4);
             return nullptr;
         }
         return openUhdTx(cfg, err);

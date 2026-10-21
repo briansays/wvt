@@ -39,9 +39,11 @@ wvt [options] [file]
 
 | Option | Function | Page |
 |---|---|---|
-| `--device DEV` | `rtlsdr[:INDEX\|SERIAL]`, `uhd[:ARGS]`, `sim` or `siggen` | [Live devices](live.md) |
+| `--device DEV` | `rtlsdr[:INDEX\|SERIAL]`, `uhd[:ARGS]` (for example `uhd:addr=192.168.40.2`), `sim` or `siggen` | [Live devices](live.md) |
 | `--gain DB\|auto` | The receiver gain (default 30 dB) | [Live devices](live.md) |
-| `--antenna NAME` | The USRP antenna (`RX2` or `TX/RX`) | [Live devices](live.md) |
+| `--antenna NAME` | The USRP receive antenna, for example `RX2` or `TX/RX` | [Live devices](live.md#usrp-options) |
+| `--usrp-channel N` | The USRP channel for receive and transmit (default 0) | [Live devices](live.md#usrp-options) |
+| `--ref SRC` | The USRP clock and time reference: `internal`, `external` or `gpsdo` | [Live devices](live.md#usrp-options) |
 | `--bandwidth HZ` | The USRP analog bandwidth (default: automatic) | [Live devices](live.md) |
 | `--bias-tee` | RTL-SDR: supply power to an LNA or an active antenna through the coax | [Live devices](live.md) |
 | `--direct-sampling I\|Q` | RTL-SDR: HF direct sampling (v3: `Q`) | [Live devices](live.md) |

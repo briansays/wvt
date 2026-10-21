@@ -255,6 +255,7 @@ TxEngine::Stats TxEngine::stats() const {
     s.running = true;
     s.description = tx_->description();
     s.notes = tx_->notes();
+    s.antenna = tx_->antenna();
     s.error = tx_->fatalError();
     s.fc = tx_->centerFreq();
     s.rate = tx_->sampleRate();
