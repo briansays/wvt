@@ -571,10 +571,13 @@ private:
         return f;
     }
 
+    // Every way out of the loop goes through the end-of-burst below: an error
+    // sets quit_ instead of returning, so the device is never left keyed (issue #43).
     void run() {
         std::vector<std::complex<float>> buf(spb_);
         const void* b[1] = {buf.data()};
         uhd_tx_metadata_handle* md = &mdFirst_;
+        timeouts_ = 0;
         while (!quit_) {
             fill_(buf.data(), (int64_t)spb_);
             size_t done = 0;
@@ -583,12 +586,14 @@ private:
                 size_t n = 0;
                 if (uhd_tx_streamer_send(tx_, b, spb_ - done, md, 0.5, &n) != UHD_ERROR_NONE) {
                     fail(lastError("transmit failed"));
-                    return;
+                    quit_ = true;
+                    break;
                 }
                 if (n == 0) {
                     if (++timeouts_ > 10) {
                         fail("USRP stopped accepting samples (unplugged?)");
-                        return;
+                        quit_ = true;
+                        break;
                     }
                     continue;
                 }
@@ -600,6 +605,7 @@ private:
             pollAsync();
         }
         // End the burst so the transmitter stops instead of underflowing forever.
+        // After an error this can fail too (device gone); there is nothing more to do then.
         std::complex<float> zero[1] = {};
         const void* z[1] = {zero};
         size_t n = 0;
