@@ -109,6 +109,7 @@ GitHub Actions builds each pull request and each push to `main` (`.github/workfl
 | Job | Contents |
 |---|---|
 | Linux (CPU, RTL-SDR, UHD) | Builds with the two device backends and the simulated BB60, runs all self-checks with CTest and some command-line runs |
+| macOS (Apple silicon, Metal, RTL-SDR, UHD) | Builds on an Apple silicon runner with XQuartz, Accelerate, the Metal backend, the two device backends and the simulated BB60. Runs all self-checks and the same command-line runs as the Linux job |
 | Linux CUDA 12.0 and 12.8 | Builds the CUDA backend. The runners have no GPU, so the job makes sure that a CUDA build runs on the CPU |
 | Sanitizers (address, thread) | Builds with `WVT_SANITIZE=address` (ASan and UBSan) and with `WVT_SANITIZE=thread` (TSan), and runs all self-checks |
 | Fuzz the parsers | Builds the fuzz targets with clang, runs them on the seed inputs, then fuzzes each one for 60 s. If a fuzz target finds a problem, the job keeps the input as a `fuzz-crashes` artifact |

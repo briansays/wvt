@@ -1,7 +1,7 @@
 # Builds wvt on pushes to main and on pull requests (issue #3, step 3 of
 # docs/design/cuda-gpu-plan.md). Pushes to other branches build through their pull
 # request only, so each commit builds once; run it by hand with "Run workflow".
-# GitHub's runners have no GPU: the CUDA jobs only check that the GPU code
+# GitHub's Linux runners have no GPU: the CUDA jobs only check that the GPU code
 # compiles and that a CUDA build runs on the CPU.
 name: build
 
@@ -30,6 +30,30 @@ jobs:
         run: cmake -S . -B build -DWVT_WITH_RTLSDR=ON -DWVT_WITH_UHD=ON -DWVT_WITH_CUDA=OFF -DWVT_BB_SIM=ON
       - name: Build
         run: cmake --build build -j "$(nproc)"
+      - name: Self-tests
+        run: ctest --test-dir build --output-on-failure
+      - name: Command line
+        run: |
+          ./build/wvt --help > /dev/null
+          ./build/wvt --list-devices
+          ./build/iqgen /tmp/t.sigmf-data --fmt ci16
+          ./build/wvt /tmp/t.sigmf-meta --chan 300k:150k --audio nfm --audio-out /tmp/t.wav --segment 0.5:1.5
+
+  macos:
+    name: macOS (Apple silicon, Metal, RTL-SDR, UHD)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install packages
+        # XQuartz gives the X11 and GLX libraries; Accelerate and Metal come with macOS.
+        run: |
+          brew install --cask xquartz
+          brew install pkgconf librtlsdr uhd
+      - name: Configure
+        run: >
+          cmake -S . -B build -DWVT_WITH_METAL=ON -DWVT_WITH_RTLSDR=ON -DWVT_WITH_UHD=ON -DWVT_BB_SIM=ON
+      - name: Build
+        run: cmake --build build -j "$(sysctl -n hw.ncpu)"
       - name: Self-tests
         run: ctest --test-dir build --output-on-failure
       - name: Command line
