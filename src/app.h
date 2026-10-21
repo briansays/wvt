@@ -86,6 +86,7 @@ private:
     void drawFreqMarkers();
     void drawTimeMarkersVertical();
     void drawTimeMarkersHorizontal();
+    void logViewSpectrum();  // issue #29
 
     // flow layout helpers (label + field, wrapping to the next line when needed)
     void flowBegin() { flowFirst_ = true; }
@@ -220,6 +221,9 @@ private:
     float leftFrac_ = 0.45f;
     float specFrac_ = 0.25f;
     bool fitSpecY_ = true;
+    std::shared_ptr<WaterfallRes> specLogged_;  // the result logViewSpectrum last logged (held, so no address reuse)
+    bool specLoggedEmpty_ = false;              // ... or that it logged "no result yet"
+    int specWarnings_ = 0;
 
     // demodulation parameters (src/s0/s1 filled in per frame)
     DemodReq demod_;

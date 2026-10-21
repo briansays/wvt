@@ -1,12 +1,62 @@
 #include "engine.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 
+#include "log.h"
 #include "ui_util.h"
 
 static constexpr float kEps = 1e-20f;
+
+namespace {
+// Value checks for the waterfall log (issue #29): one bad value in a column
+// makes that column of the spectrum of view NaN or infinite.
+struct ValStats {
+    size_t n = 0, nan = 0, inf = 0, neg = 0, zero = 0;
+    double mn = INFINITY, mx = -INFINITY;  // over the finite values
+    size_t bad() const { return nan + inf; }
+    std::string str(const char* unit) const {
+        char b[200];
+        if (mn <= mx)
+            snprintf(b, sizeof b, "%zu values, finite %.4g to %.4g%s, NaN %zu, inf %zu, negative %zu, zero %zu", n, mn,
+                     mx, unit, nan, inf, neg, zero);
+        else
+            snprintf(b, sizeof b, "%zu values, none finite, NaN %zu, inf %zu", n, nan, inf);
+        return b;
+    }
+};
+
+// The first few warnings show on the console; later ones go to the log file
+// only (DEBUG), so that panning over a bad part of a file does not flood it.
+std::atomic<int> g_wfWarnings{0};
+#define WF_WARN(...)                                                       \
+    do {                                                                   \
+        if (g_wfWarnings.fetch_add(1) < 5) LOG_WARN("waterfall", __VA_ARGS__); \
+        else LOG_DEBUG("waterfall", __VA_ARGS__);                          \
+    } while (0)
+
+template <typename T>
+ValStats valStats(const T* v, size_t n) {
+    ValStats s;
+    s.n = n;
+    for (size_t i = 0; i < n; ++i) {
+        const double x = (double)v[i];
+        if (std::isnan(x)) {
+            ++s.nan;
+        } else if (std::isinf(x)) {
+            ++s.inf;
+        } else {
+            s.mn = std::min(s.mn, x);
+            s.mx = std::max(s.mx, x);
+            s.neg += x < 0;
+            s.zero += x == 0;
+        }
+    }
+    return s;
+}
+}  // namespace
 
 // ---------------------------------------------------------------------------
 // Waterfall
@@ -47,7 +97,11 @@ std::shared_ptr<WaterfallRes> computeWaterfall(const WaterfallReq& r, const Canc
     auto res = std::make_shared<WaterfallRes>();
     res->req = r;
     const Source& src = r.src;
-    if (!src.file) return res;
+    if (!src.file) {
+        LOG_DEBUG("waterfall", "no file: empty result");
+        return res;
+    }
+    const auto tStart = std::chrono::steady_clock::now();
     const int n = isPow2(r.nfft) ? r.nfft : 1024;
     const int64_t span = std::max<int64_t>(1, r.s1 - r.s0);
 
@@ -109,6 +163,18 @@ std::shared_ptr<WaterfallRes> computeWaterfall(const WaterfallReq& r, const Canc
     if (cancelled()) return nullptr;
     res->fftsPerRow = job.avg;
     res->coverage = std::min(1.0, (double)job.avg * n / hop);
+    LOG_DEBUG("waterfall",
+              "%s: samples %lld to %lld of %lld (%s), %s fs, %s fc, N %d, %d rows x %d cols, hop %.1f, %d FFTs per row, "
+              "coverage %.1f %%, FFT input %s",
+              res->gpu ? "GPU" : "CPU", (long long)r.s0, (long long)r.s1, (long long)src.file->numSamples(src.fp),
+              fmtSI(span / std::max(1.0, src.fs), "s", 4).c_str(), fmtSI(src.fs, "S/s", 4).c_str(),
+              fmtSI(src.fc, "Hz", 9).c_str(), n, rows, cols, hop, job.avg, res->coverage * 100,
+              fmtSI((double)rows * n * job.avg, "S", 3).c_str());
+    const ValStats lin = valStats(linSum.data(), linSum.size());
+    LOG_DEBUG("waterfall", "row powers (linear): %s", lin.str("").c_str());
+    if (lin.bad() || lin.neg)
+        WF_WARN("row powers have %zu NaN, %zu infinite and %zu negative values (%s): the spectrum of "
+                 "view is NaN or infinite in those columns", lin.nan, lin.inf, lin.neg, res->gpu ? "GPU" : "CPU");
     res->db.resize(linSum.size());
     for (size_t i = 0; i < linSum.size(); ++i) res->db[i] = 10.f * std::log10(linSum[i] + kEps);
 
@@ -128,6 +194,19 @@ std::shared_ptr<WaterfallRes> computeWaterfall(const WaterfallReq& r, const Canc
         res->specAvg[c] = 10.0 * std::log10(res->specAvg[c] / rows + kEps);
         res->specPeak[c] = 10.0 * std::log10(res->specPeak[c] + kEps);
     }
+    {
+        const ValStats a = valStats(res->specAvg.data(), res->specAvg.size());
+        const ValStats pk = valStats(res->specPeak.data(), res->specPeak.size());
+        LOG_DEBUG("waterfall", "spectrum of view: %d points, %s to %s; average %s; peak %s", cols,
+                  fmtSI(res->specF.empty() ? 0 : res->specF.front(), "Hz", 9).c_str(),
+                  fmtSI(res->specF.empty() ? 0 : res->specF.back(), "Hz", 9).c_str(), a.str(" dB").c_str(),
+                  pk.str(" dB").c_str());
+        if (a.bad() == a.n)
+            WF_WARN("spectrum of view: no finite average value (NaN %zu, inf %zu of %zu): the plot is empty",
+                     a.nan, a.inf, a.n);
+        else if (a.bad())
+            WF_WARN("spectrum of view: %zu of %zu average values are not finite", a.bad(), a.n);
+    }
 
     // Percentiles on a subsample for auto ranging
     std::vector<float> sample;
@@ -140,10 +219,18 @@ std::shared_ptr<WaterfallRes> computeWaterfall(const WaterfallReq& r, const Canc
             std::nth_element(sample.begin(), sample.begin() + k, sample.end());
             return sample[k];
         };
+        const ValStats ss = valStats(sample.data(), sample.size());
         res->p5 = pct(0.05);
         res->p50 = pct(0.5);
         res->p999 = pct(0.999);
+        LOG_DEBUG("waterfall", "auto range from %zu of %zu pixels: p5 %.1f, p50 %.1f, p99.9 %.1f dB (pixels: %s)",
+                  sample.size(), total, res->p5, res->p50, res->p999, ss.str(" dB").c_str());
+        if (ss.bad() || !std::isfinite(res->p5) || !std::isfinite(res->p999))
+            WF_WARN("auto range: %zu NaN and %zu infinite pixels in the sample; p5 %g, p99.9 %g", ss.nan,
+                     ss.inf, res->p5, res->p999);
     }
+    LOG_DEBUG("waterfall", "done in %.0f ms",
+              std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tStart).count());
     return res;
 }
 
