@@ -27,6 +27,7 @@ struct LogConfig {
     bool file = true;
     std::string dir;  // empty: $WVT_LOG_DIR, then $TMPDIR, then /tmp
     std::string commandLine;  // written to the file header
+    std::string build;        // git commit and version tag, for the file header; empty = "unknown"
     FILE* consoleStream = nullptr;  // nullptr = stderr (tests redirect it)
 };
 

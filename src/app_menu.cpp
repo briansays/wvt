@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "app.h"
+#include "build_info.h"
 #include "gpu.h"
 #include "platform_x11.h"
 #include "ui_util.h"
@@ -188,6 +189,8 @@ void App::drawHelpWindows() {
                          ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize)) {
             ImGui::TextUnformatted("wvt - IQ waveform viewer");
             ImGui::Separator();
+            ImGui::Text("Version: %s", buildVersionTag());  // blank on a commit with no version tag
+            ImGui::Text("Build: %s", buildGitHash());
             const GpuInfo& g = gpuInfo();
             ImGui::Text("Renderer: %s", win_.usingGL() ? "GLX" : "software");
             if (!g.built) ImGui::TextUnformatted("GPU: not built in (CPU only)");

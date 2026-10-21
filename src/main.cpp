@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "app.h"
+#include "build_info.h"
 #include "cli.h"
 #include "extract.h"
 #include "gpu.h"
@@ -354,6 +355,7 @@ int main(int argc, char** argv) {
     // Logging options come out of argv first, so the rest of the parse is logged.
     LogConfig lc;
     for (int i = 0; i < argc; ++i) lc.commandLine += (i ? " " : "") + std::string(argv[i]);
+    lc.build = std::string(buildGitHash()) + (*buildVersionTag() ? std::string(" (") + buildVersionTag() + ")" : "");
     std::vector<char*> args(argv, argv + argc);
     std::string logErr;
     if (!logParseArgs(args, lc, logErr)) {
