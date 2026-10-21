@@ -128,7 +128,7 @@ struct Parser {
                 ++i;
                 JsonValue m;
                 if (!value(m, depth + 1)) return false;
-                v.obj.emplace_back(std::move(k), std::move(m));
+                v.obj.push_back({std::move(k), std::move(m)});
                 ws();
                 if (i < t.size() && t[i] == ',') {
                     ++i;

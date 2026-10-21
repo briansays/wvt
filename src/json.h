@@ -6,8 +6,9 @@
 // jsonQuote and jsonNumber; the files that write JSON keep their own layout.
 #include <cstdint>
 #include <string>
-#include <utility>
 #include <vector>
+
+struct JsonMember;
 
 struct JsonValue {
     enum class Type { Null, Bool, Number, String, Array, Object };
@@ -16,7 +17,7 @@ struct JsonValue {
     double num = 0;
     std::string str;
     std::vector<JsonValue> arr;
-    std::vector<std::pair<std::string, JsonValue>> obj;  // in file order
+    std::vector<JsonMember> obj;  // in file order
 
     bool isNull() const { return type == Type::Null; }
     // Object member, or null if it's missing (or this isn't an object).
@@ -28,6 +29,14 @@ struct JsonValue {
     // Whole-number member in [lo, hi], or `def` when missing. False if the
     // member is there but isn't such a number (casting it would be undefined).
     bool integer(const std::string& key, int64_t lo, int64_t hi, int64_t def, int64_t& out) const;
+};
+
+// An object member. Not std::pair<std::string, JsonValue>: JsonValue is not
+// complete inside its own definition, and libstdc++ 14 refuses a pair of an
+// incomplete type (a vector of an incomplete type is allowed).
+struct JsonMember {
+    std::string first;
+    JsonValue second;
 };
 
 // Parses the whole text. On failure, err says what and where (line:column).
