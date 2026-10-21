@@ -18,7 +18,7 @@ is correct.
 | [Signal generator chains](siggen-chain-plan.md) | #27 | Implemented (PR #31) |
 | [Plot snapshots](plot-snapshot-plan.md) | #13 | Implemented |
 | [Other USRP models](usrp-models-plan.md) | #11 | Implemented. Needs network USRPs to verify |
-| [Signal Hound BB60](bb60-integration-plan.md) | #2 | Not merged. Needs the SDK and hardware |
+| [Signal Hound BB60](bb60-integration-plan.md) | #2 | Implemented with a simulated device. Needs a BB60 to verify |
 | [Epiq Sidekiq](sidekiq-integration-plan.md) | #4 | Plan only |
 
 ```{toctree}

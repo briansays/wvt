@@ -25,7 +25,9 @@ Install the compiler, CMake and the X11 and OpenGL packages for your system:
 | macOS | Install [XQuartz](https://www.xquartz.org) and the Xcode Command Line Tools |
 
 On macOS, the build links `/opt/X11/lib/libX11` and `libGL` from XQuartz. Thus the binary is a
-real X11 client.
+real X11 client. On Apple silicon, use the ARM Homebrew (`/opt/homebrew`) for CMake and the
+optional libraries, so that the binary is native ARM. The Intel Homebrew (`/usr/local`) makes an
+x86-64 binary that runs under Rosetta, and it cannot use the Signal Hound BB60 library.
 
 These packages are optional:
 

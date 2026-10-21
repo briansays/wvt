@@ -24,6 +24,9 @@ to the default of an option, delete `build/CMakeCache.txt`, or give the default 
 | [`X11_ROOT`](#x11_root) | A folder | `/opt/X11` | macOS |
 | [`WVT_WITH_RTLSDR`](#wvt_with_rtlsdr) | `AUTO`, `ON`, `OFF` | `AUTO` | All |
 | [`WVT_WITH_UHD`](#wvt_with_uhd) | `AUTO`, `ON`, `OFF` | `AUTO` | All |
+| [`WVT_WITH_BB`](#wvt_with_bb) | `AUTO`, `ON`, `OFF` | `AUTO` | Linux, macOS ARM |
+| [`SIGNALHOUND_SDK_DIR`](#signalhound_sdk_dir) | A folder | Empty | Linux, macOS ARM |
+| [`WVT_BB_SIM`](#wvt_bb_sim) | `ON`, `OFF` | `OFF` | All |
 | [`WVT_WITH_AUDIO`](#wvt_with_audio) | `AUTO`, `ON`, `OFF` | `AUTO` | All |
 | [`WVT_WITH_CUDA`](#wvt_with_cuda) | `AUTO`, `ON`, `OFF` | `AUTO` | Linux |
 | [`WVT_CUDA_STATIC`](#wvt_cuda_static) | `ON`, `OFF` | `ON` | Linux |
@@ -85,6 +88,33 @@ all USRPs that UHD supports: the USB B200 family and the network N3xx, X3xx and 
 - Without this backend, wvt cannot receive from a USRP, and the signal generator cannot transmit.
 
 Output: `wvt: UHD support enabled (UHD <version>)`.
+
+### WVT_WITH_BB
+
+Enables or disables the Signal Hound BB60 backend (`src/sdr_bb60.cpp`). It needs `bb_api` from the
+Signal Hound SDK. Refer to [Live devices](live.md#signal-hound-bb60).
+
+- CMake looks for `bb_api.h` and the library in `SIGNALHOUND_SDK_DIR`. It uses the library for the
+  CPU of the build: Linux x86-64 (the newest version 5 library), Linux ARM64, or macOS ARM.
+- CMake copies the library into `build/bb_api/` under its run-time name. wvt finds it there
+  through its rpath. On Linux x86-64, CMake also copies `libftd2xx.so`.
+- An x86-64 macOS build cannot use the ARM library. CMake then tells you to configure with
+  `-DCMAKE_OSX_ARCHITECTURES=arm64`.
+- Without this backend, the device list does not show BB60 devices.
+
+Output: `wvt: Signal Hound BB60 support enabled (bb_api 5.0.x, <library>)`.
+
+### SIGNALHOUND_SDK_DIR
+
+The folder of the extracted Signal Hound SDK, for example `$HOME/signal_hound_sdk`. A prefix
+with `include/bb_api.h` and `lib/libbb_api.*` also works. If the library is installed in a system
+folder, such as `/usr/local/lib`, CMake finds it without this option.
+
+### WVT_BB_SIM
+
+`ON` builds the BB60 backend against a simulated BB60D (`tools/bb_sim/`) instead of the SDK. Use
+it for CI and tests. The build then also makes `bb_check`, which tests the backend. Do not use it
+for normal use: the device list then shows the simulated BB60.
 
 ### WVT_WITH_AUDIO
 
@@ -200,6 +230,7 @@ cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
 | `extract_check` | Self-check for the region export |
 | `snapshot_check` | Self-check for the plot snapshots |
 | `device_check` | Self-check for the device list and the sample rate rules |
+| `bb_check` | Self-check for the BB60 backend, with the simulated device. Only with `WVT_BB_SIM=ON` |
 | `gpu_check` | Compares the GPU results with the CPU results, and measures the speed |
 
 For the self-checks, refer to [Self-checks and test signals](self-checks.md).

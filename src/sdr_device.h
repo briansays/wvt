@@ -1,7 +1,7 @@
 #pragma once
 // SDR receiver abstraction. One open device delivers a continuous stream of
-// samples in its native packed format (RTL-SDR: cu8, USRP: ci16, simulator:
-// ci16) to a callback on the device's own thread.
+// samples in its native packed format (RTL-SDR: cu8, USRP: ci16, BB60: ci16,
+// simulator: ci16) to a callback on the device's own thread.
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -11,19 +11,22 @@
 #include "iq_file.h"
 
 struct StreamConfig {
-    std::string driver = "sim";  // "sim" | "siggen" | "rtlsdr" | "uhd"
-    std::string args;            // rtlsdr: index or serial; uhd: device args ("serial=...", "addr=192.168.10.2")
+    std::string driver = "sim";  // "sim" | "siggen" | "rtlsdr" | "uhd" | "bb"
+    std::string args;            // rtlsdr: index or serial; uhd: device args ("serial=...", "addr=192.168.10.2"); bb: serial
     double fc = 100e6;
     double rate = 2.4e6;
     bool agc = false;
-    double gain = 30;        // dB
+    double gain = 30;        // dB; bb: the reference level in dBm
     std::string antenna;     // uhd: "RX2", "TX/RX", "RX1"...; empty = device default
-    double bandwidth = 0;    // uhd analog bandwidth, 0 = auto
+    double bandwidth = 0;    // uhd analog bandwidth, bb I/Q filter bandwidth; 0 = auto
     int channel = 0;         // uhd: receive channel (X310 / N310 / X410 have several)
     std::string ref;         // uhd: clock and time source ("internal", "external", "gpsdo"); empty = default
     bool biasTee = false;    // rtlsdr
     int directSampling = 0;  // rtlsdr: 0 off, 1 I branch, 2 Q branch (HF on the RTL-SDR v3)
     int ppm = 0;             // rtlsdr frequency correction
+    int bbAtten = -1;        // bb attenuator: -1 auto, 0-3 = 0, 10, 20, 30 dB
+    int bbAmp = -1;          // bb amplifier: -1 auto, 0-3 (0 = lowest gain)
+    bool extRef = false;     // bb: lock to a 10 MHz reference on port 1
 };
 
 struct DeviceInfo {
@@ -34,8 +37,10 @@ struct DeviceInfo {
 
 struct GainRange {
     double min = 0, max = 50, step = 1;
-    std::vector<double> steps;  // discrete gains if the device only supports those
-    bool agc = true;            // device supports automatic gain
+    std::vector<double> steps;   // discrete gains if the device only supports those
+    bool agc = true;             // device supports automatic gain
+    const char* label = "Gain";  // the BB60 has a reference level instead
+    const char* unit = "dB";
 };
 
 struct Range {
@@ -79,6 +84,14 @@ public:
     virtual DeviceCaps caps() const { return {}; }
     // Set when streaming stopped by itself (e.g. the device was unplugged).
     virtual std::string fatalError() const { return {}; }
+
+    // A device that restarts its stream to retune (the BB60) calls this hook
+    // between the old samples and the new ones, so the retune is marked at the
+    // right sample. Devices that don't call it return false from usesRetuneMark;
+    // the engine then marks the retune after setCenterFreq returns.
+    using RetuneFn = std::function<void(double fc)>;
+    virtual void setRetuneMark(RetuneFn) {}
+    virtual bool usesRetuneMark() const { return false; }
 };
 
 // Drivers compiled into this binary.
@@ -92,6 +105,13 @@ std::unique_ptr<SdrDevice> openDevice(const StreamConfig& cfg, std::string& err)
 // limit depends on the model, so only the absolute limit is checked here; the
 // device reports the rate it can do when it opens.
 bool checkSampleRate(const std::string& driver, double rate, std::string& err, std::string& warn);
+// Drivers with discrete rates only (the BB60: 40 MS/s divided by a power of 2)
+// list them, highest first; others return an empty list.
+std::vector<double> supportedRates(const std::string& driver);
+// The nearest supported rate (on a log scale), or `rate` for continuous drivers.
+double snapSampleRate(const std::string& driver, double rate);
+// The widest BB60 I/Q filter at this decimation (the API's table).
+double bbMaxBandwidth(int decimation);
 
 // One line of a UHD device search ("type=x300,addr=192.168.40.2,name=,serial=
 // 31A2B3C,product=X310") as a device list entry: network devices are selected
@@ -110,4 +130,8 @@ void enumerateRtlSdr(std::vector<DeviceInfo>& out);
 #ifdef WVT_HAVE_UHD
 std::unique_ptr<SdrDevice> openUhdDevice(const StreamConfig& cfg, std::string& err);
 void enumerateUhd(std::vector<DeviceInfo>& out);
+#endif
+#ifdef WVT_HAVE_BB
+std::unique_ptr<SdrDevice> openBbDevice(const StreamConfig& cfg, std::string& err);
+void enumerateBb(std::vector<DeviceInfo>& out);
 #endif

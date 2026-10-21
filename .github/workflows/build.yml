@@ -26,12 +26,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential cmake libx11-dev libgl1-mesa-dev librtlsdr-dev libuhd-dev
       - name: Configure
-        run: cmake -S . -B build -DWVT_WITH_RTLSDR=ON -DWVT_WITH_UHD=ON -DWVT_WITH_CUDA=OFF
+        # WVT_BB_SIM builds the BB60 backend against the simulated device (no SDK in CI).
+        run: cmake -S . -B build -DWVT_WITH_RTLSDR=ON -DWVT_WITH_UHD=ON -DWVT_WITH_CUDA=OFF -DWVT_BB_SIM=ON
       - name: Build
         run: cmake --build build -j "$(nproc)"
       - name: Self-tests
         run: |
-          for t in siggen_check audio_check log_check segment_check gpu_check extract_check snapshot_check device_check; do
+          for t in siggen_check audio_check log_check segment_check gpu_check extract_check snapshot_check device_check bb_check; do
             echo "::group::$t"
             ./build/$t
             echo "::endgroup::"

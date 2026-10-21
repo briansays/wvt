@@ -6,7 +6,7 @@ that share one time axis. When you pan or zoom one plot, all the other plots fol
 
 <img width="2125" height="1407" alt="image" src="https://github.com/user-attachments/assets/71d188af-cc07-4a0c-93ef-36d082b5829b" />
 
-- **Live devices:** wvt streams from an RTL-SDR v3 or a USRP (B200 family, N3xx, X3xx, X4xx), and records the
+- **Live devices:** wvt streams from an RTL-SDR v3, a USRP (B200 family, N3xx, X3xx, X4xx) or a Signal Hound BB60, and records the
   stream to SigMF or raw IQ files.
 - **Signal generator:** CW, pulsed, swept, playback and chain waveforms, to a file, to the live
   view, or transmitted with a USRP.

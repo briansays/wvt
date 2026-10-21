@@ -341,13 +341,17 @@ static void usage() {
         "  -h, --help           show this help\n"
         "\n"
         "live devices (-c and -r set the tuning):\n"
-        "      --device DEV     rtlsdr[:INDEX|SERIAL] | uhd[:ARGS] | sim\n"
-        "                       e.g. --device uhd  --device uhd:addr=192.168.10.2  --device rtlsdr:0\n"
+        "      --device DEV     rtlsdr[:INDEX|SERIAL] | uhd[:ARGS] | bb[:SERIAL] | sim\n"
+        "                       e.g. --device uhd  --device uhd:addr=192.168.10.2  --device rtlsdr:0  --device bb\n"
         "      --gain DB|auto   receiver gain (default 30 dB)\n"
+        "      --ref-level DBM  BB60: strongest expected input (default -20 dBm)\n"
+        "      --atten auto|0|10|20|30   BB60 attenuator (default auto)\n"
+        "      --amp auto|0-3   BB60 amplifier setting (default auto)\n"
+        "      --ext-ref        BB60: lock to a 10 MHz reference on port 1\n"
         "      --antenna NAME   USRP receive antenna (e.g. RX2, TX/RX; default: the device's)\n"
         "      --usrp-channel N USRP receive / transmit channel (X310, N310, X410 have several; default 0)\n"
         "      --ref SRC        USRP clock and time reference: internal | external | gpsdo\n"
-        "      --bandwidth HZ   USRP analog bandwidth (default: automatic)\n"
+        "      --bandwidth HZ   USRP analog / BB60 I/Q bandwidth (default: automatic)\n"
         "      --bias-tee       RTL-SDR: power an LNA / active antenna over the coax\n"
         "      --direct-sampling I|Q  RTL-SDR: HF direct sampling (v3: Q)\n"
         "      --ppm N          RTL-SDR frequency correction\n"
@@ -356,7 +360,7 @@ static void usage() {
         "recording (needs --device):\n"
         "      --record PREFIX  record to PREFIX_<date>_<time>_<fc>_<rate>.<ext>\n"
         "      --record-format sigmf|raw   (default sigmf)\n"
-        "      --record-sample native|cf32 (default native: cu8 for RTL-SDR, ci16 for USRP)\n"
+        "      --record-sample native|cf32 (default native: cu8 for RTL-SDR, ci16 for USRP and BB60)\n"
         "      --record-duration T         stop after T seconds, e.g. 30\n"
         "      --no-gui         record without opening a window (Ctrl+C stops)\n"
         "\n"
@@ -443,7 +447,7 @@ int main(int argc, char** argv) {
         return c != std::string::npos && parseSI(str.substr(0, c).c_str(), a) && parseSI(str.substr(c + 1).c_str(), b);
     };
     StreamConfig dev;
-    bool haveDevice = false, haveRecord = false, noGui = false;
+    bool haveDevice = false, haveRecord = false, noGui = false, haveGain = false;
     RecordConfig rc;
     WaveformParams gp;
     FileGenConfig gc;
@@ -550,6 +554,22 @@ int main(int argc, char** argv) {
             std::string v = next("--gain");
             if (v == "auto") dev.agc = true;
             else if (!parseSI(v.c_str(), dev.gain)) { LOG_ERROR("main", "bad gain"); return 2; }
+            haveGain = true;
+        } else if (a == "--ref-level") {
+            if (!parseSI(next("--ref-level"), dev.gain)) { LOG_ERROR("main", "bad reference level"); return 2; }
+            haveGain = true;
+        } else if (a == "--atten") {
+            std::string v = next("--atten");
+            if (v == "auto") dev.bbAtten = -1;
+            else if (v == "0" || v == "10" || v == "20" || v == "30") dev.bbAtten = atoi(v.c_str()) / 10;
+            else { LOG_ERROR("main", "--atten wants auto, 0, 10, 20 or 30"); return 2; }
+        } else if (a == "--amp") {
+            std::string v = next("--amp");
+            if (v == "auto") dev.bbAmp = -1;
+            else if (v.size() == 1 && v[0] >= '0' && v[0] <= '3') dev.bbAmp = v[0] - '0';
+            else { LOG_ERROR("main", "--amp wants auto or 0-3"); return 2; }
+        } else if (a == "--ext-ref") {
+            dev.extRef = true;
         } else if (a == "--antenna") dev.antenna = next("--antenna");
         else if (a == "--usrp-channel") {
             const char* v = next("--usrp-channel");
@@ -853,7 +873,20 @@ int main(int argc, char** argv) {
         if (ov.haveFc) dev.fc = ov.fc;
         else if (dev.driver == "siggen" && haveGen) dev.fc = gp.fc;  // the loopback listens where the generator plays
         if (ov.haveRate) dev.rate = ov.rate;
-        else if (dev.driver == "uhd") dev.rate = 10e6;
+        else if (dev.driver == "uhd" || dev.driver == "bb") dev.rate = 10e6;
+        if (dev.driver == "bb") {
+            // The BB60 has a reference level, not a gain, and no AGC.
+            if (dev.agc) {
+                LOG_ERROR("main", "the BB60 has no automatic gain: use --ref-level DBM");
+                return 2;
+            }
+            if (!haveGain) dev.gain = -20;
+            const double snapped = snapSampleRate("bb", dev.rate);
+            if (std::fabs(snapped - dev.rate) > 1)
+                LOG_WARN("main", "BB60 rate %s: using %s (40 MS/s divided by a power of 2)",
+                         fmtSI(dev.rate, "S/s", 6).c_str(), fmtSI(snapped, "S/s", 6).c_str());
+            dev.rate = snapped;
+        }
         else if (dev.driver == "siggen" && haveGen) dev.rate = gp.rate;
     }
     // The audio channel: --chan, or the mode's default width at 0 Hz.
