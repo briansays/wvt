@@ -1,0 +1,3 @@
+{"wvt_chain": 1, "sample_rate": 2e6, "center_freq": 915e6, "loops": 2, "start_delay_s": 0.1,
+ "items": [{"path": "a.cf32", "datatype": "ci16_le", "header_bytes": 0, "repeats": 3, "file_rate": 1e6,
+            "start_s": 0, "length_s": 0.5, "offset_hz": 1e3, "level_dbfs": -10, "swap_iq": true, "gap_after_s": 0.01}]}

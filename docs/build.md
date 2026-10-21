@@ -33,6 +33,7 @@ to the default of an option, delete `build/CMakeCache.txt`, or give the default 
 | [`CMAKE_CUDA_ARCHITECTURES`](#cmake_cuda_architectures) | A list of GPU architectures | Refer to the section | Linux |
 | [`WVT_WITH_METAL`](#wvt_with_metal) | `AUTO`, `ON`, `OFF` | `AUTO` | macOS |
 | [`WVT_SANITIZE`](#wvt_sanitize) | `address`, `thread` or empty | Empty | All |
+| [`WVT_FUZZ`](#wvt_fuzz) | `ON`, `OFF` | `OFF` | All (clang only) |
 
 The `AUTO`, `ON` and `OFF` values have the same meaning for all options:
 
@@ -201,6 +202,16 @@ each value. Refer to [Self-checks](self-checks.md#sanitizer-builds).
 
 Output: `wvt: sanitizers enabled (address: -fsanitize=address,undefined;...)`.
 
+### WVT_FUZZ
+
+`ON` also builds the libFuzzer targets `fuzz_json`, `fuzz_chain`, `fuzz_meta` and `fuzz_parse_si`,
+with AddressSanitizer and UndefinedBehaviorSanitizer. CTest then also runs each target on its seed
+inputs. The option needs clang: with another compiler, the configure step stops with an error. On
+macOS, use the clang of the Homebrew `llvm` package, because Apple clang has no libFuzzer. Refer
+to [Fuzz tests](self-checks.md#fuzz-tests).
+
+Output: `wvt: libFuzzer targets enabled (fuzz_json, fuzz_chain, fuzz_meta, fuzz_parse_si)`.
+
 ## The CPU FFT
 
 The CPU FFT is not an option. On macOS, the build always links the Accelerate framework and uses
@@ -256,6 +267,9 @@ cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
 | `device_check` | Self-check for the device list and the sample rate rules |
 | `bb_check` | Self-check for the BB60 backend, with the simulated device. Only with `WVT_BB_SIM=ON` |
 | `gpu_check` | Compares the GPU results with the CPU results, and measures the speed |
+| `fuzz_json`, `fuzz_chain`, `fuzz_meta`, `fuzz_parse_si` | The fuzz targets. Only with `WVT_FUZZ=ON` |
+
+`ctest --test-dir build --output-on-failure` runs all the self-checks.
 
 For the self-checks, refer to [Self-checks and test signals](self-checks.md).
 

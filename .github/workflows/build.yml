@@ -31,12 +31,7 @@ jobs:
       - name: Build
         run: cmake --build build -j "$(nproc)"
       - name: Self-tests
-        run: |
-          for t in siggen_check audio_check log_check segment_check gpu_check extract_check snapshot_check device_check bb_check; do
-            echo "::group::$t"
-            ./build/$t
-            echo "::endgroup::"
-          done
+        run: ctest --test-dir build --output-on-failure
       - name: Command line
         run: |
           ./build/wvt --help > /dev/null
@@ -70,12 +65,41 @@ jobs:
       - name: Build
         run: cmake --build build -j "$(nproc)"
       - name: Self-tests
+        run: ctest --test-dir build --output-on-failure
+
+  fuzz:
+    name: Fuzz the parsers (libFuzzer, 60 s each)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install packages
         run: |
-          for t in siggen_check audio_check log_check segment_check gpu_check extract_check snapshot_check device_check bb_check; do
-            echo "::group::$t"
-            ./build/$t
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-rt-dev cmake libx11-dev libgl1-mesa-dev
+      - name: Configure
+        run: >
+          cmake -S . -B build -DWVT_FUZZ=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+          -DWVT_WITH_RTLSDR=OFF -DWVT_WITH_UHD=OFF -DWVT_WITH_CUDA=OFF -DWVT_WITH_AUDIO=OFF
+      - name: Build
+        run: cmake --build build -j "$(nproc)" --target fuzz_json fuzz_chain fuzz_meta fuzz_parse_si
+      - name: Seed inputs
+        run: ctest --test-dir build -R '^fuzz_' --output-on-failure
+      - name: Fuzz
+        # New inputs go to a copy of the corpus; a crash leaves crash-* files in fuzz-out/.
+        run: |
+          mkdir -p fuzz-out
+          for f in json chain meta parse_si; do
+            echo "::group::fuzz_$f"
+            cp -r tools/fuzz/corpus/$f fuzz-out/corpus-$f
+            (cd fuzz-out && ../build/fuzz_$f -max_total_time=60 -max_len=4096 -print_final_stats=1 corpus-$f)
             echo "::endgroup::"
           done
+      - name: Keep the crash inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes
+          path: fuzz-out/crash-*
 
   linux-cuda:
     name: Linux CUDA ${{ matrix.cuda }} (compile only)
@@ -101,11 +125,7 @@ jobs:
         run: cmake --build build -j "$(nproc)"
       - name: Self-tests (no GPU, so the CUDA build must run on the CPU)
         run: |
-          for t in siggen_check audio_check log_check segment_check gpu_check extract_check snapshot_check device_check; do
-            echo "::group::$t"
-            ./build/$t
-            echo "::endgroup::"
-          done
+          ctest --test-dir build --output-on-failure
           ./build/wvt --list-devices
           if ./build/wvt --no-log-file --gpu on; then echo "--gpu on should fail without a GPU"; exit 1; fi
 

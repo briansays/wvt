@@ -40,13 +40,14 @@ code if a check fails.
 | `build/bb_check` | The BB60 backend with the simulated device: open, rates, bandwidths, streaming, overload, unplug, and the capture segments of a recording across retunes. Only with `-DWVT_BB_SIM=ON` |
 | `build/gpu_check` | The GPU results against the CPU results. `--bench` measures the speed |
 
-To run all of them:
+To run all of them, use CTest:
 
 ```sh
-for t in siggen_check audio_check log_check segment_check gpu_check extract_check snapshot_check device_check; do
-  ./build/$t || echo "$t FAILED"
-done
+ctest --test-dir build --output-on-failure
 ```
+
+CTest shows each program as one test. To run one program, add `-R NAME`, for example
+`-R extract_check`.
 
 ## Sanitizer builds
 
@@ -69,13 +70,46 @@ can stop with `unexpected memory mapping`. Then type `sudo sysctl vm.mmap_rnd_bi
 run the checks.
 :::
 
+## Fuzz tests
+
+The fuzz targets give random and mutated input to the parsers that read text from files and from
+the user. They need clang with libFuzzer (on macOS: the Homebrew `llvm`, because Apple clang has no
+libFuzzer). Refer to [`WVT_FUZZ`](build.md#wvt_fuzz).
+
+| Program | Parser |
+|---|---|
+| `fuzz_json` | `parseJson` and the typed getters of `JsonValue` |
+| `fuzz_chain` | `loadChain` (chain files), then `checkParams` on the result |
+| `fuzz_meta` | `guessMeta`: file names (gqrx and the rate and frequency in a name) and SigMF metadata files |
+| `fuzz_parse_si` | `parseSI`, the number parser of the command line and the input fields (`2.4M`, `915 MHz`) |
+
+To build them and run them on their seed inputs (`tools/fuzz/corpus/`):
+
+```sh
+cmake -S . -B build-fuzz -DWVT_FUZZ=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+cmake --build build-fuzz -j --target fuzz_json fuzz_chain fuzz_meta fuzz_parse_si
+ctest --test-dir build-fuzz -R '^fuzz_' --output-on-failure
+```
+
+To fuzz one parser for 10 minutes, use a copy of the seed inputs. libFuzzer adds new inputs to the
+first folder that you give it, and you do not want them in the repository:
+
+```sh
+cp -r tools/fuzz/corpus/chain /tmp/corpus-chain
+./build-fuzz/fuzz_chain -max_total_time=600 -max_len=4096 /tmp/corpus-chain
+```
+
+If the program finds a problem, it stops with a report and writes the input to a `crash-...` file.
+To run that input again, type `./build-fuzz/fuzz_chain crash-...`.
+
 ## Continuous integration
 
 GitHub Actions builds each pull request and each push to `main` (`.github/workflows/build.yml`):
 
 | Job | Contents |
 |---|---|
-| Linux (CPU, RTL-SDR, UHD) | Builds with the two device backends and the simulated BB60, runs all self-checks and some command-line runs |
+| Linux (CPU, RTL-SDR, UHD) | Builds with the two device backends and the simulated BB60, runs all self-checks with CTest and some command-line runs |
 | Linux CUDA 12.0 and 12.8 | Builds the CUDA backend. The runners have no GPU, so the job makes sure that a CUDA build runs on the CPU |
 | Sanitizers (address, thread) | Builds with `WVT_SANITIZE=address` (ASan and UBSan) and with `WVT_SANITIZE=thread` (TSan), and runs all self-checks |
+| Fuzz the parsers | Builds the fuzz targets with clang, runs them on the seed inputs, then fuzzes each one for 60 s. If a fuzz target finds a problem, the job keeps the input as a `fuzz-crashes` artifact |
 | Documentation | Builds these pages with Sphinx. A warning causes the job to fail |

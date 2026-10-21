@@ -84,6 +84,7 @@
 | `tools/bb_check.cpp` | The self-check for the BB60 backend |
 | `tools/bb_sim/` | A simulated BB60D behind the `bb_api` calls that wvt uses |
 | `tools/gpu_check.cpp` | The GPU self-check and benchmark |
+| `tools/fuzz/` | The libFuzzer targets for the parsers, and their seed inputs in `corpus/` |
 
 ## Other folders
 

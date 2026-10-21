@@ -514,3 +514,48 @@ if(WVT_BB_SIM)
   target_link_libraries(bb_check PRIVATE bb_api_sim wvt_gpu imgui_implot Threads::Threads)
   target_compile_options(bb_check PRIVATE -Wall -Wextra -Wno-unused-parameter)
 endif()
+
+# ---------------------------------------------------------------------------
+# CTest (issue #53): "ctest --test-dir build --output-on-failure" runs every
+# self-check. The checks need no hardware.
+# ---------------------------------------------------------------------------
+enable_testing()
+set(WVT_CHECKS siggen_check audio_check log_check segment_check gpu_check extract_check snapshot_check device_check)
+if(WVT_BB_SIM)
+  list(APPEND WVT_CHECKS bb_check)
+endif()
+foreach(_t IN LISTS WVT_CHECKS)
+  add_test(NAME ${_t} COMMAND ${_t})
+endforeach()
+
+# ---------------------------------------------------------------------------
+# libFuzzer targets for the parsers of user-supplied text (issue #53), clang
+# only. Each target is built with ASan and UBSan. CTest runs each one over its
+# seed inputs in tools/fuzz/corpus; to fuzz, refer to docs/self-checks.md.
+# ---------------------------------------------------------------------------
+option(WVT_FUZZ "Build the libFuzzer targets (clang only)" OFF)
+if(WVT_FUZZ)
+  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR "WVT_FUZZ=ON needs clang (libFuzzer); this compiler is ${CMAKE_CXX_COMPILER_ID}")
+  endif()
+  set(_fuzz_flags -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer -g)
+  # name: sources beyond the target's own .cpp
+  set(_fuzz_json src/json.cpp)
+  set(_fuzz_chain src/siggen.cpp src/siggen_out.cpp src/json.cpp src/recorder.cpp src/sdr_device.cpp src/sdr_sim.cpp
+    src/sdr_siggen.cpp src/iq_file.cpp src/dsp.cpp src/ui_util.cpp src/log.cpp)
+  set(_fuzz_meta src/iq_file.cpp src/log.cpp)
+  set(_fuzz_parse_si src/ui_util.cpp src/log.cpp)
+  foreach(_f json chain meta parse_si)
+    add_executable(fuzz_${_f} tools/fuzz/fuzz_${_f}.cpp ${_fuzz_${_f}})
+    target_include_directories(fuzz_${_f} PRIVATE src tools/fuzz)
+    target_compile_options(fuzz_${_f} PRIVATE ${_fuzz_flags})
+    target_link_options(fuzz_${_f} PRIVATE ${_fuzz_flags})
+    target_link_libraries(fuzz_${_f} PRIVATE Threads::Threads)
+    if(_f STREQUAL "chain" OR _f STREQUAL "parse_si")
+      target_link_libraries(fuzz_${_f} PRIVATE imgui_implot)
+    endif()
+    file(GLOB _seeds "${CMAKE_SOURCE_DIR}/tools/fuzz/corpus/${_f}/*")
+    add_test(NAME fuzz_${_f}_seeds COMMAND fuzz_${_f} ${_seeds})
+  endforeach()
+  message(STATUS "wvt: libFuzzer targets enabled (fuzz_json, fuzz_chain, fuzz_meta, fuzz_parse_si)")
+endif()
