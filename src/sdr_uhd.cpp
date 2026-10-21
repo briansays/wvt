@@ -1,9 +1,11 @@
 // USRP backend through UHD's C API (uhd.h), so no Boost headers are needed.
-// Targets the B200 / B200mini / B205mini (all UHD "type=b200"): 70 MHz-6 GHz,
-// up to 56 MS/s on USB 3, antennas RX2 and TX/RX. Samples arrive as sc16.
+// Any USRP that UHD supports: the USB B2xx and the network N3xx, X3xx and X4xx
+// (issue #11). The limits (frequency, rate, gain, bandwidth, antennas,
+// channels) come from the device, not from a model table. One channel at a
+// time; samples arrive as sc16.
 //
 // UHD lets a process open a device only once, so the receiver and the
-// transmitter share one reference-counted handle (full duplex on one B2xx).
+// transmitter share one reference-counted handle (full duplex).
 #include <uhd.h>
 
 #include <algorithm>
@@ -44,22 +46,78 @@ std::string lastError(const char* what) {
 // "type=b200,name=x,serial=31A2B3C,product=B205mini" -> {type: b200, ...}
 std::map<std::string, std::string> parseArgs(const std::string& s) {
     std::map<std::string, std::string> m;
-    size_t i = 0;
-    while (i < s.size()) {
-        size_t j = s.find(',', i);
-        if (j == std::string::npos) j = s.size();
-        std::string kv = s.substr(i, j - i);
-        size_t e = kv.find('=');
-        if (e != std::string::npos) m[kv.substr(0, e)] = kv.substr(e + 1);
-        i = j + 1;
-    }
+    for (auto& [k, v] : parseDeviceArgs(s)) m[k] = v;
     return m;
+}
+
+std::vector<std::string> strings(uhd_string_vector_handle v) {
+    std::vector<std::string> out;
+    size_t n = 0;
+    uhd_string_vector_size(v, &n);
+    for (size_t i = 0; i < n; ++i) {
+        char buf[256] = {};
+        uhd_string_vector_at(v, i, buf, sizeof buf);
+        out.emplace_back(buf);
+    }
+    return out;
+}
+
+// A list from one of UHD's "get the names" calls.
+template <typename F>
+std::vector<std::string> stringList(F get) {
+    uhd_string_vector_handle v = nullptr;
+    std::vector<std::string> out;
+    if (uhd_string_vector_make(&v) != UHD_ERROR_NONE) return out;
+    if (get(&v) == UHD_ERROR_NONE) out = strings(v);
+    uhd_string_vector_free(&v);
+    return out;
+}
+
+// The overall span of one of UHD's meta ranges.
+template <typename F>
+Range metaRange(F get) {
+    Range r;
+    uhd_meta_range_handle m = nullptr;
+    if (uhd_meta_range_make(&m) != UHD_ERROR_NONE) return r;
+    if (get(m) == UHD_ERROR_NONE) {
+        uhd_meta_range_start(m, &r.min);
+        uhd_meta_range_stop(m, &r.max);
+    }
+    uhd_meta_range_free(&m);
+    return r;
+}
+
+GainRange gainRangeOf(uhd_usrp_handle h, size_t chan, bool tx) {
+    GainRange g{0, 0, 1, {}, !tx};
+    uhd_meta_range_handle m = nullptr;
+    if (uhd_meta_range_make(&m) != UHD_ERROR_NONE) return g;
+    if ((tx ? uhd_usrp_get_tx_gain_range(h, "", chan, m) : uhd_usrp_get_rx_gain_range(h, "", chan, m)) ==
+        UHD_ERROR_NONE) {
+        uhd_meta_range_start(m, &g.min);
+        uhd_meta_range_stop(m, &g.max);
+        uhd_meta_range_step(m, &g.step);
+    }
+    uhd_meta_range_free(&m);
+    return g;
+}
+
+std::string join(const std::vector<std::string>& v) {
+    std::string s;
+    for (const auto& x : v) s += (s.empty() ? "" : ", ") + x;
+    return s.empty() ? "?" : s;
+}
+
+std::string rangeText(const Range& r) {
+    return r.valid() ? fmtSI(r.min, "Hz", 4) + " - " + fmtSI(r.max, "Hz", 4) : "";
 }
 
 // ---------------------------------------------------------------------------
 // Shared device handle
 // ---------------------------------------------------------------------------
 struct Usrp;
+// A device search (on the window's scan thread) and an open both enumerate the
+// devices; this keeps those UHD calls one at a time.
+std::mutex gUhdFindM;
 std::mutex gUsrpM;
 std::condition_variable gUsrpCv;
 std::weak_ptr<Usrp> gUsrp;
@@ -67,7 +125,8 @@ int gUsrpAlive = 0;  // handles not yet freed (a new open must wait for them)
 
 struct Usrp {
     uhd_usrp_handle h = nullptr;
-    std::string args, serial;
+    std::string args, serial, product, ref;
+    bool usb = false;  // the B2xx: USB, and RX and TX share one clock (one rate)
     std::atomic<int> rxUsers{0}, txUsers{0};
     ~Usrp() {
         if (h) uhd_usrp_free(&h);
@@ -84,8 +143,7 @@ bool sameDevice(const std::string& args, const Usrp& u) {
     return !a.count("serial") || a["serial"] == u.serial;
 }
 
-std::shared_ptr<Usrp> acquireUsrp(std::string args, std::string& err) {
-    if (args.empty()) args = "type=b200";
+std::shared_ptr<Usrp> acquireUsrp(const std::string& args, std::string& err) {
     std::unique_lock<std::mutex> lk(gUsrpM);
     if (auto u = gUsrp.lock()) {
         if (sameDevice(args, *u)) {
@@ -101,10 +159,15 @@ std::shared_ptr<Usrp> acquireUsrp(std::string args, std::string& err) {
     gUsrpCv.wait(lk, [] { return gUsrpAlive == 0; });
     uhd_usrp_handle h = nullptr;
     LOG_INFO("uhd", "opening USRP '%s' (loading the FPGA image can take a few seconds)", args.c_str());
-    if (uhd_usrp_make(&h, args.c_str()) != UHD_ERROR_NONE) {
+    uhd_error made;
+    {
+        std::lock_guard<std::mutex> fl(gUhdFindM);
+        made = uhd_usrp_make(&h, args.c_str());
+    }
+    if (made != UHD_ERROR_NONE) {
         err = lastError(("cannot open USRP '" + args + "'").c_str()) +
-              " (is it plugged in? FPGA images downloaded with uhd_images_downloader?"
-              " on Linux, is UHD's udev rule installed?)";
+              " (USB: is it plugged in, with FPGA images from uhd_images_downloader and, on Linux, UHD's udev "
+              "rule? network: is addr= right, and does uhd_find_devices see it?)";
         return nullptr;
     }
     ++gUsrpAlive;
@@ -116,9 +179,42 @@ std::shared_ptr<Usrp> acquireUsrp(std::string args, std::string& err) {
         if (info.mboard_serial) u->serial = info.mboard_serial;
         uhd_usrp_rx_info_free(&info);
     }
+    char name[128] = {};
+    if (uhd_usrp_get_mboard_name(h, 0, name, sizeof name) == UHD_ERROR_NONE) u->product = name;
+    // The B2xx family (B200, B210, B200mini, B205mini) is the USB one.
+    u->usb = u->product.rfind("B2", 0) == 0;
     gUsrp = u;
-    LOG_DEBUG("uhd", "USRP open, serial %s", u->serial.c_str());
+    LOG_INFO("uhd", "USRP %s open, serial %s (%s)", u->product.c_str(), u->serial.c_str(), u->usb ? "USB" : "network");
     return u;
+}
+
+// The clock and time reference (internal, external 10 MHz + PPS, gpsdo). It
+// belongs to the device, so the receiver and the transmitter share it.
+bool setRef(Usrp& u, const std::string& ref, std::string& err) {
+    if (ref.empty() || ref == u.ref) return true;
+    if (uhd_usrp_set_clock_source(u.h, ref.c_str(), 0) != UHD_ERROR_NONE) {
+        err = lastError(("cannot use clock source '" + ref + "'").c_str());
+        return false;
+    }
+    // Not every device has the same time sources; a missing one is not fatal.
+    if (uhd_usrp_set_time_source(u.h, ref.c_str(), 0) != UHD_ERROR_NONE)
+        LOG_WARN("uhd", "%s", lastError(("time source '" + ref + "' not set").c_str()).c_str());
+    u.ref = ref;
+    LOG_INFO("uhd", "clock and time reference: %s", ref.c_str());
+    return true;
+}
+
+// The channel must exist on this device.
+bool checkChannel(uhd_usrp_handle h, int chan, bool tx, std::string& err) {
+    size_t n = 1;
+    if (tx) uhd_usrp_get_tx_num_channels(h, &n);
+    else uhd_usrp_get_rx_num_channels(h, &n);
+    if (chan < 0 || (size_t)chan >= n) {
+        err = std::string("this USRP has ") + std::to_string(n) + (tx ? " transmit" : " receive") + " channel" +
+              (n == 1 ? "" : "s") + " (0 to " + std::to_string(n - 1) + "), not " + std::to_string(chan);
+        return false;
+    }
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -137,7 +233,9 @@ public:
         dev_ = acquireUsrp(cfg.args, err);
         if (!dev_) return false;
         usrp_ = dev_->h;
-        if (dev_->txUsers > 0) {
+        if (!checkChannel(usrp_, cfg.channel, false, err) || !setRef(*dev_, cfg.ref, err)) return false;
+        chan_ = (size_t)cfg.channel;
+        if (dev_->txUsers > 0 && dev_->usb) {
             // RX and TX rates come from one master clock on the B2xx; changing one
             // while the other streams would silently change the other.
             double txRate = 0;
@@ -148,44 +246,37 @@ public:
                 return false;
             }
         }
-        uhd_usrp_rx_info_t info{};
-        if (uhd_usrp_get_rx_info(usrp_, 0, &info) == UHD_ERROR_NONE) {
-            desc_ = std::string("USRP ") + (info.mboard_id ? info.mboard_id : "") +
-                    (info.mboard_serial && info.mboard_serial[0] ? std::string(" serial ") + info.mboard_serial : "");
-            uhd_usrp_rx_info_free(&info);
-        } else {
-            desc_ = "USRP";
-        }
+        desc_ = "USRP " + dev_->product + (dev_->serial.empty() ? "" : " serial " + dev_->serial);
+        size_t nch = 1;
+        uhd_usrp_get_rx_num_channels(usrp_, &nch);
+        if (nch > 1) desc_ += " channel " + std::to_string(chan_);
+        queryCaps((int)nch);
 
-        if (!cfg.antenna.empty() && uhd_usrp_set_rx_antenna(usrp_, cfg.antenna.c_str(), 0) != UHD_ERROR_NONE) {
+        if (!cfg.antenna.empty() && uhd_usrp_set_rx_antenna(usrp_, cfg.antenna.c_str(), chan_) != UHD_ERROR_NONE) {
             err = lastError(("cannot select antenna " + cfg.antenna).c_str());
+            if (!caps_.antennas.empty()) err += " (this channel has: " + join(caps_.antennas) + ")";
             return false;
         }
-        if (uhd_usrp_set_rx_rate(usrp_, cfg.rate, 0) != UHD_ERROR_NONE) {
+        if (uhd_usrp_set_rx_rate(usrp_, cfg.rate, chan_) != UHD_ERROR_NONE) {
             err = lastError("cannot set sample rate");
             return false;
         }
-        uhd_usrp_get_rx_rate(usrp_, 0, &rate_);
-        if (std::fabs(rate_ - cfg.rate) > 1)
+        uhd_usrp_get_rx_rate(usrp_, chan_, &rate_);
+        if (std::fabs(rate_ - cfg.rate) > 1) {
+            // Network USRPs divide a fixed master clock: the rate snaps to clock / N.
             notes_ = "rate coerced to " + fmtSI(rate_, "S/s", 9);
-        if (cfg.bandwidth > 0 && uhd_usrp_set_rx_bandwidth(usrp_, cfg.bandwidth, 0) != UHD_ERROR_NONE) {
+            if (!dev_->usb) notes_ += " (the master clock divided by a whole number; master_clock_rate= in the args changes the clock)";
+        }
+        if (cfg.bandwidth > 0 && uhd_usrp_set_rx_bandwidth(usrp_, cfg.bandwidth, chan_) != UHD_ERROR_NONE) {
             err = lastError("cannot set bandwidth");
             return false;
         }
-        uhd_meta_range_handle r = nullptr;
-        if (uhd_meta_range_make(&r) == UHD_ERROR_NONE) {
-            if (uhd_usrp_get_rx_gain_range(usrp_, "", 0, r) == UHD_ERROR_NONE) {
-                uhd_meta_range_start(r, &gain_.min);
-                uhd_meta_range_stop(r, &gain_.max);
-                uhd_meta_range_step(r, &gain_.step);
-            }
-            uhd_meta_range_free(&r);
-        }
+        gain_ = gainRangeOf(usrp_, chan_, false);
         if (!setCenterFreq(cfg.fc, err)) return false;
         if (!setGain(cfg.agc, cfg.gain, err)) return false;
 
         // sc16 on the host matches the wire format: no conversion, smallest recordings.
-        size_t chan = 0;
+        size_t chan = chan_;
         uhd_stream_args_t sa{};
         sa.cpu_format = (char*)"sc16";
         sa.otw_format = (char*)"sc16";
@@ -246,18 +337,19 @@ public:
         req.dsp_freq_policy = UHD_TUNE_REQUEST_POLICY_AUTO;
         req.args = (char*)"";
         uhd_tune_result_t res{};
-        if (uhd_usrp_set_rx_freq(usrp_, &req, 0, &res) != UHD_ERROR_NONE) {
+        if (uhd_usrp_set_rx_freq(usrp_, &req, chan_, &res) != UHD_ERROR_NONE) {
             err = lastError(("cannot tune to " + fmtSI(hz, "Hz", 9)).c_str());
             return false;
         }
         double f = hz;
-        uhd_usrp_get_rx_freq(usrp_, 0, &f);
+        uhd_usrp_get_rx_freq(usrp_, chan_, &f);
         fc_ = f;
         LOG_DEBUG("uhd", "rx tune %.0f Hz: RF %.0f Hz, DSP %.0f Hz, result %.0f Hz", hz, res.actual_rf_freq,
                   res.actual_dsp_freq, f);
         if (std::fabs(f - hz) > 1) {
-            err = "USRP cannot tune to " + fmtSI(hz, "Hz", 9) + " (B200/B205: 70 MHz - 6 GHz); tuned to " +
-                  fmtSI(f, "Hz", 9);
+            const std::string range = rangeText(caps_.freq);
+            err = "USRP cannot tune to " + fmtSI(hz, "Hz", 9) + (range.empty() ? "" : " (" + range + ")") +
+                  "; tuned to " + fmtSI(f, "Hz", 9);
             return false;
         }
         return true;
@@ -265,14 +357,14 @@ public:
 
     bool setGain(bool agc, double db, std::string& err) override {
         if (agc) {
-            if (uhd_usrp_set_rx_agc(usrp_, true, 0) != UHD_ERROR_NONE) {
-                err = lastError("cannot enable AGC");
+            if (uhd_usrp_set_rx_agc(usrp_, true, chan_) != UHD_ERROR_NONE) {
+                err = lastError("cannot enable AGC (not every USRP has one)");
                 return false;
             }
             return true;
         }
-        uhd_usrp_set_rx_agc(usrp_, false, 0);
-        if (uhd_usrp_set_rx_gain(usrp_, std::clamp(db, gain_.min, gain_.max), 0, "") != UHD_ERROR_NONE) {
+        uhd_usrp_set_rx_agc(usrp_, false, chan_);
+        if (uhd_usrp_set_rx_gain(usrp_, std::clamp(db, gain_.min, gain_.max), chan_, "") != UHD_ERROR_NONE) {
             err = lastError("cannot set gain");
             return false;
         }
@@ -286,11 +378,17 @@ public:
     SampleFormat format() const override { return SampleFormat::CI16; }
     GainRange gainRange() const override { return gain_; }
     std::string description() const override { return desc_; }
+    DeviceCaps caps() const override { return caps_; }
     std::string notes() const override {
         std::string n = notes_;
-        // The C API can't report the USB speed; frequent overflows at high rates usually mean USB 2.
-        if (overflows_ > 5 && rate_ > 8e6)
+        // The C API can't report the link speed; frequent overflows at high rates usually mean USB 2,
+        // or a network link (or host) that can't keep up.
+        if (overflows_ > 5 && dev_->usb && rate_ > 8e6)
             n += std::string(n.empty() ? "" : "; ") + "frequent overflows: is the USRP on a USB 3 port?";
+        else if (overflows_ > 5 && !dev_->usb)
+            n += std::string(n.empty() ? "" : "; ") +
+                 "frequent overflows: check the link (10 GbE for high rates, MTU 9000) and the host's network "
+                 "buffers (see uhd_usrp_probe / UHD's network tuning notes)";
         return n;
     }
     std::string fatalError() const override {
@@ -354,8 +452,26 @@ private:
         fatal_ = why;
     }
 
+    void queryCaps(int channels) {
+        caps_.product = dev_->product;
+        caps_.usb = dev_->usb;
+        caps_.channels = channels;
+        caps_.antennas = stringList([&](uhd_string_vector_handle* v) { return uhd_usrp_get_rx_antennas(usrp_, chan_, v); });
+        caps_.refs = stringList([&](uhd_string_vector_handle* v) { return uhd_usrp_get_clock_sources(usrp_, 0, v); });
+        caps_.freq = metaRange([&](uhd_meta_range_handle m) { return uhd_usrp_get_rx_freq_range(usrp_, chan_, m); });
+        caps_.rate = metaRange([&](uhd_meta_range_handle m) { return uhd_usrp_get_rx_rates(usrp_, chan_, m); });
+        caps_.bandwidth =
+            metaRange([&](uhd_meta_range_handle m) { return uhd_usrp_get_rx_bandwidth_range(usrp_, chan_, m); });
+        LOG_DEBUG("uhd", "rx channel %zu of %d: antennas %s, references %s, tuning %s, rates %s, bandwidth %s", chan_,
+                  channels, join(caps_.antennas).c_str(), join(caps_.refs).c_str(), rangeText(caps_.freq).c_str(),
+                  caps_.rate.valid() ? (fmtSI(caps_.rate.min, "S/s", 4) + " - " + fmtSI(caps_.rate.max, "S/s", 4)).c_str() : "?",
+                  rangeText(caps_.bandwidth).c_str());
+    }
+
     std::shared_ptr<Usrp> dev_;
     bool counted_ = false;
+    size_t chan_ = 0;
+    DeviceCaps caps_;
     uhd_usrp_handle usrp_ = nullptr;
     uhd_rx_streamer_handle rx_ = nullptr;
     uhd_rx_metadata_handle md_ = nullptr;
@@ -392,7 +508,9 @@ public:
         dev_ = acquireUsrp(cfg.args, err);
         if (!dev_) return false;
         usrp_ = dev_->h;
-        if (dev_->rxUsers > 0) {
+        if (!checkChannel(usrp_, cfg.channel, true, err) || !setRef(*dev_, cfg.ref, err)) return false;
+        chan_ = (size_t)cfg.channel;
+        if (dev_->rxUsers > 0 && dev_->usb) {
             double rxRate = 0;
             uhd_usrp_get_rx_rate(usrp_, 0, &rxRate);
             if (std::fabs(rxRate - cfg.rate) > 1) {
@@ -401,48 +519,42 @@ public:
                 return false;
             }
         }
-        uhd_usrp_tx_info_t info{};
-        if (uhd_usrp_get_tx_info(usrp_, 0, &info) == UHD_ERROR_NONE) {
-            desc_ = std::string("USRP ") + (info.mboard_id ? info.mboard_id : "") +
-                    (info.mboard_serial && info.mboard_serial[0] ? std::string(" serial ") + info.mboard_serial : "");
-            uhd_usrp_tx_info_free(&info);
-        } else {
-            desc_ = "USRP";
-        }
-        const std::string ant = cfg.antenna.empty() ? "TX/RX" : cfg.antenna;
-        if (uhd_usrp_set_tx_antenna(usrp_, ant.c_str(), 0) != UHD_ERROR_NONE) {
-            err = lastError(("cannot select transmit antenna " + ant).c_str());
+        desc_ = "USRP " + dev_->product + (dev_->serial.empty() ? "" : " serial " + dev_->serial);
+        size_t nch = 1;
+        uhd_usrp_get_tx_num_channels(usrp_, &nch);
+        if (nch > 1) desc_ += " channel " + std::to_string(chan_);
+        const auto ants =
+            stringList([&](uhd_string_vector_handle* v) { return uhd_usrp_get_tx_antennas(usrp_, chan_, v); });
+        freq_ = metaRange([&](uhd_meta_range_handle m) { return uhd_usrp_get_tx_freq_range(usrp_, chan_, m); });
+        // The default is the channel's first transmit port (TX/RX on the B2xx and N3xx, TX/RX0 on the X410).
+        antenna_ = !cfg.antenna.empty() ? cfg.antenna : !ants.empty() ? ants.front() : "TX/RX";
+        LOG_DEBUG("uhd", "tx channel %zu of %zu: antennas %s, tuning %s", chan_, nch, join(ants).c_str(),
+                  rangeText(freq_).c_str());
+        if (uhd_usrp_set_tx_antenna(usrp_, antenna_.c_str(), chan_) != UHD_ERROR_NONE) {
+            err = lastError(("cannot select transmit antenna " + antenna_).c_str());
+            if (!ants.empty()) err += " (this channel has: " + join(ants) + ")";
             return false;
         }
-        if (uhd_usrp_set_tx_rate(usrp_, cfg.rate, 0) != UHD_ERROR_NONE) {
+        if (uhd_usrp_set_tx_rate(usrp_, cfg.rate, chan_) != UHD_ERROR_NONE) {
             err = lastError("cannot set the transmit sample rate");
             return false;
         }
-        uhd_usrp_get_tx_rate(usrp_, 0, &rate_);
+        uhd_usrp_get_tx_rate(usrp_, chan_, &rate_);
         if (std::fabs(rate_ - cfg.rate) > 1) {
             // The generator was built for the requested rate: refuse rather than shift every frequency.
             err = "the USRP can't transmit at " + fmtSI(cfg.rate, "S/s", 9) + " (nearest: " + fmtSI(rate_, "S/s", 9) + ")";
             return false;
         }
-        if (cfg.bandwidth > 0 && uhd_usrp_set_tx_bandwidth(usrp_, cfg.bandwidth, 0) != UHD_ERROR_NONE) {
+        if (cfg.bandwidth > 0 && uhd_usrp_set_tx_bandwidth(usrp_, cfg.bandwidth, chan_) != UHD_ERROR_NONE) {
             err = lastError("cannot set the transmit bandwidth");
             return false;
         }
-        uhd_meta_range_handle r = nullptr;
-        if (uhd_meta_range_make(&r) == UHD_ERROR_NONE) {
-            if (uhd_usrp_get_tx_gain_range(usrp_, "", 0, r) == UHD_ERROR_NONE) {
-                uhd_meta_range_start(r, &range_.min);
-                uhd_meta_range_stop(r, &range_.max);
-                uhd_meta_range_step(r, &range_.step);
-            }
-            uhd_meta_range_free(&r);
-        }
-        range_.agc = false;
+        range_ = gainRangeOf(usrp_, chan_, true);
         if (!setGain(cfg.gain, err)) return false;
         if (!setCenterFreq(cfg.fc, err)) return false;
 
         // Float samples on the host, sc16 on the wire: UHD converts and scales 1.0 to full scale.
-        size_t chan = 0;
+        size_t chan = chan_;
         uhd_stream_args_t sa{};
         sa.cpu_format = (char*)"fc32";
         sa.otw_format = (char*)"sc16";
@@ -485,28 +597,29 @@ public:
         req.dsp_freq_policy = UHD_TUNE_REQUEST_POLICY_AUTO;
         req.args = (char*)"";
         uhd_tune_result_t res{};
-        if (uhd_usrp_set_tx_freq(usrp_, &req, 0, &res) != UHD_ERROR_NONE) {
+        if (uhd_usrp_set_tx_freq(usrp_, &req, chan_, &res) != UHD_ERROR_NONE) {
             err = lastError(("cannot tune the transmitter to " + fmtSI(hz, "Hz", 9)).c_str());
             return false;
         }
         double f = hz;
-        uhd_usrp_get_tx_freq(usrp_, 0, &f);
+        uhd_usrp_get_tx_freq(usrp_, chan_, &f);
         fc_ = f;
         if (std::fabs(f - hz) > 1) {
-            err = "USRP cannot transmit at " + fmtSI(hz, "Hz", 9) + " (B200/B205: 70 MHz - 6 GHz); tuned to " +
-                  fmtSI(f, "Hz", 9);
+            const std::string range = rangeText(freq_);
+            err = "USRP cannot transmit at " + fmtSI(hz, "Hz", 9) + (range.empty() ? "" : " (" + range + ")") +
+                  "; tuned to " + fmtSI(f, "Hz", 9);
             return false;
         }
         return true;
     }
 
     bool setGain(double db, std::string& err) override {
-        if (uhd_usrp_set_tx_gain(usrp_, std::clamp(db, range_.min, range_.max), 0, "") != UHD_ERROR_NONE) {
+        if (uhd_usrp_set_tx_gain(usrp_, std::clamp(db, range_.min, range_.max), chan_, "") != UHD_ERROR_NONE) {
             err = lastError("cannot set the transmit gain");
             return false;
         }
         double g = db;
-        uhd_usrp_get_tx_gain(usrp_, 0, "", &g);
+        uhd_usrp_get_tx_gain(usrp_, chan_, "", &g);
         gain_ = g;
         return true;
     }
@@ -516,8 +629,9 @@ public:
     double gain() const override { return gain_; }
     GainRange gainRange() const override { return range_; }
     std::string description() const override { return desc_; }
+    std::string antenna() const override { return antenna_; }
     std::string notes() const override {
-        if (underflows_ > 5 && rate_ > 8e6) return "frequent underflows: is the USRP on a USB 3 port?";
+        if (underflows_ > 5 && dev_->usb && rate_ > 8e6) return "frequent underflows: is the USRP on a USB 3 port?";
         if (underflows_ > 5) return "underflows: the host could not keep up (gaps in the transmitted signal)";
         return {};
     }
@@ -596,6 +710,9 @@ private:
 
     std::shared_ptr<Usrp> dev_;
     bool counted_ = false;
+    size_t chan_ = 0;
+    std::string antenna_;
+    Range freq_;
     uhd_usrp_handle usrp_ = nullptr;
     uhd_tx_streamer_handle tx_ = nullptr;
     uhd_tx_metadata_handle mdFirst_ = nullptr, mdMid_ = nullptr, mdLast_ = nullptr;
@@ -603,7 +720,7 @@ private:
     size_t spb_ = 0;
     double rate_ = 0;
     std::atomic<double> fc_{0}, gain_{0};
-    GainRange range_{0, 89.75, 0.25, {}, false};
+    GainRange range_{0, 89.75, 0.25, {}, false};  // replaced by the device's range on open
     std::string desc_;
     FillFn fill_;
     std::thread th_;
@@ -617,22 +734,17 @@ private:
 }  // namespace
 
 void enumerateUhd(std::vector<DeviceInfo>& out) {
-    // Only USB B2xx devices: a full network scan would stall the UI for seconds.
+    // USB and network devices. A network search broadcasts on every interface
+    // and waits for answers (about half a second), so the window scans in the
+    // background.
     uhd_string_vector_handle v = nullptr;
     if (uhd_string_vector_make(&v) != UHD_ERROR_NONE) return;
-    if (uhd_usrp_find("type=b200", &v) == UHD_ERROR_NONE) {
-        size_t n = 0;
-        uhd_string_vector_size(v, &n);
-        for (size_t i = 0; i < n; ++i) {
-            char buf[512] = {};
-            uhd_string_vector_at(v, i, buf, sizeof buf);
-            auto a = parseArgs(buf);
-            std::string product = a.count("product") ? a["product"] : "B200";
-            std::string serial = a.count("serial") ? a["serial"] : "";
-            out.push_back({"uhd", serial.empty() ? "type=b200" : "serial=" + serial,
-                           "USRP " + product + (serial.empty() ? "" : " (serial " + serial + ")")});
+    std::lock_guard<std::mutex> fl(gUhdFindM);
+    if (uhd_usrp_find("", &v) == UHD_ERROR_NONE)
+        for (const auto& f : strings(v)) {
+            out.push_back(uhdDeviceInfo(f));
+            LOG_DEBUG("uhd", "found %s -> %s", f.c_str(), out.back().args.c_str());
         }
-    }
     uhd_string_vector_free(&v);
 }
 

@@ -1,4 +1,5 @@
 #pragma once
+#include <future>
 #include <memory>
 #include <string>
 #include <vector>
@@ -131,6 +132,7 @@ private:
     void enterLive();
     void leaveLive();
     void scanDevices();
+    void pollScan();
     void selectDevice(const DeviceInfo& d);
     bool restartDevice();
     void pollLive();
@@ -322,6 +324,9 @@ private:
     StreamConfig devCfg_;
     std::vector<DeviceInfo> devices_;
     bool devicesScanned_ = false;
+    std::future<std::vector<DeviceInfo>> scanJob_;  // a device scan in the background (a network scan takes ~0.5 s)
+    bool devPicked_ = false;  // a device was chosen (command line or the list): a scan does not change it
+    DeviceCaps devCaps_;      // of the device last opened (antennas, channels, ranges)
     char devArgs_[256] = {};
     char antenna_[32] = {};
     std::string liveErr_;
@@ -382,6 +387,7 @@ private:
     TxEngine::Stats txStats_;
     TxConfig txCfg_;
     char txArgs_[256] = {};
+    char txAntenna_[32] = {};
     bool txArmed_ = false;
     std::string txErr_;
 

@@ -62,7 +62,7 @@ void App::drawSourceSelector(float width) {
         else if (mode == 0 && liveMode_) leaveLive();
     }
     ImGui::EndDisabled();
-    tooltipAlways("File: analyze a recording.\nDevice: stream live from an RTL-SDR or USRP B200/B205.");
+    tooltipAlways("File: analyze a recording.\nDevice: stream live from an RTL-SDR or a USRP.");
 }
 
 void App::enterLive() {
@@ -86,18 +86,32 @@ void App::leaveLive() {
     status_ = file_ ? "Back to " + file_->path() : "No file loaded - type a path in the File box and press Enter";
 }
 
+// UHD searches the network too, so the scan runs in the background; pollScan
+// takes the result.
 void App::scanDevices() {
+    if (scanJob_.valid()) return;
+    LOG_DEBUG("app", "scanning for devices");
+    scanJob_ = std::async(std::launch::async, [] { return enumerateDevices(); });
+}
+
+void App::pollScan() {
+    if (!scanJob_.valid() || scanJob_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
     const bool first = !devicesScanned_;
-    devices_ = enumerateDevices();
+    devices_ = scanJob_.get();
     devicesScanned_ = true;
-    bool found = false;
-    for (const auto& d : devices_) found |= d.driver == devCfg_.driver && d.args == devCfg_.args;
-    // The first scan picks the first real device (the simulator is listed last).
-    if ((first || !found) && !devices_.empty()) selectDevice(devices_.front());
+    LOG_INFO("app", "found %zu device entries", devices_.size());
+    // The first scan picks the first real device (the simulator is listed last),
+    // unless one was chosen already (on the command line, or while it scanned).
+    if (first && !devPicked_ && !(live_ && live_->running()) && !devices_.empty()) {
+        selectDevice(devices_.front());
+        devPicked_ = false;
+    }
 }
 
 void App::selectDevice(const DeviceInfo& d) {
     const bool driverChanged = d.driver != devCfg_.driver;
+    if (d.args != devCfg_.args || driverChanged) devCaps_ = {};
+    devPicked_ = true;
     devCfg_.driver = d.driver;
     devCfg_.args = d.args;
     snprintf(devArgs_, sizeof devArgs_, "%s", d.args.c_str());
@@ -106,7 +120,10 @@ void App::selectDevice(const DeviceInfo& d) {
         if (!checkSampleRate(d.driver, devCfg_.rate, err, warn)) devCfg_.rate = d.driver == "uhd" ? 10e6 : 2.4e6;
         GainRange g = defaultGain(d.driver);
         devCfg_.gain = std::clamp(devCfg_.gain, g.min, g.max);
-        if (d.driver == "uhd" && !antenna_[0]) snprintf(antenna_, sizeof antenna_, "RX2");
+        // A USRP starts on its default antenna, channel 0 and its default reference.
+        antenna_[0] = 0;
+        devCfg_.channel = 0;
+        devCfg_.ref.clear();
     }
 }
 
@@ -123,6 +140,7 @@ bool App::restartDevice() {
     }
     liveErr_.clear();
     liveStats_ = live_->stats();
+    devCaps_ = live_->caps();
     status_ = "Streaming from " + liveStats_.description;
     win_.setTitle("wvt - " + liveStats_.description);
     return true;
@@ -131,6 +149,7 @@ bool App::restartDevice() {
 bool App::startDevice(const StreamConfig& cfg) {
     if (!liveMode_) enterLive();
     devCfg_ = cfg;
+    devPicked_ = true;
     snprintf(devArgs_, sizeof devArgs_, "%s", cfg.args.c_str());
     snprintf(antenna_, sizeof antenna_, "%s", cfg.antenna.c_str());
     return restartDevice();
@@ -161,9 +180,12 @@ void App::drawDeviceToolbar() {
     std::string err;
 
     // --- device ---
+    pollScan();
+    const bool scanning = scanJob_.valid();
     std::string cur = std::string(driverName(devCfg_.driver)) + (devCfg_.args.empty() ? "" : " " + devCfg_.args);
     for (const auto& d : devices_)
         if (d.driver == devCfg_.driver && d.args == devCfg_.args) cur = d.label;
+    if (scanning && !devicesScanned_) cur = "Scanning...";
     label("Device", fieldW(30));
     ImGui::BeginDisabled(rec);
     if (ImGui::BeginCombo("##dev", cur.c_str())) {
@@ -175,13 +197,21 @@ void App::drawDeviceToolbar() {
         ImGui::EndCombo();
     }
     ImGui::SameLine(0, st.ItemInnerSpacing.x);
-    if (ImGui::Button("Rescan")) scanDevices();
-    tooltipAlways("Look for attached devices again");
+    ImGui::BeginDisabled(scanning);
+    if (ImGui::Button(scanning ? "Scanning" : "Rescan")) scanDevices();
+    ImGui::EndDisabled();
+    tooltipAlways("Look for attached devices again (USB, and USRPs on the network)");
     if (devCfg_.driver == "uhd") {
         label("Args", fieldW(22));
-        if (ImGui::InputText("##args", devArgs_, sizeof devArgs_, ImGuiInputTextFlags_EnterReturnsTrue) && running)
-            restartDevice();
-        tooltipAlways("UHD device arguments, e.g. type=b200 or serial=31A2B3C (Enter applies)");
+        if (ImGui::InputText("##args", devArgs_, sizeof devArgs_, ImGuiInputTextFlags_EnterReturnsTrue)) {
+            devCaps_ = {};
+            if (running) restartDevice();
+        }
+        tooltipAlways("UHD device arguments (Enter applies), e.g.\n"
+                      "  serial=31A2B3C               a USB B2xx\n"
+                      "  addr=192.168.10.2            a network USRP (N3xx, X3xx, X4xx)\n"
+                      "  addr=192.168.40.2,master_clock_rate=184.32e6\n"
+                      "Empty: the first USRP UHD finds.");
     }
     ImGui::EndDisabled();
 
@@ -217,9 +247,18 @@ void App::drawDeviceToolbar() {
         }
     }
     ImGui::EndDisabled();
-    tooltipAlways(rec ? "A recording has a single sample rate. Stop recording to change it."
-                      : devCfg_.driver == "rtlsdr" ? "RTL-SDR: 225-300 kS/s or 0.9-3.2 MS/s (2.4 MS/s or less is reliable)"
-                                                   : "USRP B200/B205: up to 56 MS/s on USB 3");
+    std::string rateTip;
+    if (rec) rateTip = "A recording has a single sample rate. Stop recording to change it.";
+    else if (devCfg_.driver == "rtlsdr") rateTip = "RTL-SDR: 225-300 kS/s or 0.9-3.2 MS/s (2.4 MS/s or less is reliable)";
+    else if (devCfg_.driver == "uhd" && devCaps_.rate.valid())
+        rateTip = "USRP " + devCaps_.product + ": " + fmtSI(devCaps_.rate.min, "S/s", 4) + " to " +
+                  fmtSI(devCaps_.rate.max, "S/s", 4) + (devCaps_.usb ? " (USB 3 above about 8 MS/s)" : "") +
+                  ". The USRP uses the nearest rate it can make.";
+    else if (devCfg_.driver == "uhd")
+        rateTip = "USRP: the limit depends on the model (B2xx 61.44 MS/s on USB 3, N310 153.6 MS/s,\n"
+                  "X310 200 MS/s, X410 500 MS/s). Network USRPs divide a fixed master clock.";
+    else rateTip = "Up to 20 MS/s";
+    tooltipAlways(rateTip.c_str());
 
     // --- gain ---
     const GainRange g = running ? live_->gainRange() : defaultGain(devCfg_.driver);
@@ -254,7 +293,7 @@ void App::drawDeviceToolbar() {
     if (devCfg_.driver == "rtlsdr" || devCfg_.driver == "uhd") {
         ImGui::SameLine(0, st.ItemInnerSpacing.x);
         settingsButton("##devopts", devCfg_.driver == "rtlsdr" ? "Bias-T, direct sampling and frequency correction"
-                                                               : "Antenna and analog bandwidth");
+                                                               : "Antenna, channel, reference and analog bandwidth");
     }
     if (ImGui::BeginPopup("##devopts")) {
         ImGui::BeginDisabled(rec);
@@ -271,16 +310,56 @@ void App::drawDeviceToolbar() {
                     restart = true;
                 }
             } else if (devCfg_.driver == "uhd") {
-                row("Antenna");
-                if (ImGui::BeginCombo("##ant", antenna_[0] ? antenna_ : "RX2")) {
-                    for (const char* a : {"RX2", "TX/RX"})
-                        if (ImGui::Selectable(a, strcmp(a, antenna_) == 0)) {
-                            snprintf(antenna_, sizeof antenna_, "%s", a);
+                // The lists come from the device once it has been opened.
+                row("Antenna", "The receive port of the channel. Default: the device's default (RX2 on the B2xx).");
+                if (ImGui::BeginCombo("##ant", antenna_[0] ? antenna_ : "Default")) {
+                    if (ImGui::Selectable("Default", !antenna_[0])) {
+                        antenna_[0] = 0;
+                        restart = true;
+                    }
+                    std::vector<std::string> ants = devCaps_.antennas;
+                    if (ants.empty()) ants = {"RX2", "TX/RX"};
+                    for (const auto& a : ants)
+                        if (ImGui::Selectable(a.c_str(), a == antenna_)) {
+                            snprintf(antenna_, sizeof antenna_, "%s", a.c_str());
                             restart = true;
                         }
                     ImGui::EndCombo();
                 }
-                row("Bandwidth", "Analog filter bandwidth, 200 kHz - 56 MHz. 0 = automatic (follows the sample rate).");
+                const int nch = std::max(1, devCaps_.channels);
+                row("Channel", "Receive channel: the X310, N310 and X410 have several (one daughterboard or RF port\n"
+                               "each). wvt streams one channel at a time.");
+                if (ImGui::InputInt("##chan", &devCfg_.channel)) {
+                    devCfg_.channel = std::clamp(devCfg_.channel, 0, devCaps_.channels > 0 ? nch - 1 : 15);
+                    restart = true;
+                }
+                if (devCaps_.channels > 0) {
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("of %d", nch);
+                }
+                row("Reference", "Clock and time reference: internal, external (10 MHz and PPS inputs) or gpsdo.\n"
+                                 "Default: the device's default (internal).");
+                if (ImGui::BeginCombo("##ref", devCfg_.ref.empty() ? "Default" : devCfg_.ref.c_str())) {
+                    if (ImGui::Selectable("Default", devCfg_.ref.empty())) {
+                        devCfg_.ref.clear();
+                        restart = true;
+                    }
+                    std::vector<std::string> refs = devCaps_.refs;
+                    if (refs.empty()) refs = {"internal", "external", "gpsdo"};
+                    for (const auto& r : refs)
+                        if (ImGui::Selectable(r.c_str(), r == devCfg_.ref)) {
+                            devCfg_.ref = r;
+                            restart = true;
+                        }
+                    ImGui::EndCombo();
+                }
+                const std::string bwTip =
+                    "Analog filter bandwidth" +
+                    (devCaps_.bandwidth.valid()
+                         ? ", " + fmtSI(devCaps_.bandwidth.min, "Hz", 4) + " - " + fmtSI(devCaps_.bandwidth.max, "Hz", 4)
+                         : std::string()) +
+                    ". 0 = automatic (follows the sample rate). Not every daughterboard has one.";
+                row("Bandwidth", bwTip.c_str());
                 if (InputSI("##bw", &devCfg_.bandwidth, "Hz", ImGui::GetContentRegionAvail().x)) restart = true;
             }
             ImGui::EndTable();

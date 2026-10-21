@@ -49,6 +49,7 @@ App::App(X11Window& win) : win_(win) {
     sgFile_ = std::make_unique<FileGenJob>();
     snprintf(sgPrefix_, sizeof sgPrefix_, "~/wvt-recordings/siggen");
     snprintf(txArgs_, sizeof txArgs_, "%s", txCfg_.args.c_str());
+    snprintf(txAntenna_, sizeof txAntenna_, "%s", txCfg_.antenna.c_str());
     snprintf(auPrefix_, sizeof auPrefix_, "~/wvt-recordings/audio");
 }
 

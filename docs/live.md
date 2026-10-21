@@ -1,6 +1,7 @@
 # Live devices
 
-wvt streams from an RTL-SDR v3 or a USRP B200 / B205mini. It shows the spectrum and a scrolling
+wvt streams from an RTL-SDR v3 or a USRP: the USB B200 family, or a network USRP such as the N310,
+X310 or X410. It shows the spectrum and a scrolling
 waterfall in real time, and it records the stream to SigMF or raw IQ files. wvt opens these files
 directly.
 
@@ -9,7 +10,7 @@ directly.
 Live streaming needs librtlsdr (for an RTL-SDR), UHD (for a USRP), or both. Install them before
 you configure the build. CMake finds them automatically.
 
-| System | RTL-SDR | UHD (USRP B200 / B205) |
+| System | RTL-SDR | UHD (USRP) |
 |---|---|---|
 | Debian / Ubuntu | `sudo apt install librtlsdr-dev` | `sudo apt install libuhd-dev uhd-host` |
 | Fedora | `sudo dnf install rtl-sdr-devel` | `sudo dnf install uhd-devel` |
@@ -35,7 +36,9 @@ simulator, and the signal generator. For the CMake options, refer to
    installs a udev rule. If `rtl_test` works only as root, add your user to the `plugdev` group.
    Then connect the dongle again.
 
-### USRP B200 / B205mini
+### USRP B200 family (USB)
+
+This applies to the B200, B210, B200mini and B205mini.
 
 1. Download the FPGA and firmware images one time: `sudo uhd_images_downloader`. On macOS with
    Homebrew, type the command without `sudo`.
@@ -44,19 +47,45 @@ simulator, and the signal generator. For the CMake options, refer to
 3. Connect the device to a USB 3 port. Rates above approximately 8 MS/s need USB 3.
 4. To make sure that the computer finds the device, type `uhd_find_devices`.
 
+### Network USRPs (N3xx, X3xx, X4xx)
+
+This applies to the N300, N310, N320, N321, X300, X310 and X410, and to the other USRPs that
+connect through Ethernet.
+
+1. Make sure that the FPGA image on the device agrees with the UHD version on the computer. If
+   `uhd_usrp_probe` shows an image error, update the image as the Ettus manual tells you.
+2. Give the network interface of the computer an address on the subnet of the USRP. For example,
+   an X310 has `192.168.10.2` on SFP port 0 (1 GbE) and `192.168.40.2` on SFP port 1 (10 GbE).
+3. For rates above approximately 25 MS/s, use a 10 GbE (or faster) link. Set the MTU of the
+   interface to 9000.
+4. On Linux, make the network buffers of the kernel larger, as UHD tells you when it starts.
+5. To make sure that the computer finds the device, type `uhd_find_devices` or
+   `uhd_find_devices --args addr=192.168.40.2`.
+
+A network USRP makes its sample rates from a fixed master clock divided by a whole number. For
+example, an X310 at 200 MHz gives 200, 100, 66.67, 50 MS/s and so on. If you set a different rate,
+the device uses the nearest rate that it can make, and the status bar tells you. To use a
+different master clock, add `master_clock_rate=` to the device arguments, for example
+`addr=192.168.40.2,master_clock_rate=184.32e6`.
+
 ## Start a stream
 
 1. In the **Source** drop-down on the right of the menu bar, select **Device**.
-2. Select the device.
-3. Set the center frequency, the sample rate and the gain.
-4. Click **Start**.
+2. Select the device. wvt looks for devices in the background, on USB and on the network. Until
+   the search is done, the list shows *Scanning...*. To search again, click **Rescan**.
+3. For a USRP that is not in the list, type its device arguments in **Args** and press Enter. For
+   example, type `addr=192.168.40.2`.
+4. Set the center frequency, the sample rate and the gain.
+5. Click **Start**.
 
 Each wvt window streams from one device only. You can also start wvt with `--device`:
 
 ```sh
 wvt --device rtlsdr -c 100.1M -r 2.4M --gain 30          # RTL-SDR v3, FM broadcast band
 wvt --device rtlsdr -c 7.1M -r 2.4M --direct-sampling Q  # RTL-SDR v3, HF
-wvt --device uhd:type=b200 -c 915M -r 20M --gain 40      # USRP B200 / B205mini
+wvt --device uhd -c 915M -r 20M --gain 40                # the first USRP found (for example a B205mini)
+wvt --device uhd:addr=192.168.40.2 -c 2.4G -r 50M --usrp-channel 1 --antenna RX2   # X310, second daughterboard
+wvt --device uhd:addr=192.168.10.2 -c 3.5G -r 122.88M --ref external                # X410 on a 10 MHz / PPS reference
 wvt --device sim -c 100M -r 2.4M                         # built-in simulator, no hardware
 ```
 
@@ -64,13 +93,46 @@ To see the devices that wvt finds, type `wvt --list-devices`.
 
 ## Device limits
 
-| | RTL-SDR v3 | USRP B200 / B205mini |
+| | RTL-SDR v3 | USRP |
 |---|---|---|
-| Tuning | 24 MHz to 1.766 GHz. HF below 24 MHz with direct sampling (Q) | 70 MHz to 6 GHz |
-| Sample rate | 225 kS/s to 300 kS/s, or 0.9 MS/s to 3.2 MS/s. 2.4 MS/s or less is reliable | Up to 56 MS/s (USB 3) |
-| Gain | 0 dB to 49.6 dB in tuner steps, or AGC | 0 dB to 76 dB, or AGC |
-| Options (⚙ next to AGC) | Bias-tee, direct sampling, PPM correction | Antenna RX2 or TX/RX, analog bandwidth |
+| Tuning | 24 MHz to 1.766 GHz. HF below 24 MHz with direct sampling (Q) | The range of the device and its daughterboard |
+| Sample rate | 225 kS/s to 300 kS/s, or 0.9 MS/s to 3.2 MS/s. 2.4 MS/s or less is reliable | The range of the device, up to 500 MS/s |
+| Gain | 0 dB to 49.6 dB in tuner steps, or AGC | The range of the device. AGC on the devices that have it |
+| Options (⚙ next to AGC) | Bias-tee, direct sampling, PPM correction | Antenna, channel, reference, analog bandwidth |
 | Samples | `cu8` | `ci16` (sc16) |
+
+wvt reads the USRP limits from the device when it opens, so it does not need a table of models.
+These are typical values:
+
+| USRP | Link | Tuning | Maximum rate | Receive channels |
+|---|---|---|---|---|
+| B200, B210, B200mini, B205mini | USB 3 | 70 MHz to 6 GHz | 56 MS/s (61.44 MS/s) | 1 (B210: 2) |
+| N310 | 1 GbE, 10 GbE | 10 MHz to 6 GHz | 153.6 MS/s | 4 |
+| X310 | 1 GbE, 10 GbE | Depends on the daughterboards (UBX: 10 MHz to 6 GHz) | 200 MS/s | 2 (one for each daughterboard slot) |
+| X410 | 10 GbE, 100 GbE | 1 MHz to 7.2 GHz | 491.52 MS/s (500 MS/s) | 4 |
+
+The real limit is often the link and the host. A 1 GbE link carries approximately 25 MS/s. Above
+approximately 100 MS/s, the computer must also analyze and record the samples fast enough.
+
+### USRP options
+
+The ⚙ button next to **AGC** has these options. A change starts the stream again.
+
+Antenna
+: The receive port of the channel, for example `RX2` or `TX/RX`. The list comes from the device
+  after it opens. *Default* uses the default port of the device.
+
+Channel
+: The receive channel. The X310 has one for each daughterboard slot, and the N310 and X410 have
+  four. wvt streams one channel at a time. From the command line, use `--usrp-channel N`.
+
+Reference
+: The clock and time reference: *internal*, *external* (the 10 MHz and PPS inputs) or *gpsdo*.
+  The reference applies to the full device, so the transmitter uses it too. From the command line,
+  use `--ref SRC`.
+
+Bandwidth
+: The analog filter bandwidth. 0 sets it automatically. Not all daughterboards have this filter.
 
 ## The live view
 
@@ -128,8 +190,8 @@ folders that do not exist.
 
 - One file has one rate. Thus wvt locks the sample rate during a recording.
 - **Limit** stops the recording after a set time.
-- The storage must be sufficiently fast. For example, 2.4 MS/s `cu8` is 4.8 MB/s, but a B205 at
-  56 MS/s `ci16` is 224 MB/s.
+- The storage must be sufficiently fast. For example, 2.4 MS/s `cu8` is 4.8 MB/s, a B205 at
+  56 MS/s `ci16` is 224 MB/s, and an X310 at 200 MS/s is 800 MB/s.
 - The **buffer** value shows how far the writer is behind. If the buffer is full, wvt drops samples
   and adds an annotation for the gap.
 - **Open recording** stops the device and opens the last recording in file mode.
@@ -140,7 +202,7 @@ folders that do not exist.
 stop.
 
 ```sh
-wvt --device uhd:type=b200 -c 915M -r 10M --record ~/caps/ism --record-duration 30 --no-gui
+wvt --device uhd -c 915M -r 10M --record ~/caps/ism --record-duration 30 --no-gui
 ```
 
 | Option | Function |
@@ -161,4 +223,14 @@ types of reader use this buffer:
 - The recorder reads all samples. If the recorder is behind, the device thread does not write over
   the samples that the recorder did not read. It drops the new block and records the gap.
 
-Thus a slow disk does not stop the spectrum, and each loss in a recording has an annotation.
+Thus a slow disk does not stop the spectrum, and each loss in a recording has an annotation. The
+buffer holds approximately 2 s of samples, from 16 MB to 1 GB.
+
+The USRP backend uses the C API of UHD for all USRPs. When a USRP opens, wvt asks UHD for the
+model, the number of channels, the antennas, the clock sources, and the ranges of the frequency,
+rate, gain and bandwidth of the channel. The window uses these values for its lists and tooltips.
+The receiver and the transmitter share one open device. The search for devices runs on a
+background thread, because a network search takes approximately half a second. The self-check
+`build/device_check` tests the device list entries and the rate rules.
+
+For the design, refer to [the USRP models design record](design/usrp-models-plan.md).

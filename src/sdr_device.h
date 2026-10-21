@@ -1,7 +1,7 @@
 #pragma once
 // SDR receiver abstraction. One open device delivers a continuous stream of
-// samples in its native packed format (RTL-SDR: cu8, USRP B2xx: ci16,
-// simulator: ci16) to a callback on the device's own thread.
+// samples in its native packed format (RTL-SDR: cu8, USRP: ci16, simulator:
+// ci16) to a callback on the device's own thread.
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -12,13 +12,15 @@
 
 struct StreamConfig {
     std::string driver = "sim";  // "sim" | "siggen" | "rtlsdr" | "uhd"
-    std::string args;            // rtlsdr: index or serial; uhd: device args ("type=b200,serial=...")
+    std::string args;            // rtlsdr: index or serial; uhd: device args ("serial=...", "addr=192.168.10.2")
     double fc = 100e6;
     double rate = 2.4e6;
     bool agc = false;
     double gain = 30;        // dB
-    std::string antenna;     // uhd: "RX2" / "TX/RX"; empty = device default
+    std::string antenna;     // uhd: "RX2", "TX/RX", "RX1"...; empty = device default
     double bandwidth = 0;    // uhd analog bandwidth, 0 = auto
+    int channel = 0;         // uhd: receive channel (X310 / N310 / X410 have several)
+    std::string ref;         // uhd: clock and time source ("internal", "external", "gpsdo"); empty = default
     bool biasTee = false;    // rtlsdr
     int directSampling = 0;  // rtlsdr: 0 off, 1 I branch, 2 Q branch (HF on the RTL-SDR v3)
     int ppm = 0;             // rtlsdr frequency correction
@@ -34,6 +36,22 @@ struct GainRange {
     double min = 0, max = 50, step = 1;
     std::vector<double> steps;  // discrete gains if the device only supports those
     bool agc = true;            // device supports automatic gain
+};
+
+struct Range {
+    double min = 0, max = 0;
+    bool valid() const { return max > 0 && max >= min; }
+};
+
+// What an open device supports (issue #11: other USRPs). Empty / invalid
+// fields are unknown; the UI then shows its defaults.
+struct DeviceCaps {
+    std::string product;                 // "B205mini", "X310", "N310", "X410"...
+    bool usb = false;                    // USB (B2xx) or network transport
+    int channels = 1;                    // receive channels
+    std::vector<std::string> antennas;   // receive antennas of the open channel
+    std::vector<std::string> refs;       // clock sources
+    Range freq, rate, bandwidth;         // of the open channel
 };
 
 class SdrDevice {
@@ -58,6 +76,7 @@ public:
     virtual GainRange gainRange() const = 0;
     virtual std::string description() const = 0;  // e.g. "RTL-SDR (R820T) serial 00000001"
     virtual std::string notes() const { return {}; }  // non-fatal warnings to show the user
+    virtual DeviceCaps caps() const { return {}; }
     // Set when streaming stopped by itself (e.g. the device was unplugged).
     virtual std::string fatalError() const { return {}; }
 };
@@ -69,8 +88,17 @@ std::vector<DeviceInfo> enumerateDevices();
 // Opens and configures (rate, frequency, gain...) but does not start streaming.
 std::unique_ptr<SdrDevice> openDevice(const StreamConfig& cfg, std::string& err);
 // Checks a sample rate against what the driver supports. `warn` gets a
-// non-fatal note (e.g. a rate that is known to drop samples).
+// non-fatal note (e.g. a rate that is known to drop samples). For a USRP the
+// limit depends on the model, so only the absolute limit is checked here; the
+// device reports the rate it can do when it opens.
 bool checkSampleRate(const std::string& driver, double rate, std::string& err, std::string& warn);
+
+// One line of a UHD device search ("type=x300,addr=192.168.40.2,name=,serial=
+// 31A2B3C,product=X310") as a device list entry: network devices are selected
+// by address, USB devices by serial.
+DeviceInfo uhdDeviceInfo(const std::string& found);
+// "a=1,b=2" -> {a: 1, b: 2}
+std::vector<std::pair<std::string, std::string>> parseDeviceArgs(const std::string& args);
 
 // Backends (each defined in its own sdr_*.cpp)
 std::unique_ptr<SdrDevice> openSimDevice(const StreamConfig& cfg, std::string& err);

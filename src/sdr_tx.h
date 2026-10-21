@@ -1,5 +1,5 @@
 #pragma once
-// SDR transmitter abstraction (USRP B200/B205 through UHD). The device thread
+// SDR transmitter abstraction (a USRP through UHD). The device thread
 // asks for samples with a fill callback and streams them continuously until
 // stop(); stop() ends the burst so the transmitter goes quiet.
 #include <complex>
@@ -12,12 +12,14 @@
 
 struct TxConfig {
     std::string driver = "uhd";
-    std::string args = "type=b200";
-    std::string antenna = "TX/RX";  // the only transmit port on the B200/B205
+    std::string args;      // empty: the first USRP found
+    std::string antenna;   // empty: the channel's first transmit antenna (TX/RX on the B2xx)
     double fc = 915e6;
     double rate = 1e6;
     double gain = 0;       // dB; B200/B205: 0-89.75
     double bandwidth = 0;  // analog filter, 0 = automatic
+    int channel = 0;       // transmit channel
+    std::string ref;       // clock and time source; empty = device default
 };
 
 class SdrTx {
@@ -43,6 +45,7 @@ public:
     virtual double gain() const = 0;
     virtual GainRange gainRange() const = 0;
     virtual std::string description() const = 0;
+    virtual std::string antenna() const { return {}; }  // the transmit port in use
     virtual std::string notes() const { return {}; }
     virtual std::string fatalError() const { return {}; }
     virtual Stats stats() const = 0;
