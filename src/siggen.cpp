@@ -5,10 +5,10 @@
 #include <cerrno>
 #include <climits>
 #include <cstdio>
-#include <cstring>
 
 #include "dsp.h"
 #include "json.h"
+#include "log.h"
 #include "recorder.h"
 #include "ui_util.h"
 
@@ -52,21 +52,6 @@ std::string num(double v) {
     char b[40];
     snprintf(b, sizeof b, "%.12g", v);
     return b;
-}
-
-std::string jsonString(const std::string& v) {
-    std::string o = "\"";
-    for (char c : v) {
-        if (c == '"' || c == '\\') o += '\\';
-        if ((unsigned char)c < 0x20) {
-            char b[8];
-            snprintf(b, sizeof b, "\\u%04x", c);
-            o += b;
-        } else {
-            o += c;
-        }
-    }
-    return o + "\"";
 }
 
 std::string lower(const char* s) {
@@ -167,10 +152,10 @@ bool saveChain(const std::string& path, const WaveformParams& p, std::string& er
     const std::string full = expandHome(path);
     const std::string dir = dirOf(full) + "/";
     std::string j = "{\n  \"wvt_chain\": 1,\n";
-    j += "  \"sample_rate\": " + num(p.rate) + ",\n";
-    j += "  \"center_freq\": " + num(p.fc) + ",\n";
+    j += "  \"sample_rate\": " + jsonNumber(p.rate) + ",\n";
+    j += "  \"center_freq\": " + jsonNumber(p.fc) + ",\n";
     j += "  \"loops\": " + std::to_string(p.chainLoops) + ",\n";
-    j += "  \"start_delay_s\": " + num(p.startDelay) + ",\n";
+    j += "  \"start_delay_s\": " + jsonNumber(p.startDelay) + ",\n";
     j += "  \"items\": [";
     for (size_t i = 0; i < p.chain.size(); ++i) {
         const ChainItem& c = p.chain[i];
@@ -181,14 +166,14 @@ bool saveChain(const std::string& path, const WaveformParams& p, std::string& er
         j += std::string(i ? "," : "") + "\n    {\"path\": " + jsonQuote(f) + ", \"datatype\": \"" + fmt + "\"";
         if (c.fp.swapIQ) j += ", \"swap_iq\": true";
         if (c.fp.headerBytes) j += ", \"header_bytes\": " + std::to_string(c.fp.headerBytes);
-        j += ", \"file_rate\": " + num(c.fileRate) + ", \"start_s\": " + num(c.start) + ", \"length_s\": " + num(c.len) +
-             ", \"offset_hz\": " + num(c.offset) + ", \"level_dbfs\": " + (c.keepLevel ? std::string("null") : num(c.ampDb)) +
-             ", \"repeats\": " + std::to_string(c.repeats) + ", \"gap_after_s\": " + num(c.gapAfter) + "}";
+        j += ", \"file_rate\": " + jsonNumber(c.fileRate) + ", \"start_s\": " + jsonNumber(c.start) + ", \"length_s\": " + jsonNumber(c.len) +
+             ", \"offset_hz\": " + jsonNumber(c.offset) + ", \"level_dbfs\": " + (c.keepLevel ? std::string("null") : jsonNumber(c.ampDb)) +
+             ", \"repeats\": " + std::to_string(c.repeats) + ", \"gap_after_s\": " + jsonNumber(c.gapAfter) + "}";
     }
     j += "\n  ]\n}\n";
     FILE* f = fopen(full.c_str(), "wb");
     if (!f) {
-        err = "can't write " + full + ": " + strerror(errno);
+        err = "can't write " + full + ": " + errnoText(errno);
         return false;
     }
     const bool ok = fwrite(j.data(), 1, j.size(), f) == j.size();
@@ -203,7 +188,7 @@ bool loadChain(const std::string& path, WaveformParams& p, std::string& err) {
     const std::string full = expandHome(path);
     FILE* f = fopen(full.c_str(), "rb");
     if (!f) {
-        err = "can't open " + full + ": " + strerror(errno);
+        err = "can't open " + full + ": " + errnoText(errno);
         return false;
     }
     std::string text;
@@ -549,81 +534,81 @@ std::string paramsJson(const WaveformParams& p) {
                     : p.mode == GenMode::Chain  ? "chain"
                                                 : "playback"));
     if (p.mode != GenMode::Chain) {  // (each chain item has its own)
-        add("offset_hz", num(p.offset));
-        add("amplitude_dbfs", num(p.ampDb));
+        add("offset_hz", jsonNumber(p.offset));
+        add("amplitude_dbfs", jsonNumber(p.ampDb));
     }
-    add("phase_deg", num(p.phaseDeg));
+    add("phase_deg", jsonNumber(p.phaseDeg));
     if (p.sweeping()) {
         auto name = [&](SweepShape v) { return str(lower(sweepShapeName(v)).c_str()); };
-        std::string w = "{\"period_s\": " + num((double)p.sweepSamples() / p.rate);
+        std::string w = "{\"period_s\": " + jsonNumber((double)p.sweepSamples() / p.rate);
         if (p.fSweep != SweepShape::Off) {
-            w += ", \"frequency\": " + name(p.fSweep) + ", \"from_hz\": " + num(p.fFrom) + ", \"to_hz\": " + num(p.fTo);
+            w += ", \"frequency\": " + name(p.fSweep) + ", \"from_hz\": " + jsonNumber(p.fFrom) + ", \"to_hz\": " + jsonNumber(p.fTo);
             if (p.fSweep == SweepShape::Stepped)
-                w += ", \"step_hz\": " + num(p.fStep) + ", \"dwell_s\": " + num(p.fDwell);
+                w += ", \"step_hz\": " + jsonNumber(p.fStep) + ", \"dwell_s\": " + jsonNumber(p.fDwell);
         }
         if (p.aSweep != SweepShape::Off)
-            w += ", \"level\": " + name(p.aSweep) + ", \"from_dbfs\": " + num(p.aFrom) + ", \"to_dbfs\": " + num(p.aTo);
+            w += ", \"level\": " + name(p.aSweep) + ", \"from_dbfs\": " + jsonNumber(p.aFrom) + ", \"to_dbfs\": " + jsonNumber(p.aTo);
         if (p.mode == GenMode::Pulsed) w += ", \"per_pulse\": true";
         add("sweep", w + "}");
     }
     if (p.mode == GenMode::CW) {
-        add("drift_hz_per_s", num(p.driftHzPerSec));
+        add("drift_hz_per_s", jsonNumber(p.driftHzPerSec));
     } else if (p.mode == GenMode::Chain) {
         std::string a = "[";
         for (size_t i = 0; i < p.chain.size(); ++i) {
             const ChainItem& c = p.chain[i];
             std::string fmt = formatName(c.fp.fmt);
             fmt = fmt.substr(0, fmt.find(' ')) + (c.fp.bigEndian ? "_be" : "");
-            a += std::string(i ? ", " : "") + "{\"source_file\": " + jsonString(c.path) + ", \"source_datatype\": \"" + fmt +
-                 "\", \"source_rate_hz\": " + num(c.fileRate > 0 ? c.fileRate : p.rate) + ", \"segment_start_s\": " +
-                 num(c.start) + ", \"segment_length_s\": " + num(c.len) + ", \"offset_hz\": " + num(c.offset) +
-                 ", \"level_dbfs\": " + (c.keepLevel ? std::string("\"as recorded\"") : num(c.ampDb)) +
-                 ", \"repeats\": " + std::to_string(c.repeats) + ", \"gap_after_s\": " + num(c.gapAfter) + "}";
+            a += std::string(i ? ", " : "") + "{\"source_file\": " + jsonQuote(c.path) + ", \"source_datatype\": \"" + fmt +
+                 "\", \"source_rate_hz\": " + jsonNumber(c.fileRate > 0 ? c.fileRate : p.rate) + ", \"segment_start_s\": " +
+                 jsonNumber(c.start) + ", \"segment_length_s\": " + jsonNumber(c.len) + ", \"offset_hz\": " + jsonNumber(c.offset) +
+                 ", \"level_dbfs\": " + (c.keepLevel ? std::string("\"as recorded\"") : jsonNumber(c.ampDb)) +
+                 ", \"repeats\": " + std::to_string(c.repeats) + ", \"gap_after_s\": " + jsonNumber(c.gapAfter) + "}";
         }
         add("chain", a + "]");
         add("loops", std::to_string(p.chainLoops));
-        add("start_delay_s", num(p.startDelay));
+        add("start_delay_s", jsonNumber(p.startDelay));
     } else if (p.mode == GenMode::Playback) {
-        add("source_file", jsonString(p.playPath));
+        add("source_file", jsonQuote(p.playPath));
         std::string fmt = formatName(p.playFp.fmt);
         fmt = fmt.substr(0, fmt.find(' ')) + (p.playFp.bigEndian ? "_be" : "");
         add("source_datatype", str(fmt.c_str()));
-        add("source_rate_hz", num(playFileRate(p)));
-        add("segment_start_s", num(p.playStart));
-        add("segment_length_s", num(p.playLen));
+        add("source_rate_hz", jsonNumber(playFileRate(p)));
+        add("segment_start_s", jsonNumber(p.playStart));
+        add("segment_length_s", jsonNumber(p.playLen));
         add("loop", p.playLoop ? "true" : "false");
-        add("repeat_gap_s", num(p.playGap));
-        add("start_delay_s", num(p.startDelay));
+        add("repeat_gap_s", jsonNumber(p.playGap));
+        add("start_delay_s", jsonNumber(p.startDelay));
     } else {
-        add("pri_s", num(p.pri));
-        add("pulse_width_s", num(p.pw));
+        add("pri_s", jsonNumber(p.pri));
+        add("pulse_width_s", jsonNumber(p.pw));
         add("edge", str(edgeName(p.edge)));
         if (p.edge != EdgeShape::Rect) {
-            add("rise_s", num(p.rise));
-            add("fall_s", num(p.fall));
+            add("rise_s", jsonNumber(p.rise));
+            add("fall_s", jsonNumber(p.fall));
         }
         add("pri_pattern", str(priPatternName(p.priPattern)));
         if (p.priPattern == PriPattern::Stagger) {
             std::string a = "[";
-            for (size_t i = 0; i < p.stagger.size(); ++i) a += (i ? ", " : "") + num(p.stagger[i]);
+            for (size_t i = 0; i < p.stagger.size(); ++i) a += (i ? ", " : "") + jsonNumber(p.stagger[i]);
             add("stagger_s", a + "]");
         }
         if (p.priPattern == PriPattern::Jitter) {
-            add("jitter_pct", num(p.jitterPct));
+            add("jitter_pct", jsonNumber(p.jitterPct));
             add("seed", std::to_string(p.seed));
         }
         add("burst_pulses", std::to_string(p.burstPulses));
-        add("burst_gap_s", num(p.burstGap));
-        add("start_delay_s", num(p.startDelay));
+        add("burst_gap_s", jsonNumber(p.burstGap));
+        add("start_delay_s", jsonNumber(p.startDelay));
         add("intrapulse", str(intraModName(p.intra)));
         if (p.intra == IntraMod::Barker) add("barker_length", std::to_string(p.barkerLen));
-        else if (p.intra != IntraMod::None) add("chirp_bw_hz", num(p.chirpBw));
+        else if (p.intra != IntraMod::None) add("chirp_bw_hz", jsonNumber(p.chirpBw));
     }
-    if (p.noise) add("snr_db", num(p.snrDb));
-    if (p.dcI != 0 || p.dcQ != 0) add("dc_offset", "[" + num(p.dcI) + ", " + num(p.dcQ) + "]");
-    if (p.iqGainDb != 0) add("iq_gain_db", num(p.iqGainDb));
-    if (p.iqPhaseDeg != 0) add("iq_phase_deg", num(p.iqPhaseDeg));
-    if (p.linewidth != 0) add("linewidth_hz", num(p.linewidth));
+    if (p.noise) add("snr_db", jsonNumber(p.snrDb));
+    if (p.dcI != 0 || p.dcQ != 0) add("dc_offset", "[" + jsonNumber(p.dcI) + ", " + jsonNumber(p.dcQ) + "]");
+    if (p.iqGainDb != 0) add("iq_gain_db", jsonNumber(p.iqGainDb));
+    if (p.iqPhaseDeg != 0) add("iq_phase_deg", jsonNumber(p.iqPhaseDeg));
+    if (p.linewidth != 0) add("linewidth_hz", jsonNumber(p.linewidth));
     return j + "}";
 }
 

@@ -8,7 +8,6 @@
 #include <chrono>
 #include <cstdarg>
 #include <cstdlib>
-#include <cstring>
 #include <ctime>
 #include <mutex>
 
@@ -44,9 +43,9 @@ void stamp(char* buf, size_t n, bool date) {
 std::string logDir(const LogConfig& cfg) {
     std::string d = cfg.dir;
     if (d.empty())
-        if (const char* e = getenv("WVT_LOG_DIR"); e && *e) d = e;
+        if (const char* e = envVar("WVT_LOG_DIR"); e && *e) d = e;
     if (d.empty())
-        if (const char* e = getenv("TMPDIR"); e && *e) d = e;
+        if (const char* e = envVar("TMPDIR"); e && *e) d = e;
     if (d.empty()) d = "/tmp";
     while (d.size() > 1 && d.back() == '/') d.pop_back();
     return d;
@@ -69,7 +68,7 @@ FILE* openUnique(const std::string& dir, std::string& path, std::string& err) {
         if (FILE* f = fopen(path.c_str(), "wx")) return f;
         if (errno != EEXIST) break;
     }
-    err = strerror(errno);
+    err = errnoText(errno);
     path.clear();
     return nullptr;
 }

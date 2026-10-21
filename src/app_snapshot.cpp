@@ -133,7 +133,8 @@ std::string App::statusText() const {
 }
 
 void App::afterRender() {
-    if (snapCountdown_ <= 0 || --snapCountdown_ > 0) return;
+    if (snapCountdown_ <= 0) return;
+    if (--snapCountdown_ > 0) return;
     saveSnapshots();
     if (ImGui::IsMousePosValid(&snapMouse_)) ImGui::GetIO().AddMousePosEvent(snapMouse_.x, snapMouse_.y);
 }

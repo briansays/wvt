@@ -49,7 +49,7 @@ bool parseStagger(const char* text, std::vector<double>& out) {
         }
     }
     if (v.empty()) return false;
-    out = v;
+    out = std::move(v);
     return true;
 }
 

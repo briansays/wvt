@@ -32,6 +32,9 @@ to the default of an option, delete `build/CMakeCache.txt`, or give the default 
 | [`WVT_CUDA_STATIC`](#wvt_cuda_static) | `ON`, `OFF` | `ON` | Linux |
 | [`CMAKE_CUDA_ARCHITECTURES`](#cmake_cuda_architectures) | A list of GPU architectures | Refer to the section | Linux |
 | [`WVT_WITH_METAL`](#wvt_with_metal) | `AUTO`, `ON`, `OFF` | `AUTO` | macOS |
+| [`WVT_WERROR`](#wvt_werror) | `ON`, `OFF` | `OFF` | All |
+| [`WVT_SANITIZE`](#wvt_sanitize) | `address`, `thread` or empty | Empty | All |
+| [`WVT_FUZZ`](#wvt_fuzz) | `ON`, `OFF` | `OFF` | All (clang only) |
 
 The `AUTO`, `ON` and `OFF` values have the same meaning for all options:
 
@@ -52,8 +55,8 @@ Use `ON` in scripts and CI jobs, where a missing library must cause an error.
 
 Sets the compiler optimization. If you do not give a value, wvt uses `Release`.
 
-- `Release` compiles with `-O3 -DNDEBUG`. Use this value for normal use. The waterfall and the
-  demodulators are much slower without optimization.
+- `Release` compiles with `-O3 -DNDEBUG` (the CMake default for GCC and clang). Use this value for
+  normal use. The waterfall and the demodulators are much slower without optimization.
 - `Debug` compiles with `-g` and no optimization. Use it with a debugger.
 - `RelWithDebInfo` compiles with optimization and debug symbols.
 
@@ -183,6 +186,42 @@ to [GPU processing](gpu.md).
 
 Output: `wvt: Metal support enabled (MPSGraph FFT; the GPU path needs macOS 14 at run time)`.
 
+### WVT_WERROR
+
+`ON` makes the compiler warnings in the wvt code errors (`-Werror`). The code in `third_party/` is
+not included. All CI build jobs use `ON`, so a change that adds a warning fails CI. All the wvt
+targets compile with `-Wall -Wextra -Wno-unused-parameter`.
+
+To add your own compiler flags, use `CMAKE_CXX_FLAGS` or `CMAKE_CXX_FLAGS_RELEASE`. wvt does not
+replace them.
+
+### WVT_SANITIZE
+
+Builds all the programs with compiler sanitizers. Use it to test, not for normal use: the
+programs are slower and use more memory.
+
+- `address`: AddressSanitizer and UndefinedBehaviorSanitizer (`-fsanitize=address,undefined`). They
+  find out-of-bounds access, use after free, memory leaks (Linux) and undefined behavior. An
+  undefined-behavior error stops the program.
+- `thread`: ThreadSanitizer (`-fsanitize=thread`). It finds data races between threads. You cannot
+  use it together with `address`.
+- Empty (the default): no sanitizers.
+
+The CUDA code (`gpu_cuda.cu`) does not get the sanitizer flags. Use a separate build folder for
+each value. Refer to [Self-checks](self-checks.md#sanitizer-builds).
+
+Output: `wvt: sanitizers enabled (address: -fsanitize=address,undefined;...)`.
+
+### WVT_FUZZ
+
+`ON` also builds the libFuzzer targets `fuzz_json`, `fuzz_chain`, `fuzz_meta` and `fuzz_parse_si`,
+with AddressSanitizer and UndefinedBehaviorSanitizer. CTest then also runs each target on its seed
+inputs. The option needs clang: with another compiler, the configure step stops with an error. On
+macOS, use the clang of the Homebrew `llvm` package, because Apple clang has no libFuzzer. Refer
+to [Fuzz tests](self-checks.md#fuzz-tests).
+
+Output: `wvt: libFuzzer targets enabled (fuzz_json, fuzz_chain, fuzz_meta, fuzz_parse_si)`.
+
 ## The CPU FFT
 
 The CPU FFT is not an option. On macOS, the build always links the Accelerate framework and uses
@@ -209,6 +248,12 @@ A CUDA build for one GPU type, with shared CUDA libraries:
 cmake -S . -B build -DWVT_WITH_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=89 -DWVT_CUDA_STATIC=OFF
 ```
 
+A build for ThreadSanitizer, in a separate folder:
+
+```sh
+cmake -S . -B build-tsan -DWVT_SANITIZE=thread -DCMAKE_BUILD_TYPE=RelWithDebInfo
+```
+
 A debug build:
 
 ```sh
@@ -232,6 +277,9 @@ cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
 | `device_check` | Self-check for the device list and the sample rate rules |
 | `bb_check` | Self-check for the BB60 backend, with the simulated device. Only with `WVT_BB_SIM=ON` |
 | `gpu_check` | Compares the GPU results with the CPU results, and measures the speed |
+| `fuzz_json`, `fuzz_chain`, `fuzz_meta`, `fuzz_parse_si` | The fuzz targets. Only with `WVT_FUZZ=ON` |
+
+`ctest --test-dir build --output-on-failure` runs all the self-checks.
 
 For the self-checks, refer to [Self-checks and test signals](self-checks.md).
 

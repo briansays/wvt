@@ -11,9 +11,9 @@
 #include <complex>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <ctime>
 
+#include "json.h"
 #include "log.h"
 
 namespace {
@@ -32,33 +32,6 @@ std::string isoTime(double t) {
     snprintf(buf, sizeof buf, "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
              tm.tm_hour, tm.tm_min, tm.tm_sec, ms);
     return buf;
-}
-
-std::string jsonEscape(const std::string& s) {
-    std::string o;
-    for (char c : s) {
-        switch (c) {
-            case '"': o += "\\\""; break;
-            case '\\': o += "\\\\"; break;
-            case '\n': o += "\\n"; break;
-            case '\t': o += "\\t"; break;
-            default:
-                if ((unsigned char)c < 0x20) {
-                    char b[8];
-                    snprintf(b, sizeof b, "\\u%04x", c);
-                    o += b;
-                } else {
-                    o += c;
-                }
-        }
-    }
-    return o;
-}
-
-std::string num(double v) {
-    char b[40];
-    snprintf(b, sizeof b, "%.17g", v);
-    return b;
 }
 
 // "%.6f" without trailing zeros, keeping at least `keep` decimals.
@@ -81,7 +54,7 @@ bool mkdirs(const std::string& dir, std::string& err) {
         if (j == std::string::npos) j = dir.size();
         cur = dir.substr(0, j);
         if (!cur.empty() && mkdir(cur.c_str(), 0755) != 0 && errno != EEXIST) {
-            err = "cannot create directory '" + cur + "': " + strerror(errno);
+            err = "cannot create directory '" + cur + "': " + errnoText(errno);
             return false;
         }
         i = j + 1;
@@ -133,7 +106,7 @@ bool makeDirs(const std::string& dir, std::string& err) { return mkdirs(dir, err
 
 std::string expandHome(const std::string& path) {
     if (path == "~" || path.rfind("~/", 0) == 0) {
-        const char* home = getenv("HOME");
+        const char* home = envVar("HOME");
         if (home) return std::string(home) + path.substr(1);
     }
     return path;
@@ -168,7 +141,7 @@ bool Recorder::start(std::shared_ptr<SampleRing> ring, const RecordSource& src, 
     std::string dataPath = cfg.sigmf ? base + ".sigmf-data" : base + rawExt(outFmt);
     fd_ = ::open(dataPath.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0644);
     if (fd_ < 0) {
-        err = "cannot create '" + dataPath + "': " + strerror(errno);
+        err = "cannot create '" + dataPath + "': " + errnoText(errno);
         LOG_DEBUG("record", "start failed: %s", err.c_str());
         return false;
     }
@@ -321,7 +294,7 @@ void Recorder::run() {
                 ok = writeAll(fd_, raw.data(), (size_t)n * bps);
             }
             if (!ok) {
-                reason = std::string("write failed: ") + strerror(errno);
+                reason = std::string("write failed: ") + errnoText(errno);
                 failed = true;
                 break;
             }
@@ -352,7 +325,7 @@ void Recorder::run() {
     ring_->closeGate();
     handleGaps(true);
     if (::close(fd_) != 0 && !failed) {
-        reason = std::string("close failed: ") + strerror(errno);
+        reason = std::string("close failed: ") + errnoText(errno);
         failed = true;
     }
     fd_ = -1;
@@ -380,19 +353,19 @@ bool Recorder::writeMeta(std::string& err) {
         metaPath = metaPath_;
         j += "{\n  \"global\": {\n";
         j += "    \"core:datatype\": \"" + std::string(sigmfType(cfg_.cf32 ? SampleFormat::CF32 : src_.fmt)) + "\",\n";
-        j += "    \"core:sample_rate\": " + num(src_.rate) + ",\n";
+        j += "    \"core:sample_rate\": " + jsonNumber(src_.rate) + ",\n";
         j += "    \"core:version\": \"1.0.0\",\n";
         j += "    \"core:recorder\": \"wvt\",\n";
-        if (!src_.hw.empty()) j += "    \"core:hw\": \"" + jsonEscape(src_.hw) + "\",\n";
-        if (!cfg_.description.empty()) j += "    \"core:description\": \"" + jsonEscape(cfg_.description) + "\",\n";
+        if (!src_.hw.empty()) j += "    \"core:hw\": " + jsonQuote(src_.hw) + ",\n";
+        if (!cfg_.description.empty()) j += "    \"core:description\": " + jsonQuote(cfg_.description) + ",\n";
         if (!cfg_.extraGlobal.empty()) j += "    " + cfg_.extraGlobal + ",\n";
         j += "    \"core:num_channels\": 1\n  },\n  \"captures\": [";
         for (size_t i = 0; i < captures_.size(); ++i) {
             const auto& c = captures_[i];
             j += std::string(i ? "," : "") + "\n    {\"core:sample_start\": " + std::to_string(c.start) +
-                 ", \"core:frequency\": " + num(c.fc);
-            if (!c.datetime.empty()) j += ", \"core:datetime\": \"" + c.datetime + "\"";
-            j += "}";
+                 ", \"core:frequency\": " + jsonNumber(c.fc);
+            if (!c.datetime.empty()) j += ", \"core:datetime\": " + jsonQuote(c.datetime);
+            j += '}';
         }
         j += "\n  ],\n  \"annotations\": [";
         // SigMF wants annotations ordered by sample_start.
@@ -402,9 +375,9 @@ bool Recorder::writeMeta(std::string& err) {
             const auto& a = annotations_[i];
             j += std::string(i ? "," : "") + "\n    {\"core:sample_start\": " + std::to_string(a.start);
             if (a.count > 0) j += ", \"core:sample_count\": " + std::to_string(a.count);
-            if (!a.label.empty()) j += ", \"core:label\": \"" + jsonEscape(a.label) + "\"";
-            if (!a.comment.empty()) j += ", \"core:comment\": \"" + jsonEscape(a.comment) + "\"";
-            j += "}";
+            if (!a.label.empty()) j += ", \"core:label\": " + jsonQuote(a.label);
+            if (!a.comment.empty()) j += ", \"core:comment\": " + jsonQuote(a.comment);
+            j += '}';
         }
         j += annotations_.empty() ? "]\n}\n" : "\n  ]\n}\n";
         metaDirty_ = false;
@@ -413,13 +386,13 @@ bool Recorder::writeMeta(std::string& err) {
     std::string tmp = metaPath + ".tmp";
     FILE* f = fopen(tmp.c_str(), "wb");
     if (!f) {
-        err = "cannot write '" + tmp + "': " + strerror(errno);
+        err = "cannot write '" + tmp + "': " + errnoText(errno);
         return false;
     }
     bool ok = fwrite(j.data(), 1, j.size(), f) == j.size();
     ok = (fclose(f) == 0) && ok;
     if (!ok || rename(tmp.c_str(), metaPath.c_str()) != 0) {
-        err = "cannot write '" + metaPath + "': " + strerror(errno);
+        err = "cannot write '" + metaPath + "': " + errnoText(errno);
         unlink(tmp.c_str());
         return false;
     }

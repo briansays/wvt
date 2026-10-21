@@ -1,0 +1,19 @@
+# Build folders (build/, build-asan/, build-tsan/, build-fuzz/ ...)
+/build*/
+/cmake-build-*/
+
+# Log files that wvt and the build write
+*.log
+
+# Recordings and generated test files
+*.sigmf-data
+*.sigmf-meta
+*.wav
+
+# Editor and OS files
+.DS_Store
+.vscode/
+.idea/
+*.swp
+compile_commands.json
+.cache/

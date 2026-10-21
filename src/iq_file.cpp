@@ -15,6 +15,7 @@
 #include <regex>
 #include <sstream>
 
+#include "json.h"
 #include "log.h"
 
 const char* formatName(SampleFormat f) {
@@ -44,7 +45,7 @@ int formatBytesPerSample(SampleFormat f) {
 std::shared_ptr<IqFile> IqFile::open(const std::string& path, std::string& err) {
     int fd = ::open(path.c_str(), O_RDONLY);
     if (fd < 0) {
-        err = "cannot open '" + path + "': " + strerror(errno);
+        err = "cannot open '" + path + "': " + errnoText(errno);
         return nullptr;
     }
     struct stat st{};
@@ -59,7 +60,7 @@ std::shared_ptr<IqFile> IqFile::open(const std::string& path, std::string& err) 
     if (f->size_ > 0) {
         void* p = mmap(nullptr, f->size_, PROT_READ, MAP_PRIVATE, fd, 0);
         if (p == MAP_FAILED) {
-            err = "mmap failed for '" + path + "': " + strerror(errno);
+            err = "mmap failed for '" + path + "': " + errnoText(errno);
             ::close(fd);
             return nullptr;
         }
@@ -215,33 +216,13 @@ bool parseFormatName(const std::string& in, SampleFormat& fmt, bool& bigEndian) 
     return true;
 }
 
-// Finds `"key"` in a JSON-ish text and returns the raw value token after ':'.
-static bool jsonValue(const std::string& text, const std::string& key, std::string& out) {
-    size_t p = text.find("\"" + key + "\"");
-    if (p == std::string::npos) return false;
-    p = text.find(':', p + key.size() + 2);
-    if (p == std::string::npos) return false;
-    ++p;
-    while (p < text.size() && std::isspace((unsigned char)text[p])) ++p;
-    if (p >= text.size()) return false;
-    if (text[p] == '"') {
-        size_t e = text.find('"', p + 1);
-        if (e == std::string::npos) return false;
-        out = text.substr(p + 1, e - p - 1);
-    } else {
-        size_t e = p;
-        while (e < text.size() && (std::isdigit((unsigned char)text[e]) || strchr("+-.eE", text[e]))) ++e;
-        out = text.substr(p, e - p);
-    }
-    return !out.empty();
-}
-
 // "2026-10-20T13:50:22.125Z" (SigMF core:datetime, UTC) -> seconds since
 // 1970; 0 when it does not parse.
 double parseIsoTime(const std::string& s) {
     int y, mo, d, h, mi;
     double sec;
-    if (sscanf(s.c_str(), "%d-%d-%dT%d:%d:%lf", &y, &mo, &d, &h, &mi, &sec) != 6) return 0;
+    // The count checks the format; a field too long for an int only gives a wrong time.
+    if (sscanf(s.c_str(), "%d-%d-%dT%d:%d:%lf", &y, &mo, &d, &h, &mi, &sec) != 6) return 0;  // NOLINT(bugprone-unchecked-string-to-number-conversion,cert-err34-c)
     struct tm tm{};
     tm.tm_year = y - 1900;
     tm.tm_mon = mo - 1;
@@ -273,13 +254,38 @@ static FileMetaGuess guessMetaImpl(const std::string& path) {
         if (in) {
             std::stringstream ss;
             ss << in.rdbuf();
-            std::string text = ss.str(), v;
-            if (jsonValue(text, "core:datatype", v) && parseFormatName(v, g.fmt, g.bigEndian)) g.haveFmt = true;
-            if (jsonValue(text, "core:sample_rate", v)) { g.rate = atof(v.c_str()); g.haveRate = g.rate > 0; }
-            if (jsonValue(text, "core:frequency", v)) { g.fc = atof(v.c_str()); g.haveFc = true; }
-            if (jsonValue(text, "core:datetime", v)) g.startTime = parseIsoTime(v);
-            g.source = "SigMF metadata";
-            return g;
+            JsonValue meta;
+            std::string err;
+            if (parseJson(ss.str(), meta, err)) {
+                // SigMF puts the datatype and the rate in "global", the frequency and the
+                // time in each capture; the first capture describes sample 0. A key in the
+                // other place is accepted too.
+                const JsonValue* caps = meta.get("captures");
+                const JsonValue* cap0 = caps && !caps->arr.empty() ? &caps->arr[0] : nullptr;
+                const JsonValue* global = meta.get("global");
+                auto find = [&](const char* key, JsonValue::Type type) -> const JsonValue* {
+                    for (const JsonValue* o : {global, cap0}) {
+                        const JsonValue* v = o ? o->get(key) : nullptr;
+                        if (v && v->type == type) return v;
+                    }
+                    return nullptr;
+                };
+                using T = JsonValue::Type;
+                if (const JsonValue* v = find("core:datatype", T::String); v && parseFormatName(v->str, g.fmt, g.bigEndian))
+                    g.haveFmt = true;
+                if (const JsonValue* v = find("core:sample_rate", T::Number)) {
+                    g.rate = v->num;
+                    g.haveRate = std::isfinite(g.rate) && g.rate > 0;
+                }
+                if (const JsonValue* v = find("core:frequency", T::Number); v && std::isfinite(v->num)) {
+                    g.fc = v->num;
+                    g.haveFc = true;
+                }
+                if (const JsonValue* v = find("core:datetime", T::String)) g.startTime = parseIsoTime(v->str);
+                g.source = "SigMF metadata";
+                return g;
+            }
+            LOG_WARN("file", "SigMF metadata %s is not valid JSON (%s); guessing from the name", metaPath.c_str(), err.c_str());
         }
     }
 
@@ -290,8 +296,8 @@ static FileMetaGuess guessMetaImpl(const std::string& path) {
         static const std::regex re(R"(gqrx_\d{8}_\d{6}_(\d+)_(\d+)_fc\.raw)", std::regex::icase);
         std::smatch m;
         if (std::regex_search(base, m, re)) {
-            g.fc = atof(m[1].str().c_str());
-            g.rate = atof(m[2].str().c_str());
+            g.fc = strtod(m[1].str().c_str(), nullptr);
+            g.rate = strtod(m[2].str().c_str(), nullptr);
             g.haveFc = g.haveRate = true;
             g.haveFmt = true;
             g.fmt = SampleFormat::CF32;
@@ -312,11 +318,11 @@ static FileMetaGuess guessMetaImpl(const std::string& path) {
             return 1.0;
         };
         if (std::regex_search(base, m, rateRe)) {
-            g.rate = atof(m[1].str().c_str()) * mult(m[2].str());
+            g.rate = strtod(m[1].str().c_str(), nullptr) * mult(m[2].str());
             g.haveRate = g.rate > 0;
         }
         if (std::regex_search(base, m, fcRe)) {
-            g.fc = atof(m[1].str().c_str()) * mult(m[2].str());
+            g.fc = strtod(m[1].str().c_str(), nullptr) * mult(m[2].str());
             g.haveFc = true;
         }
     }

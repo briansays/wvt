@@ -235,10 +235,16 @@ Pipelines& pipelines() {
     std::call_once(once, [] {
         @autoreleasepool {
             MTLCompileOptions* o = [MTLCompileOptions new];
-            // Same float rounding as the CPU: no fast math.
+            // Same float rounding as the CPU: no fast math. mathMode is in the
+            // macOS 15 SDK only, so an older SDK (Xcode 15) uses fastMathEnabled.
+            bool safeMath = false;
+#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 150000
             if (@available(macOS 15.0, *)) {
                 o.mathMode = MTLMathModeSafe;
-            } else {
+                safeMath = true;
+            }
+#endif
+            if (!safeMath) {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
                 o.fastMathEnabled = NO;

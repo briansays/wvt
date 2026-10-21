@@ -1,7 +1,7 @@
 # Builds wvt on pushes to main and on pull requests (issue #3, step 3 of
 # docs/design/cuda-gpu-plan.md). Pushes to other branches build through their pull
 # request only, so each commit builds once; run it by hand with "Run workflow".
-# GitHub's runners have no GPU: the CUDA jobs only check that the GPU code
+# GitHub's Linux runners have no GPU: the CUDA jobs only check that the GPU code
 # compiles and that a CUDA build runs on the CPU.
 name: build
 
@@ -27,22 +27,124 @@ jobs:
           sudo apt-get install -y build-essential cmake libx11-dev libgl1-mesa-dev librtlsdr-dev libuhd-dev
       - name: Configure
         # WVT_BB_SIM builds the BB60 backend against the simulated device (no SDK in CI).
-        run: cmake -S . -B build -DWVT_WITH_RTLSDR=ON -DWVT_WITH_UHD=ON -DWVT_WITH_CUDA=OFF -DWVT_BB_SIM=ON
+        run: cmake -S . -B build -DWVT_WERROR=ON -DWVT_WITH_RTLSDR=ON -DWVT_WITH_UHD=ON -DWVT_WITH_CUDA=OFF -DWVT_BB_SIM=ON
       - name: Build
         run: cmake --build build -j "$(nproc)"
       - name: Self-tests
-        run: |
-          for t in siggen_check audio_check log_check segment_check gpu_check extract_check snapshot_check device_check bb_check; do
-            echo "::group::$t"
-            ./build/$t
-            echo "::endgroup::"
-          done
+        run: ctest --test-dir build --output-on-failure
       - name: Command line
         run: |
           ./build/wvt --help > /dev/null
           ./build/wvt --list-devices
           ./build/iqgen /tmp/t.sigmf-data --fmt ci16
           ./build/wvt /tmp/t.sigmf-meta --chan 300k:150k --audio nfm --audio-out /tmp/t.wav --segment 0.5:1.5
+
+  macos:
+    name: macOS (Apple silicon, Metal, RTL-SDR, UHD)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install packages
+        # XQuartz gives the X11 and GLX libraries; Accelerate and Metal come with macOS.
+        run: |
+          brew install --cask xquartz
+          brew install pkgconf librtlsdr uhd
+      - name: Configure
+        run: >
+          cmake -S . -B build -DWVT_WERROR=ON -DWVT_WITH_METAL=ON -DWVT_WITH_RTLSDR=ON -DWVT_WITH_UHD=ON -DWVT_BB_SIM=ON
+      - name: Build
+        run: cmake --build build -j "$(sysctl -n hw.ncpu)"
+      - name: Self-tests
+        run: ctest --test-dir build --output-on-failure
+      - name: Command line
+        run: |
+          ./build/wvt --help > /dev/null
+          ./build/wvt --list-devices
+          ./build/iqgen /tmp/t.sigmf-data --fmt ci16
+          ./build/wvt /tmp/t.sigmf-meta --chan 300k:150k --audio nfm --audio-out /tmp/t.wav --segment 0.5:1.5
+
+  sanitizers:
+    name: Sanitizers (${{ matrix.sanitize }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitize: [address, thread]
+    env:
+      UBSAN_OPTIONS: print_stacktrace=1
+      TSAN_OPTIONS: second_deadlock_stack=1
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libx11-dev libgl1-mesa-dev
+      - name: Allow TSan's memory layout
+        # Ubuntu 24.04 randomizes too many address bits for TSan ("unexpected memory mapping").
+        run: sudo sysctl vm.mmap_rnd_bits=28
+      - name: Configure
+        run: >
+          cmake -S . -B build -DWVT_SANITIZE=${{ matrix.sanitize }} -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DWVT_WITH_RTLSDR=OFF -DWVT_WITH_UHD=OFF -DWVT_WITH_CUDA=OFF -DWVT_BB_SIM=ON
+      - name: Build
+        run: cmake --build build -j "$(nproc)"
+      - name: Self-tests
+        run: ctest --test-dir build --output-on-failure
+
+  fuzz:
+    name: Fuzz the parsers (libFuzzer, 60 s each)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-rt-dev cmake libx11-dev libgl1-mesa-dev
+      - name: Configure
+        run: >
+          cmake -S . -B build -DWVT_FUZZ=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+          -DWVT_WITH_RTLSDR=OFF -DWVT_WITH_UHD=OFF -DWVT_WITH_CUDA=OFF -DWVT_WITH_AUDIO=OFF
+      - name: Build
+        run: cmake --build build -j "$(nproc)" --target fuzz_json fuzz_chain fuzz_meta fuzz_parse_si
+      - name: Seed inputs
+        run: ctest --test-dir build -R '^fuzz_' --output-on-failure
+      - name: Fuzz
+        # New inputs go to a copy of the corpus; a crash leaves crash-* files in fuzz-out/.
+        run: |
+          mkdir -p fuzz-out
+          for f in json chain meta parse_si; do
+            echo "::group::fuzz_$f"
+            cp -r tools/fuzz/corpus/$f fuzz-out/corpus-$f
+            (cd fuzz-out && ../build/fuzz_$f -max_total_time=60 -max_len=4096 -print_final_stats=1 corpus-$f)
+            echo "::endgroup::"
+          done
+      - name: Keep the crash inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes
+          path: fuzz-out/crash-*
+
+  clang-tidy:
+    name: clang-tidy (bugprone, cert, concurrency, performance)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install packages
+        # The version is pinned: a newer clang-tidy can add findings by itself.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libx11-dev libgl1-mesa-dev librtlsdr-dev libuhd-dev
+          pip install clang-tidy==23.1.3
+      - name: Configure
+        run: >
+          cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DWVT_WITH_RTLSDR=ON -DWVT_WITH_UHD=ON
+          -DWVT_WITH_CUDA=OFF -DWVT_BB_SIM=ON
+      - name: clang-tidy (.clang-tidy; any finding fails)
+        run: tools/run-clang-tidy.sh build
 
   linux-cuda:
     name: Linux CUDA ${{ matrix.cuda }} (compile only)
@@ -63,16 +165,12 @@ jobs:
           DEBIAN_FRONTEND=noninteractive apt-get install -y cmake g++ make git libx11-dev libgl-dev
       - uses: actions/checkout@v5
       - name: Configure
-        run: cmake -S . -B build -DWVT_WITH_CUDA=ON -DWVT_WITH_RTLSDR=OFF -DWVT_WITH_UHD=OFF
+        run: cmake -S . -B build -DWVT_WERROR=ON -DWVT_WITH_CUDA=ON -DWVT_WITH_RTLSDR=OFF -DWVT_WITH_UHD=OFF
       - name: Build
         run: cmake --build build -j "$(nproc)"
       - name: Self-tests (no GPU, so the CUDA build must run on the CPU)
         run: |
-          for t in siggen_check audio_check log_check segment_check gpu_check extract_check snapshot_check device_check; do
-            echo "::group::$t"
-            ./build/$t
-            echo "::endgroup::"
-          done
+          ctest --test-dir build --output-on-failure
           ./build/wvt --list-devices
           if ./build/wvt --no-log-file --gpu on; then echo "--gpu on should fail without a GPU"; exit 1; fi
 

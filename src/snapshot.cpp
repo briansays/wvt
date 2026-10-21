@@ -5,6 +5,8 @@
 #include <cstring>
 #include <sys/stat.h>
 
+#include "log.h"
+
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
@@ -54,7 +56,7 @@ bool writePng(const std::string& path, const RgbImage& img, std::string& err) {
     // Level 9 is slower but makes the plots (large flat areas) much smaller.
     stbi_write_png_compression_level = 9;
     if (!stbi_write_png(path.c_str(), img.w, img.h, 3, img.px.data(), img.w * 3)) {
-        err = "cannot write '" + path + "'" + (errno ? std::string(": ") + strerror(errno) : "");
+        err = "cannot write '" + path + "'" + (errno ? std::string(": ") + errnoText(errno) : "");
         return false;
     }
     return true;

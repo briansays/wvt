@@ -90,7 +90,7 @@ public:
     // right sample. Devices that don't call it return false from usesRetuneMark;
     // the engine then marks the retune after setCenterFreq returns.
     using RetuneFn = std::function<void(double fc)>;
-    virtual void setRetuneMark(RetuneFn) {}
+    virtual void setRetuneMark(RetuneFn) {}  // NOLINT(performance-unnecessary-value-param): overrides move it
     virtual bool usesRetuneMark() const { return false; }
 };
 

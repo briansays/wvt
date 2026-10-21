@@ -60,7 +60,7 @@ Hound devices, transmit.
 - [x] `enumerateBb()` via `bbGetSerialNumberList2`.
 
 ### Phase 4 — CLI (`src/main.cpp`)
-- [x] `--device bb[:SERIAL]`, `--ref-level DBM`, `--atten auto|0|10|20|30`, `--amp auto|0-3`, `--ext-ref`.
+- [x] `--device bb[:SERIAL]`, `--ref-level DBM`, `--atten auto|0|10|20|30`, `--bb-amp auto|0-3` (first `--amp`, which the generator amplitude option already used; renamed in #54), `--ext-ref`.
 - [x] Default rate 10 MS/s and ref level -20 dBm for `bb` when not given.
 - [x] Help text updates.
 

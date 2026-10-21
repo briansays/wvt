@@ -128,7 +128,7 @@ struct Parser {
                 ++i;
                 JsonValue m;
                 if (!value(m, depth + 1)) return false;
-                v.obj.emplace_back(std::move(k), std::move(m));
+                v.obj.push_back({std::move(k), std::move(m)});
                 ws();
                 if (i < t.size() && t[i] == ',') {
                     ++i;
@@ -261,4 +261,16 @@ std::string jsonQuote(const std::string& s) {
         }
     }
     return o + "\"";
+}
+
+std::string jsonNumber(double v) {
+    if (!std::isfinite(v)) return "null";
+    // The fewest %g digits that read back as the same double: "915000000", not
+    // the "9.15e+08" that the shortest form (std::to_chars) gives.
+    char b[32];
+    for (int prec = 15; prec <= 17; ++prec) {
+        snprintf(b, sizeof b, "%.*g", prec, v);
+        if (strtod(b, nullptr) == v) break;
+    }
+    return b;
 }

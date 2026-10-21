@@ -93,7 +93,8 @@ public:
             LOG_INFO("bb", "external 10 MHz reference on port 1");
         }
         // sc16 halves the USB-to-ring and recording bandwidth compared with cf32.
-        if ((s = bbConfigureIQDataType(dev_, bbDataType16sc)) < bbNoError) {
+        s = bbConfigureIQDataType(dev_, bbDataType16sc);
+        if (s < bbNoError) {
             err = bbError("cannot select 16-bit I/Q", s);
             return false;
         }
@@ -182,20 +183,19 @@ private:
 
     // Sends the stored settings to the API. The device must not be streaming.
     bool configure(std::string& err) {
-        bbStatus s;
-        if ((s = bbConfigureIQCenter(dev_, fc_)) < bbNoError) {
+        if (const bbStatus s = bbConfigureIQCenter(dev_, fc_); s < bbNoError) {
             err = bbError("cannot tune to " + fmtSI(fc_, "Hz", 9), s);
             return false;
         }
-        if ((s = bbConfigureRefLevel(dev_, refLevel_)) < bbNoError) {
+        if (const bbStatus s = bbConfigureRefLevel(dev_, refLevel_); s < bbNoError) {
             err = bbError("cannot set reference level " + fmtSI(refLevel_, "dBm", 4), s);
             return false;
         }
-        if ((s = bbConfigureGainAtten(dev_, amp_, atten_)) < bbNoError) {
+        if (const bbStatus s = bbConfigureGainAtten(dev_, amp_, atten_); s < bbNoError) {
             err = bbError("cannot set the amplifier / attenuator", s);
             return false;
         }
-        if ((s = bbConfigureIQ(dev_, decimation_, bandwidth_)) < bbNoError) {
+        if (const bbStatus s = bbConfigureIQ(dev_, decimation_, bandwidth_); s < bbNoError) {
             err = bbError("cannot set I/Q rate " + fmtSI(rate_, "S/s", 6) + ", bandwidth " + fmtSI(bandwidth_, "Hz", 4), s);
             return false;
         }

@@ -211,7 +211,7 @@ bool TxEngine::start(const TxConfig& cfg, std::string& err) {
     LOG_INFO("tx", "transmitting %s on %s at %s, %s, gain %.2f dB", describeParams(p).c_str(), tx->description().c_str(),
              fmtSI(tx->centerFreq(), "Hz", 9).c_str(), fmtSI(tx->sampleRate(), "S/s", 6).c_str(), tx->gain());
     if (!tx->notes().empty()) LOG_WARN("tx", "%s", tx->notes().c_str());
-    gen_ = gen;
+    gen_ = std::move(gen);
     tx_ = std::move(tx);
     return true;
 }

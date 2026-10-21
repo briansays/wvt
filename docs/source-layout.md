@@ -4,14 +4,15 @@
 
 | File | Function |
 |---|---|
-| `src/main.cpp` | Command-line parsing, ImGui and ImPlot setup, the event loop |
+| `src/main.cpp` | The table of command-line options, ImGui and ImPlot setup, the event loop |
+| `src/cli.*` | The table-driven command-line parser: it runs the option handlers and makes `--help` from the same table |
 | `src/platform_x11.*` | The Xlib window, input, clipboard, and GLX or software presentation |
 | `src/sw_renderer.*` | The software rasterizer for ImGui draw data |
 | `src/app.*` | The UI: toolbar, linked plots, parameter panels |
 | `src/app_menu.cpp` | The menu bar, the keyboard help and the About window |
 | `src/ui_util.*` | SI-unit inputs and formatters, the scrollbar widget, forms, the gear button, the color bar, the style |
 | `src/log.*` | The logger |
-| `src/json.*` | A small JSON reader (chain files) |
+| `src/json.*` | The JSON module: a small reader (chain files, SigMF metadata) and the writer functions `jsonQuote` and `jsonNumber` |
 | `src/snapshot.*`, `src/app_snapshot.cpp` | Plot snapshots: names, crop, PNG writer, the snapshot window and the capture |
 
 ## File viewer and signal processing
@@ -84,6 +85,8 @@
 | `tools/bb_check.cpp` | The self-check for the BB60 backend |
 | `tools/bb_sim/` | A simulated BB60D behind the `bb_api` calls that wvt uses |
 | `tools/gpu_check.cpp` | The GPU self-check and benchmark |
+| `tools/run-clang-tidy.sh` | Runs clang-tidy on the wvt sources, as CI does (`.clang-tidy`, `tools/.clang-tidy`) |
+| `tools/fuzz/` | The libFuzzer targets for the parsers, and their seed inputs in `corpus/` |
 
 ## Other folders
 

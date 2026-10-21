@@ -1,17 +1,21 @@
 // wvt - IQ waveform visualization tool (X11)
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <cmath>
+#include <climits>
 #include <csignal>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "app.h"
+#include "cli.h"
 #include "extract.h"
 #include "gpu.h"
 #include "imgui.h"
@@ -311,131 +315,10 @@ static int runAudioLive(const StreamConfig& dev, const AudioParams& ap, const st
     return as.wavError.empty() && devErr.empty() ? 0 : 1;
 }
 
-static void usage() {
-    printf(
-        "usage: wvt [options] [file]\n"
-        "\n"
-        "Interactive waterfall / AM / FM / PM viewer for raw IQ recordings.\n"
-        "\n"
-        "options:\n"
-        "  -f, --format FMT     cf32 | cf64 | ci16 | ci32 | ci8 | cu8  (suffix _be for big-endian)\n"
-        "  -r, --rate HZ        sample rate, SI suffixes allowed (e.g. 2.4M)\n"
-        "  -c, --fc HZ          center frequency (e.g. 915M)\n"
-        "  -H, --header BYTES   bytes to skip at the start of the file\n"
-        "      --swap-iq        swap I and Q\n"
-        "      --chan OFF:BW    enable the channel filter, e.g. --chan 300k:150k\n"
-        "      --segment T0:T1  load only this part of the file, in seconds; -1 = file\n"
-        "                       start / end, e.g. --segment 40:50 or --segment 40:-1\n"
-        "      --view T0:T1     initial time range in seconds, e.g. --view 0.5:0.52\n"
-        "      --software       force the software renderer (no GLX)\n"
-        "      --scale S        UI scale factor (default 1, or $WVT_SCALE)\n"
-        "      --geometry WxH   initial window size (default 1600x950)\n"
-        "      --screenshot F   render, write a PPM screenshot to F and exit\n"
-        "      --gpu auto|on|off  GPU processing, CUDA or Metal (default auto, or $WVT_GPU); on = stop\n"
-        "                       if no GPU can be used\n"
-        "      --gpu-device N   use GPU N (see --list-devices)\n"
-        "  -v, --verbose [LEVEL]  print log messages to the console: debug | info | warn | error\n"
-        "                       (default info; without -v only warnings and errors print)\n"
-        "      --log-dir DIR    log file folder (default $WVT_LOG_DIR, then $TMPDIR, then /tmp)\n"
-        "      --no-log-file    don't write wvt_log_<date>_<time>.log\n"
-        "  -h, --help           show this help\n"
-        "\n"
-        "live devices (-c and -r set the tuning):\n"
-        "      --device DEV     rtlsdr[:INDEX|SERIAL] | uhd[:ARGS] | bb[:SERIAL] | sim\n"
-        "                       e.g. --device uhd  --device uhd:addr=192.168.10.2  --device rtlsdr:0  --device bb\n"
-        "      --gain DB|auto   receiver gain (default 30 dB)\n"
-        "      --ref-level DBM  BB60: strongest expected input (default -20 dBm)\n"
-        "      --atten auto|0|10|20|30   BB60 attenuator (default auto)\n"
-        "      --amp auto|0-3   BB60 amplifier setting (default auto)\n"
-        "      --ext-ref        BB60: lock to a 10 MHz reference on port 1\n"
-        "      --antenna NAME   USRP receive antenna (e.g. RX2, TX/RX; default: the device's)\n"
-        "      --usrp-channel N USRP receive / transmit channel (X310, N310, X410 have several; default 0)\n"
-        "      --ref SRC        USRP clock and time reference: internal | external | gpsdo\n"
-        "      --bandwidth HZ   USRP analog / BB60 I/Q bandwidth (default: automatic)\n"
-        "      --bias-tee       RTL-SDR: power an LNA / active antenna over the coax\n"
-        "      --direct-sampling I|Q  RTL-SDR: HF direct sampling (v3: Q)\n"
-        "      --ppm N          RTL-SDR frequency correction\n"
-        "      --list-devices   print attached devices and GPUs, and exit\n"
-        "\n"
-        "recording (needs --device):\n"
-        "      --record PREFIX  record to PREFIX_<date>_<time>_<fc>_<rate>.<ext>\n"
-        "      --record-format sigmf|raw   (default sigmf)\n"
-        "      --record-sample native|cf32 (default native: cu8 for RTL-SDR, ci16 for USRP and BB60)\n"
-        "      --record-duration T         stop after T seconds, e.g. 30\n"
-        "      --no-gui         record without opening a window (Ctrl+C stops)\n"
-        "\n"
-        "signal generator (-c sets the center frequency, -r the sample rate):\n"
-        "      --siggen         open the signal generator window\n"
-        "      --gen cw|pulsed|playback   waveform mode (also opens the window)\n"
-        "      --offset HZ      carrier offset from the center (default 100k)\n"
-        "      --amp DBFS       peak amplitude (default -6)\n"
-        "      --drift HZ       CW frequency drift per second\n"
-        "      --sweep FROM:TO  frequency sweep, offsets from the center (e.g. -400k:400k); CW or,\n"
-        "                       with --gen pulsed, pulse to pulse\n"
-        "      --sweep-shape up|down|tri   --sweep-step HZ:DWELL (stepped)   --sweep-time S (period)\n"
-        "      --level-sweep FROM:TO   level sweep in dBFS over the same period (CW or pulsed)\n"
-        "      --level-shape up|down|tri   (sweeps repeat until stopped)\n"
-        "      --pri S | --prf HZ   pulse repetition interval / frequency\n"
-        "      --pw S           pulse width, edges included\n"
-        "      --edge rect|linear|cos|gauss   --rise S  --fall S\n"
-        "      --stagger S,S,.. PRIs used in turn     --jitter PCT  --seed N\n"
-        "      --burst N[:GAP]  N pulses per burst, GAP seconds of extra silence after each\n"
-        "      --delay S        silence before the first pulse\n"
-        "      --lfm up|down|tri:BW  chirp each pulse, e.g. --lfm up:2M\n"
-        "      --barker N       Barker phase code (2 3 4 5 7 11 13)\n"
-        "      --play FILE      play back a SigMF or raw IQ recording (-f overrides its format;\n"
-        "                       its rate and frequency become -r and -c unless given)\n"
-        "      --play-rate HZ   the recording's sample rate (resampled to -r if different)\n"
-        "      --play-segment START:LEN   play part of it (LEN 0 = to the end)\n"
-        "      --play-gap S     silence between repeats    --play-once  don't repeat\n"
-        "      --chain FILE     play a chain saved from the window (.wvtchain.json)\n"
-        "      --chain-add PATH[@OFFSET][:N]   add a recording to the chain (repeatable), played N\n"
-        "                       times, e.g. b13.sigmf-meta@250k:3; the first sets -r and -c unless given\n"
-        "      --chain-loops N  passes through the chain (default 0 = until stopped)\n"
-        "      --snr DB  --dc I:Q  --iq GAIN_DB:PHASE_DEG  --linewidth HZ   impairments\n"
-        "      --gen-out PREFIX write to a file and exit (format via --record-format)\n"
-        "      --gen-sample cf32|ci16|ci8|cu8   file sample format (default cf32)\n"
-        "      --gen-duration T | --gen-pulses N   file length (default 1 s; N pulses, plays, sweeps\n"
-        "                       or chain passes)\n"
-        "      --gen-annotate   SigMF: one annotation per pulse, play, sweep or chain item\n"
-        "      --tx             TRANSMIT with a USRP until Ctrl+C (or --gen-duration)\n"
-        "      --tx-gain DB     transmit gain (default 0)   --tx-args ARGS  (default: the first USRP)\n"
-        "      --tx-antenna NAME  transmit port (default: the channel's first, e.g. TX/RX)\n"
-        "\n"
-        "export part of a file (the --segment limits it; --record-format sigmf|raw):\n"
-        "      --extract-out PATH    write it to PATH (.sigmf-data / .sigmf-meta, or raw) and exit\n"
-        "      --extract T0:T1       time range in seconds (default: the whole segment)\n"
-        "      --extract-band LO:HI  only this band (absolute Hz), mixed to 0 Hz, filtered and\n"
-        "                            decimated; without it the samples are copied unchanged\n"
-        "      --extract-format cf32|ci16   band output format (default cf32)\n"
-        "      --extract-overwrite   replace existing output files\n"
-        "      --export-window       open the export window (Ctrl+E): the --chan band, or the view\n"
-        "\n"
-        "audio (the channel comes from --chan OFFSET:BW; without it: 0 Hz, the mode's width):\n"
-        "      --audio am|nfm|wfm|usb|lsb|cw   open the audio window and play\n"
-        "      --audio-out FILE.wav  demodulate to WAV and exit: the file (or --view range),\n"
-        "                       or with --device the live stream until Ctrl+C / --record-duration\n"
-        "      --audio-device NAME   sound output (default: system default)\n"
-        "      --list-audio-devices  print sound output devices and exit\n"
-        "      --volume DB      playback volume (default -6)\n"
-        "      --squelch DBFS   mute while the channel power is below this\n"
-        "\n"
-        "Format, rate and center frequency are auto-detected from SigMF metadata,\n"
-        "gqrx file names and extensions (.cu8 .cs8 .cs16 .cf32 ...) when possible.\n"
-        "\n"
-        "mouse:  drag = pan, wheel = zoom (over an axis: zoom that axis only),\n"
-        "        right-drag = box zoom, double-click = fit, Ctrl+click spectrum/waterfall = tune channel\n"
-        "        right-click the waterfall = export a region (view, channel or a box you drag)\n"
-        "        Shift+click a time plot or the waterfall = play audio from there\n"
-        "keys:   Left/Right pan, PgUp/PgDn page, +/- zoom, Home/End, A all, T/F markers,\n"
-        "        Z zoom to time markers, C channel on/off, B bookmark,\n"
-        "        Ctrl+G signal generator, Ctrl+D audio window, Ctrl+E export window\n");
-}
-
 int main(int argc, char** argv) {
     CliOverrides ov;
     std::string path, shotPath;
-    bool software = false;
+    bool software = false, showHelp = false;
     bool haveChan = false, haveView = false, haveSeg = false;
     std::string extractOut;
     bool haveExtract = false, haveExtractBand = false, extractCi16 = false, extractOverwrite = false, openExportWin = false;
@@ -464,7 +347,7 @@ int main(int argc, char** argv) {
     double audioVol = -6;
     float scale = 1.f;
     int winW = 1600, winH = 950;
-    if (const char* e = getenv("WVT_SCALE")) scale = (float)atof(e);
+    if (const char* e = envVar("WVT_SCALE")) scale = (float)strtod(e, nullptr);
     GpuMode gpuMode = GpuMode::Auto;
     int gpuDevice = -1;
 
@@ -478,302 +361,468 @@ int main(int argc, char** argv) {
         return 2;
     }
     logInit(lc);
-    if (const char* e = getenv("WVT_GPU"); e && *e && !parseGpuMode(e, gpuMode))
+    if (const char* e = envVar("WVT_GPU"); e && *e && !parseGpuMode(e, gpuMode))
         LOG_WARN("main", "WVT_GPU=%s is not auto, on or off; using auto", e);
     argc = (int)args.size();
     args.push_back(nullptr);
     argv = args.data();
 
-    for (int i = 1; i < argc; ++i) {
-        std::string a = argv[i];
-        auto next = [&](const char* what) -> const char* {
-            if (i + 1 >= argc) {
-                LOG_ERROR("main", "%s needs a value", what);
-                exit(2);
-            }
-            return argv[++i];
+    // The options (issue #54): one table for parsing and for --help.
+    int exitNow = -1;  // set by the options that print and exit
+    auto bad = [](const char* fmt, const char* what = "") {
+        LOG_ERROR("main", fmt, what);
+        return false;
+    };
+    // A number with SI suffixes into `dst`; `then` runs after a good value.
+    auto si = [&](const char* name, double& dst, const std::function<void()>& then = {}) -> CliParser::Handler {
+        return [&dst, name, then, &bad](const char* v) {
+            if (!parseSI(v, dst)) return bad("bad value for %s", name);
+            if (then) then();
+            return true;
         };
-        if (a == "-h" || a == "--help") { usage(); return 0; }
-        else if (a == "-f" || a == "--format") {
-            const char* v = next("--format");
-            if (!parseFormatName(v, ov.fmt, ov.bigEndian)) { LOG_ERROR("main", "unknown format '%s'", v); return 2; }
-            ov.haveFmt = true;
-        } else if (a == "-r" || a == "--rate") {
-            if (!parseSI(next("--rate"), ov.rate) || ov.rate <= 0) { LOG_ERROR("main", "bad rate"); return 2; }
-            ov.haveRate = true;
-        } else if (a == "-c" || a == "--fc") {
-            if (!parseSI(next("--fc"), ov.fc)) { LOG_ERROR("main", "bad center frequency"); return 2; }
-            ov.haveFc = true;
-        } else if (a == "-H" || a == "--header") ov.header = atoll(next("--header"));
-        else if (a == "--swap-iq") ov.swapIQ = true;
-        else if (a == "--chan") {
-            if (!parsePair(next("--chan"), chanOff, chanBw)) { LOG_ERROR("main", "--chan wants OFFSET:BW"); return 2; }
-            haveChan = true;
-        } else if (a == "--view") {
-            if (!parsePair(next("--view"), view0, view1)) { LOG_ERROR("main", "--view wants T0:T1"); return 2; }
-            haveView = true;
-        } else if (a == "--segment") {
-            if (!parsePair(next("--segment"), seg0, seg1)) { LOG_ERROR("main", "--segment wants T0:T1 (-1 = file start / end)"); return 2; }
-            if (seg0 >= 0 && seg1 >= 0 && seg1 <= seg0) { LOG_ERROR("main", "--segment end must be after its start"); return 2; }
-            haveSeg = true;
+    };
+    auto pair = [&](const char* msg, double& a, double& b, const std::function<bool()>& then = {}) -> CliParser::Handler {
+        return [&a, &b, msg, then, &parsePair, &bad](const char* v) {
+            if (!parsePair(v, a, b)) return bad("%s", msg);
+            return then ? then() : true;
+        };
+    };
+    auto flag = [](bool& b) -> CliParser::Handler { return [&b](const char*) { return b = true; }; };
+    // A whole number in [lo, hi]. atoi() took "abc" as 0, and for some options
+    // 0 means "forever" (issue #54).
+    auto whole = [](const char* name, const char* v, long long lo, long long hi, long long& out) {
+        char* end = nullptr;
+        errno = 0;
+        out = strtoll(v, &end, 10);
+        if (end == v || *end || errno == ERANGE || out < lo || out > hi) {
+            LOG_ERROR("main", "%s wants a whole number from %lld to %lld (got '%s')", name, lo, hi, v);
+            return false;
         }
-        else if (a == "--extract-out") extractOut = next("--extract-out");
-        else if (a == "--extract") {
-            if (!parsePair(next("--extract"), extract0, extract1)) { LOG_ERROR("main", "--extract wants T0:T1"); return 2; }
-            haveExtract = true;
-        } else if (a == "--extract-band") {
-            if (!parsePair(next("--extract-band"), extractLo, extractHi)) { LOG_ERROR("main", "--extract-band wants LO:HI"); return 2; }
-            haveExtractBand = true;
-        } else if (a == "--extract-format") {
-            std::string v = next("--extract-format");
-            if (v != "cf32" && v != "ci16") { LOG_ERROR("main", "--extract-format wants cf32 or ci16"); return 2; }
-            extractCi16 = v == "ci16";
-        } else if (a == "--extract-overwrite") extractOverwrite = true;
-        else if (a == "--export-window") openExportWin = true;
-        else if (a == "--software") software = true;
-        else if (a == "--gpu") {
-            const char* v = next("--gpu");
-            if (!parseGpuMode(v, gpuMode)) { LOG_ERROR("main", "--gpu wants auto, on or off"); return 2; }
-        } else if (a == "--gpu-device") {
-            const char* v = next("--gpu-device");
-            char* end = nullptr;
-            gpuDevice = (int)strtol(v, &end, 10);
-            if (end == v || *end || gpuDevice < 0) { LOG_ERROR("main", "--gpu-device wants a device number"); return 2; }
-        }
-        else if (a == "--scale") scale = (float)atof(next("--scale"));
-        else if (a == "--geometry") {
-            if (sscanf(next("--geometry"), "%dx%d", &winW, &winH) != 2) { LOG_ERROR("main", "bad geometry"); return 2; }
-        } else if (a == "--screenshot") shotPath = next("--screenshot");
-        else if (a == "--device") {
-            std::string v = next("--device");
-            size_t c = v.find(':');
-            dev.driver = v.substr(0, c);
-            dev.args = c == std::string::npos ? "" : v.substr(c + 1);
-            haveDevice = true;
-        } else if (a == "--gain") {
-            std::string v = next("--gain");
-            if (v == "auto") dev.agc = true;
-            else if (!parseSI(v.c_str(), dev.gain)) { LOG_ERROR("main", "bad gain"); return 2; }
-            haveGain = true;
-        } else if (a == "--ref-level") {
-            if (!parseSI(next("--ref-level"), dev.gain)) { LOG_ERROR("main", "bad reference level"); return 2; }
-            haveGain = true;
-        } else if (a == "--atten") {
-            std::string v = next("--atten");
-            if (v == "auto") dev.bbAtten = -1;
-            else if (v == "0" || v == "10" || v == "20" || v == "30") dev.bbAtten = atoi(v.c_str()) / 10;
-            else { LOG_ERROR("main", "--atten wants auto, 0, 10, 20 or 30"); return 2; }
-        } else if (a == "--amp") {
-            std::string v = next("--amp");
-            if (v == "auto") dev.bbAmp = -1;
-            else if (v.size() == 1 && v[0] >= '0' && v[0] <= '3') dev.bbAmp = v[0] - '0';
-            else { LOG_ERROR("main", "--amp wants auto or 0-3"); return 2; }
-        } else if (a == "--ext-ref") {
-            dev.extRef = true;
-        } else if (a == "--antenna") dev.antenna = next("--antenna");
-        else if (a == "--usrp-channel") {
-            const char* v = next("--usrp-channel");
-            char* end = nullptr;
-            long c = strtol(v, &end, 10);
-            if (end == v || *end || c < 0 || c > 63) { LOG_ERROR("main", "bad channel '%s'", v); return 2; }
-            dev.channel = txc.channel = (int)c;
-        } else if (a == "--ref") {
-            dev.ref = txc.ref = next("--ref");
-        }
-        else if (a == "--bandwidth") {
-            if (!parseSI(next("--bandwidth"), dev.bandwidth)) { LOG_ERROR("main", "bad bandwidth"); return 2; }
-        } else if (a == "--bias-tee") dev.biasTee = true;
-        else if (a == "--direct-sampling") {
-            std::string v = next("--direct-sampling");
-            dev.directSampling = (v == "I" || v == "i" || v == "1") ? 1 : (v == "Q" || v == "q" || v == "2") ? 2 : 0;
-        } else if (a == "--ppm") dev.ppm = atoi(next("--ppm"));
-        else if (a == "--list-devices") {
-            for (const auto& d : enumerateDevices()) printf("%-8s %-28s %s\n", d.driver.c_str(), d.args.c_str(), d.label.c_str());
-            printf("\nGPUs (--gpu-device N):\n");
-            for (const auto& g : gpuListDevices()) printf("  %s\n", g.c_str());
-            return 0;
-        } else if (a == "--record") {
-            rc.prefix = next("--record");
-            haveRecord = true;
-        } else if (a == "--record-format") {
-            std::string v = next("--record-format");
-            if (v != "sigmf" && v != "raw") { LOG_ERROR("main", "--record-format wants sigmf or raw"); return 2; }
-            rc.sigmf = v == "sigmf";
-        } else if (a == "--record-sample") {
-            std::string v = next("--record-sample");
-            if (v != "native" && v != "cf32") { LOG_ERROR("main", "--record-sample wants native or cf32"); return 2; }
-            rc.cf32 = v == "cf32";
-        } else if (a == "--record-duration") {
-            if (!parseSI(next("--record-duration"), rc.maxSeconds) || rc.maxSeconds <= 0) {
-                LOG_ERROR("main", "bad --record-duration");
-                return 2;
-            }
-        } else if (a == "--no-gui") noGui = true;
-        else if (a == "--siggen") openGen = true;
-        else if (a == "--gen") {
-            std::string v = next("--gen");
-            if (v != "cw" && v != "pulsed" && v != "playback") { LOG_ERROR("main", "--gen wants cw, pulsed or playback"); return 2; }
-            gp.mode = v == "cw" ? GenMode::CW : v == "pulsed" ? GenMode::Pulsed : GenMode::Playback;
+        return true;
+    };
+    auto text = [](std::string& s) -> CliParser::Handler { return [&s](const char* v) { s = v; return true; }; };
+
+    CliParser cli;
+    cli.section("options:");
+    cli.add("-f", "--format", "FMT", "cf32 | cf64 | ci16 | ci32 | ci8 | cu8  (suffix _be for big-endian)", [&](const char* v) {
+        if (!parseFormatName(v, ov.fmt, ov.bigEndian)) return bad("unknown format '%s'", v);
+        return ov.haveFmt = true;
+    });
+    cli.add("-r", "--rate", "HZ", "sample rate, SI suffixes allowed (e.g. 2.4M)", [&](const char* v) {
+        if (!parseSI(v, ov.rate) || ov.rate <= 0) return bad("bad rate");
+        return ov.haveRate = true;
+    });
+    cli.add("-c", "--fc", "HZ", "center frequency (e.g. 915M)", [&](const char* v) {
+        if (!parseSI(v, ov.fc)) return bad("bad center frequency");
+        return ov.haveFc = true;
+    });
+    cli.add("-H", "--header", "BYTES", "bytes to skip at the start of the file", [&](const char* v) {
+        long long n;
+        if (!whole("--header", v, 0, LLONG_MAX, n)) return false;
+        ov.header = n;
+        return true;
+    });
+    cli.add(nullptr, "--swap-iq", nullptr, "swap I and Q", flag(ov.swapIQ));
+    cli.add(nullptr, "--chan", "OFF:BW", "enable the channel filter, e.g. --chan 300k:150k",
+            pair("--chan wants OFFSET:BW", chanOff, chanBw, [&] { return haveChan = true; }));
+    cli.add(nullptr, "--segment", "T0:T1",
+            "load only this part of the file, in seconds; -1 = file\nstart / end, e.g. --segment 40:50 or --segment 40:-1",
+            pair("--segment wants T0:T1 (-1 = file start / end)", seg0, seg1, [&] {
+                if (seg0 >= 0 && seg1 >= 0 && seg1 <= seg0) return bad("--segment end must be after its start");
+                return haveSeg = true;
+            }));
+    cli.add(nullptr, "--view", "T0:T1", "initial time range in seconds, e.g. --view 0.5:0.52",
+            pair("--view wants T0:T1", view0, view1, [&] { return haveView = true; }));
+    cli.add(nullptr, "--software", nullptr, "force the software renderer (no GLX)", flag(software));
+    cli.add(nullptr, "--scale", "S", "UI scale factor (default 1, or $WVT_SCALE)", [&](const char* v) {
+        double x;
+        if (!parseSI(v, x)) return bad("bad --scale");
+        scale = (float)x;
+        return true;
+    });
+    cli.add(nullptr, "--geometry", "WxH", "initial window size (default 1600x950)", [&](const char* v) {
+        const std::string s = v;
+        const size_t x = s.find('x');
+        long long w, h;
+        if (x == std::string::npos) return bad("--geometry wants WxH, e.g. 1600x950");
+        if (!whole("--geometry width", s.substr(0, x).c_str(), 100, 16384, w) ||
+            !whole("--geometry height", s.substr(x + 1).c_str(), 100, 16384, h))
+            return false;
+        winW = (int)w;
+        winH = (int)h;
+        return true;
+    });
+    cli.add(nullptr, "--screenshot", "F", "render, write a PPM screenshot to F and exit", text(shotPath));
+    cli.add(nullptr, "--gpu", "auto|on|off", "GPU processing, CUDA or Metal (default auto, or $WVT_GPU);\non = stop if no GPU can be used",
+            [&](const char* v) {
+                if (!parseGpuMode(v, gpuMode)) return bad("--gpu wants auto, on or off");
+                return true;
+            });
+    cli.add(nullptr, "--gpu-device", "N", "use GPU N (see --list-devices)", [&](const char* v) {
+        char* end = nullptr;
+        gpuDevice = (int)strtol(v, &end, 10);
+        if (end == v || *end || gpuDevice < 0) return bad("--gpu-device wants a device number");
+        return true;
+    });
+    cli.note("-v", "--verbose", "[LEVEL]",
+             "print log messages to the console: debug | info | warn | error\n(default info; without -v only warnings and errors print)");
+    cli.note(nullptr, "--log-dir", "DIR", "log file folder (default $WVT_LOG_DIR, then $TMPDIR, then /tmp)");
+    cli.note(nullptr, "--no-log-file", nullptr, "don't write wvt_log_<date>_<time>.log");
+    cli.action("-h", "--help", "show this help", [&](const char*) {
+        exitNow = 0;
+        showHelp = true;
+        return true;
+    });
+
+    cli.section("live devices (-c and -r set the tuning):");
+    cli.add(nullptr, "--device", "DEV",
+            "rtlsdr[:INDEX|SERIAL] | uhd[:ARGS] | bb[:SERIAL] | sim\n"
+            "e.g. --device uhd  --device uhd:addr=192.168.10.2  --device rtlsdr:0  --device bb",
+            [&](const char* v) {
+                const std::string s = v;
+                const size_t c = s.find(':');
+                dev.driver = s.substr(0, c);
+                dev.args = c == std::string::npos ? "" : s.substr(c + 1);
+                return haveDevice = true;
+            });
+    cli.add(nullptr, "--gain", "DB|auto", "receiver gain (default 30 dB)", [&](const char* v) {
+        if (std::string(v) == "auto") dev.agc = true;
+        else if (!parseSI(v, dev.gain)) return bad("bad gain");
+        return haveGain = true;
+    });
+    cli.add(nullptr, "--ref-level", "DBM", "BB60: strongest expected input (default -20 dBm)", [&](const char* v) {
+        if (!parseSI(v, dev.gain)) return bad("bad reference level");
+        return haveGain = true;
+    });
+    cli.add(nullptr, "--atten", "auto|0|10|20|30", "BB60 attenuator (default auto)", [&](const char* v) {
+        const std::string s = v;
+        if (s == "auto") dev.bbAtten = -1;
+        else if (s == "0" || s == "10" || s == "20" || s == "30") dev.bbAtten = s[0] - '0';
+        else return bad("--atten wants auto, 0, 10, 20 or 30");
+        return true;
+    });
+    cli.add(nullptr, "--bb-amp", "auto|0-3", "BB60 amplifier setting (default auto)", [&](const char* v) {
+        const std::string s = v;
+        if (s == "auto") dev.bbAmp = -1;
+        else if (s.size() == 1 && s[0] >= '0' && s[0] <= '3') dev.bbAmp = s[0] - '0';
+        else return bad("--bb-amp wants auto or 0-3");
+        return true;
+    });
+    cli.add(nullptr, "--ext-ref", nullptr, "BB60: lock to a 10 MHz reference on port 1", flag(dev.extRef));
+    cli.add(nullptr, "--antenna", "NAME", "USRP receive antenna (e.g. RX2, TX/RX; default: the device's)", text(dev.antenna));
+    cli.add(nullptr, "--usrp-channel", "N", "USRP receive / transmit channel (X310, N310, X410 have several; default 0)",
+            [&](const char* v) {
+                char* end = nullptr;
+                const long c = strtol(v, &end, 10);
+                if (end == v || *end || c < 0 || c > 63) return bad("bad channel '%s'", v);
+                dev.channel = txc.channel = (int)c;
+                return true;
+            });
+    cli.add(nullptr, "--ref", "SRC", "USRP clock and time reference: internal | external | gpsdo", [&](const char* v) {
+        dev.ref = txc.ref = v;
+        return true;
+    });
+    cli.add(nullptr, "--bandwidth", "HZ", "USRP analog / BB60 I/Q bandwidth (default: automatic)", [&](const char* v) {
+        if (!parseSI(v, dev.bandwidth)) return bad("bad bandwidth");
+        return true;
+    });
+    cli.add(nullptr, "--bias-tee", nullptr, "RTL-SDR: power an LNA / active antenna over the coax", flag(dev.biasTee));
+    cli.add(nullptr, "--direct-sampling", "I|Q", "RTL-SDR: HF direct sampling (v3: Q)", [&](const char* v) {
+        const std::string s = v;
+        dev.directSampling = (s == "I" || s == "i" || s == "1") ? 1 : (s == "Q" || s == "q" || s == "2") ? 2 : 0;
+        return true;
+    });
+    cli.add(nullptr, "--ppm", "N", "RTL-SDR frequency correction", [&](const char* v) {
+        long long n;
+        if (!whole("--ppm", v, -1000, 1000, n)) return false;
+        dev.ppm = (int)n;
+        return true;
+    });
+    cli.action(nullptr, "--list-devices", "print attached devices and GPUs, and exit", [&](const char*) {
+        for (const auto& d : enumerateDevices()) printf("%-8s %-28s %s\n", d.driver.c_str(), d.args.c_str(), d.label.c_str());
+        printf("\nGPUs (--gpu-device N):\n");
+        for (const auto& g : gpuListDevices()) printf("  %s\n", g.c_str());
+        exitNow = 0;
+        return true;
+    });
+
+    cli.section("recording (needs --device):");
+    cli.add(nullptr, "--record", "PREFIX", "record to PREFIX_<date>_<time>_<fc>_<rate>.<ext>", [&](const char* v) {
+        rc.prefix = v;
+        return haveRecord = true;
+    });
+    cli.add(nullptr, "--record-format", "sigmf|raw", "(default sigmf)", [&](const char* v) {
+        const std::string s = v;
+        if (s != "sigmf" && s != "raw") return bad("--record-format wants sigmf or raw");
+        rc.sigmf = s == "sigmf";
+        return true;
+    });
+    cli.add(nullptr, "--record-sample", "native|cf32", "(default native: cu8 for RTL-SDR, ci16 for USRP and BB60)",
+            [&](const char* v) {
+                const std::string s = v;
+                if (s != "native" && s != "cf32") return bad("--record-sample wants native or cf32");
+                rc.cf32 = s == "cf32";
+                return true;
+            });
+    cli.add(nullptr, "--record-duration", "T", "stop after T seconds, e.g. 30", [&](const char* v) {
+        if (!parseSI(v, rc.maxSeconds) || rc.maxSeconds <= 0) return bad("bad --record-duration");
+        return true;
+    });
+    cli.add(nullptr, "--no-gui", nullptr, "record without opening a window (Ctrl+C stops)", flag(noGui));
+
+    cli.section("signal generator (-c sets the center frequency, -r the sample rate):");
+    cli.add(nullptr, "--siggen", nullptr, "open the signal generator window", flag(openGen));
+    cli.add(nullptr, "--gen", "cw|pulsed|playback", "waveform mode (also opens the window)", [&](const char* v) {
+        const std::string s = v;
+        if (s != "cw" && s != "pulsed" && s != "playback") return bad("--gen wants cw, pulsed or playback");
+        gp.mode = s == "cw" ? GenMode::CW : s == "pulsed" ? GenMode::Pulsed : GenMode::Playback;
+        return haveGen = true;
+    });
+    // These set a generator value, so they also open the generator.
+    const auto gen = [&](const char* name, double& dst, const std::function<void()>& then = {}) {
+        return si(name, dst, [&, then] {
+            if (then) then();
             haveGen = true;
-        } else if (a == "--offset" || a == "--amp" || a == "--drift" || a == "--pri" || a == "--prf" || a == "--pw" ||
-                   a == "--rise" || a == "--fall" || a == "--jitter" || a == "--delay" || a == "--snr" ||
-                   a == "--linewidth" || a == "--tx-gain" || a == "--gen-duration" || a == "--play-rate" || a == "--play-gap") {
-            double v;
-            if (!parseSI(next(a.c_str()), v)) { LOG_ERROR("main", "bad value for %s", a.c_str()); return 2; }
-            if (a == "--offset") { gp.offset = v; haveOffset = true; }
-            else if (a == "--play-rate") playRate = v;
-            else if (a == "--play-gap") gp.playGap = v;
-            else if (a == "--amp") gp.ampDb = v;
-            else if (a == "--drift") gp.driftHzPerSec = v;
-            else if (a == "--pri") gp.pri = v;
-            else if (a == "--prf") gp.pri = v > 0 ? 1 / v : 0;
-            else if (a == "--pw") gp.pw = v;
-            else if (a == "--rise") gp.rise = v;
-            else if (a == "--fall") gp.fall = v;
-            else if (a == "--jitter") { gp.jitterPct = v; gp.priPattern = PriPattern::Jitter; }
-            else if (a == "--delay") gp.startDelay = v;
-            else if (a == "--snr") { gp.snrDb = v; gp.noise = true; }
-            else if (a == "--linewidth") gp.linewidth = v;
-            else if (a == "--tx-gain") txc.gain = v;
-            else genSeconds = v;
-            haveGen |= a != "--tx-gain" && a != "--gen-duration";
-        } else if (a == "--edge") {
-            std::string v = next("--edge");
-            if (v == "rect") gp.edge = EdgeShape::Rect;
-            else if (v == "linear") gp.edge = EdgeShape::Linear;
-            else if (v == "cos") gp.edge = EdgeShape::RaisedCos;
-            else if (v == "gauss") gp.edge = EdgeShape::Gaussian;
-            else { LOG_ERROR("main", "--edge wants rect, linear, cos or gauss"); return 2; }
-            haveGen = true;
-        } else if (a == "--stagger") {
-            std::string v = next("--stagger"), tok;
-            gp.stagger.clear();
-            for (size_t k = 0; k <= v.size(); ++k) {
-                if (k == v.size() || v[k] == ',') {
-                    double x;
-                    if (!parseSI(tok.c_str(), x)) { LOG_ERROR("main", "bad --stagger list"); return 2; }
-                    gp.stagger.push_back(x);
-                    tok.clear();
-                } else {
-                    tok += v[k];
-                }
-            }
-            gp.priPattern = PriPattern::Stagger;
-            haveGen = true;
-        } else if (a == "--seed") gp.seed = (uint32_t)atol(next("--seed"));
-        else if (a == "--burst") {
-            std::string v = next("--burst");
-            size_t c = v.find(':');
-            gp.burstPulses = atoi(v.substr(0, c).c_str());
-            if (c != std::string::npos && !parseSI(v.substr(c + 1).c_str(), gp.burstGap)) {
-                LOG_ERROR("main", "--burst wants N or N:GAP");
-                return 2;
-            }
-            haveGen = true;
-        } else if (a == "--lfm") {
-            std::string v = next("--lfm");
-            size_t c = v.find(':');
-            std::string dir = v.substr(0, c);
-            gp.intra = dir == "up" ? IntraMod::LfmUp : dir == "down" ? IntraMod::LfmDown : dir == "tri" ? IntraMod::LfmTriangle : IntraMod::None;
-            if (gp.intra == IntraMod::None || c == std::string::npos || !parseSI(v.substr(c + 1).c_str(), gp.chirpBw)) {
-                LOG_ERROR("main", "--lfm wants up|down|tri:BW, e.g. up:2M");
-                return 2;
-            }
-            haveGen = true;
-        } else if (a == "--barker") {
-            gp.intra = IntraMod::Barker;
-            gp.barkerLen = atoi(next("--barker"));
-            haveGen = true;
-        } else if (a == "--dc" || a == "--iq") {
-            double x, y;
-            if (!parsePair(next(a.c_str()), x, y)) { LOG_ERROR("main", "%s wants A:B", a.c_str()); return 2; }
-            if (a == "--dc") { gp.dcI = x; gp.dcQ = y; }
-            else { gp.iqGainDb = x; gp.iqPhaseDeg = y; }
-            haveGen = true;
-        } else if (a == "--sweep" || a == "--level-sweep" || a == "--sweep-step") {
-            double x, y;
-            if (!parsePair(next(a.c_str()), x, y)) { LOG_ERROR("main", "%s wants A:B", a.c_str()); return 2; }
-            if (a == "--sweep") {
-                gp.fFrom = x;
-                gp.fTo = y;
+        });
+    };
+    cli.add(nullptr, "--offset", "HZ", "carrier offset from the center (default 100k)",
+            gen("--offset", gp.offset, [&] { haveOffset = true; }));
+    cli.add(nullptr, "--amp", "DBFS", "peak amplitude (default -6)", gen("--amp", gp.ampDb));
+    cli.add(nullptr, "--drift", "HZ", "CW frequency drift per second", gen("--drift", gp.driftHzPerSec));
+    cli.add(nullptr, "--sweep", "FROM:TO",
+            "frequency sweep, offsets from the center (e.g. -400k:400k); CW or,\nwith --gen pulsed, pulse to pulse",
+            pair("--sweep wants A:B", gp.fFrom, gp.fTo, [&] {
                 if (gp.fSweep == SweepShape::Off) gp.fSweep = SweepShape::RampUp;
-            } else if (a == "--sweep-step") {
-                gp.fStep = x;
-                gp.fDwell = y;
+                return haveGen = haveSweep = true;
+            }));
+    const auto shape = [&](const char* name, SweepShape& dst) -> CliParser::Handler {
+        return [&, name](const char* v) {
+            const std::string s = v;
+            const SweepShape sh = s == "up" ? SweepShape::RampUp : s == "down" ? SweepShape::RampDown
+                                : s == "tri" ? SweepShape::Triangle : SweepShape::Off;
+            if (sh == SweepShape::Off) return bad("%s wants up, down or tri", name);
+            dst = sh;
+            return haveGen = haveSweep = true;
+        };
+    };
+    cli.add(nullptr, "--sweep-shape", "up|down|tri", "frequency sweep shape", shape("--sweep-shape", gp.fSweep));
+    cli.add(nullptr, "--sweep-step", "HZ:DWELL", "stepped frequency sweep",
+            pair("--sweep-step wants A:B", gp.fStep, gp.fDwell, [&] {
                 gp.fSweep = SweepShape::Stepped;
-            } else {
-                gp.aFrom = x;
-                gp.aTo = y;
+                return haveGen = haveSweep = true;
+            }));
+    cli.add(nullptr, "--sweep-time", "S", "sweep period", [&](const char* v) {
+        if (!parseSI(v, gp.sweepPeriod)) return bad("bad --sweep-time");
+        return haveGen = haveSweep = true;
+    });
+    cli.add(nullptr, "--level-sweep", "FROM:TO", "level sweep in dBFS over the same period (CW or pulsed)",
+            pair("--level-sweep wants A:B", gp.aFrom, gp.aTo, [&] {
                 if (gp.aSweep == SweepShape::Off) gp.aSweep = SweepShape::RampUp;
+                return haveGen = haveSweep = true;
+            }));
+    cli.add(nullptr, "--level-shape", "up|down|tri", "level sweep shape (sweeps repeat until stopped)",
+            shape("--level-shape", gp.aSweep));
+    cli.add(nullptr, "--pri", "S", "pulse repetition interval", gen("--pri", gp.pri));
+    cli.add(nullptr, "--prf", "HZ", "pulse repetition frequency (sets --pri to 1/HZ)", [&](const char* v) {
+        double f;
+        if (!parseSI(v, f)) return bad("bad value for %s", "--prf");
+        gp.pri = f > 0 ? 1 / f : 0;
+        return haveGen = true;
+    });
+    cli.add(nullptr, "--pw", "S", "pulse width, edges included", gen("--pw", gp.pw));
+    cli.add(nullptr, "--edge", "rect|linear|cos|gauss", "pulse edge shape", [&](const char* v) {
+        const std::string s = v;
+        if (s == "rect") gp.edge = EdgeShape::Rect;
+        else if (s == "linear") gp.edge = EdgeShape::Linear;
+        else if (s == "cos") gp.edge = EdgeShape::RaisedCos;
+        else if (s == "gauss") gp.edge = EdgeShape::Gaussian;
+        else return bad("--edge wants rect, linear, cos or gauss");
+        return haveGen = true;
+    });
+    cli.add(nullptr, "--rise", "S", "rise time of the pulse edge", gen("--rise", gp.rise));
+    cli.add(nullptr, "--fall", "S", "fall time of the pulse edge", gen("--fall", gp.fall));
+    cli.add(nullptr, "--stagger", "S,S,..", "PRIs used in turn", [&](const char* v) {
+        const std::string s = v;
+        std::string tok;
+        gp.stagger.clear();
+        for (size_t k = 0; k <= s.size(); ++k) {
+            if (k == s.size() || s[k] == ',') {
+                double x;
+                if (!parseSI(tok.c_str(), x)) return bad("bad --stagger list");
+                gp.stagger.push_back(x);
+                tok.clear();
+            } else {
+                tok += s[k];
             }
-            haveGen = haveSweep = true;
-        } else if (a == "--sweep-shape" || a == "--level-shape") {
-            std::string v = next(a.c_str());
-            const SweepShape sh = v == "up" ? SweepShape::RampUp : v == "down" ? SweepShape::RampDown
-                                : v == "tri" ? SweepShape::Triangle : SweepShape::Off;
-            if (sh == SweepShape::Off) { LOG_ERROR("main", "%s wants up, down or tri", a.c_str()); return 2; }
-            (a == "--sweep-shape" ? gp.fSweep : gp.aSweep) = sh;
-            haveGen = haveSweep = true;
-        } else if (a == "--sweep-time") {
-            if (!parseSI(next("--sweep-time"), gp.sweepPeriod)) { LOG_ERROR("main", "bad --sweep-time"); return 2; }
-            haveGen = haveSweep = true;
-        } else if (a == "--chain") {
-            chainFile = next("--chain");
-            haveGen = true;
-        } else if (a == "--chain-add") {
-            chainAdds.push_back(next("--chain-add"));
-            haveGen = true;
-        } else if (a == "--chain-loops") {
-            chainLoops = atoi(next("--chain-loops"));
-            if (chainLoops < 0) { LOG_ERROR("main", "--chain-loops wants 0 (forever) or more"); return 2; }
-        } else if (a == "--play") {
-            playFile = next("--play");
-            gp.mode = GenMode::Playback;
-            haveGen = true;
-        } else if (a == "--play-segment") {
-            if (!parsePair(next("--play-segment"), gp.playStart, gp.playLen)) {
-                LOG_ERROR("main", "--play-segment wants START:LEN, e.g. 0.5:0.1");
-                return 2;
-            }
-        } else if (a == "--play-once") gp.playLoop = false;
-        else if (a == "--gen-out") {
-            gc.rec.prefix = next("--gen-out");
-            haveGenOut = true;
-        } else if (a == "--gen-sample") {
-            std::string v = next("--gen-sample");
-            bool be;
-            if (!parseFormatName(v, gc.fmt, be) || be ||
-                !(gc.fmt == SampleFormat::CF32 || gc.fmt == SampleFormat::CI16 || gc.fmt == SampleFormat::CI8 || gc.fmt == SampleFormat::CU8)) {
-                LOG_ERROR("main", "--gen-sample wants cf32, ci16, ci8 or cu8");
-                return 2;
-            }
-        } else if (a == "--gen-pulses") gc.pulses = atoll(next("--gen-pulses"));
-        else if (a == "--gen-annotate") gc.annotatePulses = true;
-        else if (a == "--audio") {
-            std::string v = next("--audio");
-            for (auto& c : v) c = (char)tolower(c);
-            if (!parseAudioMode(v, ap.mode)) { LOG_ERROR("main", "--audio wants am, nfm, wfm, usb, lsb or cw"); return 2; }
-            haveAudio = true;
-        } else if (a == "--audio-out") audioOut = next("--audio-out");
-        else if (a == "--audio-device") audioDevice = next("--audio-device");
-        else if (a == "--volume") {
-            if (!parseSI(next("--volume"), audioVol)) { LOG_ERROR("main", "bad --volume"); return 2; }
-        } else if (a == "--squelch") {
-            if (!parseSI(next("--squelch"), ap.squelchDb)) { LOG_ERROR("main", "bad --squelch"); return 2; }
-            ap.squelch = true;
-        } else if (a == "--list-audio-devices") {
-            std::string err;
-            auto devs = listAudioDevices(err);
-            if (!err.empty()) { LOG_ERROR("main", "%s", err.c_str()); return 1; }
-            for (const auto& d : devs) printf("%s%s\n", d.name.c_str(), d.isDefault ? "  (default)" : "");
-            return 0;
         }
-        else if (a == "--tx") haveTx = true;
-        else if (a == "--tx-args") txc.args = next("--tx-args");
-        else if (a == "--tx-antenna") txc.antenna = next("--tx-antenna");
-        else if (!a.empty() && a[0] == '-') { LOG_ERROR("main", "unknown option %s (try --help)", a.c_str()); return 2; }
-        else path = a;
+        gp.priPattern = PriPattern::Stagger;
+        return haveGen = true;
+    });
+    cli.add(nullptr, "--jitter", "PCT", "random PRI jitter in percent",
+            gen("--jitter", gp.jitterPct, [&] { gp.priPattern = PriPattern::Jitter; }));
+    cli.add(nullptr, "--seed", "N", "random seed for the jitter and the noise", [&](const char* v) {
+        long long n;
+        if (!whole("--seed", v, 0, UINT32_MAX, n)) return false;
+        gp.seed = (uint32_t)n;
+        return true;
+    });
+    cli.add(nullptr, "--burst", "N[:GAP]", "N pulses per burst, GAP seconds of extra silence after each", [&](const char* v) {
+        const std::string s = v;
+        const size_t c = s.find(':');
+        long long n;
+        if (!whole("--burst", s.substr(0, c).c_str(), 0, INT_MAX, n)) return false;
+        gp.burstPulses = (int)n;
+        if (c != std::string::npos && !parseSI(s.substr(c + 1).c_str(), gp.burstGap)) return bad("--burst wants N or N:GAP");
+        return haveGen = true;
+    });
+    cli.add(nullptr, "--delay", "S", "silence before the first pulse", gen("--delay", gp.startDelay));
+    cli.add(nullptr, "--lfm", "up|down|tri:BW", "chirp each pulse, e.g. --lfm up:2M", [&](const char* v) {
+        const std::string s = v;
+        const size_t c = s.find(':');
+        const std::string dir = s.substr(0, c);
+        gp.intra = dir == "up" ? IntraMod::LfmUp : dir == "down" ? IntraMod::LfmDown : dir == "tri" ? IntraMod::LfmTriangle : IntraMod::None;
+        if (gp.intra == IntraMod::None || c == std::string::npos || !parseSI(s.substr(c + 1).c_str(), gp.chirpBw))
+            return bad("--lfm wants up|down|tri:BW, e.g. up:2M");
+        return haveGen = true;
+    });
+    cli.add(nullptr, "--barker", "N", "Barker phase code (2 3 4 5 7 11 13)", [&](const char* v) {
+        long long n;
+        if (!whole("--barker", v, 0, INT_MAX, n)) return false;
+        gp.intra = IntraMod::Barker;
+        gp.barkerLen = (int)n;
+        return haveGen = true;
+    });
+    cli.add(nullptr, "--play", "FILE",
+            "play back a SigMF or raw IQ recording (-f overrides its format;\nits rate and frequency become -r and -c unless given)",
+            [&](const char* v) {
+                playFile = v;
+                gp.mode = GenMode::Playback;
+                return haveGen = true;
+            });
+    cli.add(nullptr, "--play-rate", "HZ", "the recording's sample rate (resampled to -r if different)",
+            gen("--play-rate", playRate));
+    cli.add(nullptr, "--play-segment", "START:LEN", "play part of it (LEN 0 = to the end)",
+            pair("--play-segment wants START:LEN, e.g. 0.5:0.1", gp.playStart, gp.playLen));
+    cli.add(nullptr, "--play-gap", "S", "silence between repeats", gen("--play-gap", gp.playGap));
+    cli.add(nullptr, "--play-once", nullptr, "don't repeat", [&](const char*) {
+        gp.playLoop = false;
+        return true;
+    });
+    cli.add(nullptr, "--chain", "FILE", "play a chain saved from the window (.wvtchain.json)", [&](const char* v) {
+        chainFile = v;
+        return haveGen = true;
+    });
+    cli.add(nullptr, "--chain-add", "PATH[@OFFSET][:N]",
+            "add a recording to the chain (repeatable), played N times,\n"
+            "e.g. b13.sigmf-meta@250k:3; the first sets -r and -c unless given",
+            [&](const char* v) {
+                chainAdds.push_back(v);
+                return haveGen = true;
+            });
+    cli.add(nullptr, "--chain-loops", "N", "passes through the chain (default 0 = until stopped)", [&](const char* v) {
+        long long n;
+        if (!whole("--chain-loops", v, 0, INT_MAX, n)) return false;
+        chainLoops = (int)n;
+        return true;
+    });
+    cli.add(nullptr, "--snr", "DB", "add noise at this signal-to-noise ratio",
+            gen("--snr", gp.snrDb, [&] { gp.noise = true; }));
+    cli.add(nullptr, "--dc", "I:Q", "DC offset", pair("--dc wants A:B", gp.dcI, gp.dcQ, [&] { return haveGen = true; }));
+    cli.add(nullptr, "--iq", "GAIN_DB:PHASE_DEG", "I/Q imbalance",
+            pair("--iq wants A:B", gp.iqGainDb, gp.iqPhaseDeg, [&] { return haveGen = true; }));
+    cli.add(nullptr, "--linewidth", "HZ", "phase noise linewidth", gen("--linewidth", gp.linewidth));
+    cli.add(nullptr, "--gen-out", "PREFIX", "write to a file and exit (format via --record-format)", [&](const char* v) {
+        gc.rec.prefix = v;
+        return haveGenOut = true;
+    });
+    cli.add(nullptr, "--gen-sample", "cf32|ci16|ci8|cu8", "file sample format (default cf32)", [&](const char* v) {
+        bool be;
+        if (!parseFormatName(v, gc.fmt, be) || be ||
+            !(gc.fmt == SampleFormat::CF32 || gc.fmt == SampleFormat::CI16 || gc.fmt == SampleFormat::CI8 || gc.fmt == SampleFormat::CU8))
+            return bad("--gen-sample wants cf32, ci16, ci8 or cu8");
+        return true;
+    });
+    cli.add(nullptr, "--gen-duration", "T", "file length (default 1 s), or how long --tx transmits", si("--gen-duration", genSeconds));
+    cli.add(nullptr, "--gen-pulses", "N", "file length in pulses, plays, sweeps or chain passes", [&](const char* v) {
+        long long n;
+        if (!whole("--gen-pulses", v, 0, LLONG_MAX, n)) return false;
+        gc.pulses = n;
+        return true;
+    });
+    cli.add(nullptr, "--gen-annotate", nullptr, "SigMF: one annotation per pulse, play, sweep or chain item",
+            flag(gc.annotatePulses));
+    cli.add(nullptr, "--tx", nullptr, "TRANSMIT with a USRP until Ctrl+C (or --gen-duration)", flag(haveTx));
+    cli.add(nullptr, "--tx-gain", "DB", "transmit gain (default 0)", si("--tx-gain", txc.gain));
+    cli.add(nullptr, "--tx-args", "ARGS", "the USRP to transmit with (default: the first USRP)", text(txc.args));
+    cli.add(nullptr, "--tx-antenna", "NAME", "transmit port (default: the channel's first, e.g. TX/RX)", text(txc.antenna));
+
+    cli.section("export part of a file (the --segment limits it; --record-format sigmf|raw):");
+    cli.add(nullptr, "--extract-out", "PATH", "write it to PATH (.sigmf-data / .sigmf-meta, or raw) and exit",
+            text(extractOut));
+    cli.add(nullptr, "--extract", "T0:T1", "time range in seconds (default: the whole segment)",
+            pair("--extract wants T0:T1", extract0, extract1, [&] { return haveExtract = true; }));
+    cli.add(nullptr, "--extract-band", "LO:HI",
+            "only this band (absolute Hz), mixed to 0 Hz, filtered and\ndecimated; without it the samples are copied unchanged",
+            pair("--extract-band wants LO:HI", extractLo, extractHi, [&] { return haveExtractBand = true; }));
+    cli.add(nullptr, "--extract-format", "cf32|ci16", "band output format (default cf32)", [&](const char* v) {
+        const std::string s = v;
+        if (s != "cf32" && s != "ci16") return bad("--extract-format wants cf32 or ci16");
+        extractCi16 = s == "ci16";
+        return true;
+    });
+    cli.add(nullptr, "--extract-overwrite", nullptr, "replace existing output files", flag(extractOverwrite));
+    cli.add(nullptr, "--export-window", nullptr, "open the export window (Ctrl+E): the --chan band, or the view",
+            flag(openExportWin));
+
+    cli.section("audio (the channel comes from --chan OFFSET:BW; without it: 0 Hz, the mode's width):");
+    cli.add(nullptr, "--audio", "am|nfm|wfm|usb|lsb|cw", "open the audio window and play", [&](const char* v) {
+        std::string s = v;
+        for (auto& c : s) c = (char)tolower(c);
+        if (!parseAudioMode(s, ap.mode)) return bad("--audio wants am, nfm, wfm, usb, lsb or cw");
+        return haveAudio = true;
+    });
+    cli.add(nullptr, "--audio-out", "FILE.wav",
+            "demodulate to WAV and exit: the file (or --view range),\nor with --device the live stream until Ctrl+C / --record-duration",
+            text(audioOut));
+    cli.add(nullptr, "--audio-device", "NAME", "sound output (default: system default)", text(audioDevice));
+    cli.action(nullptr, "--list-audio-devices", "print sound output devices and exit", [&](const char*) {
+        std::string err;
+        auto devs = listAudioDevices(err);
+        exitNow = 1;
+        if (!err.empty()) return bad("%s", err.c_str());
+        for (const auto& d : devs) printf("%s%s\n", d.name.c_str(), d.isDefault ? "  (default)" : "");
+        exitNow = 0;
+        return true;
+    });
+    cli.add(nullptr, "--volume", "DB", "playback volume (default -6)", [&](const char* v) {
+        if (!parseSI(v, audioVol)) return bad("bad --volume");
+        return true;
+    });
+    cli.add(nullptr, "--squelch", "DBFS", "mute while the channel power is below this", [&](const char* v) {
+        if (!parseSI(v, ap.squelchDb)) return bad("bad --squelch");
+        return ap.squelch = true;
+    });
+    cli.epilogue(
+        "Format, rate and center frequency are auto-detected from SigMF metadata,\n"
+        "gqrx file names and extensions (.cu8 .cs8 .cs16 .cf32 ...) when possible.\n"
+        "\n"
+        "mouse:  drag = pan, wheel = zoom (over an axis: zoom that axis only),\n"
+        "        right-drag = box zoom, double-click = fit, Ctrl+click spectrum/waterfall = tune channel\n"
+        "        right-click the waterfall = export a region (view, channel or a box you drag)\n"
+        "        Shift+click a time plot or the waterfall = play audio from there\n"
+        "keys:   Left/Right pan, PgUp/PgDn page, +/- zoom, Home/End, A all, T/F markers,\n"
+        "        Z zoom to time markers, C channel on/off, B bookmark,\n"
+        "        Ctrl+G signal generator, Ctrl+D audio window, Ctrl+E export window\n");
+
+    std::vector<std::string> positional;
+    const bool parsed = cli.parse(argc, argv, positional);
+    if (showHelp) {
+        printf("%s", cli.help("usage: wvt [options] [file]\n\nInteractive waterfall / AM / FM / PM viewer for raw IQ recordings.\n").c_str());
+        return 0;
     }
+    if (!parsed) return exitNow > 0 ? exitNow : 2;
+    if (exitNow >= 0) return exitNow;
+    if (!positional.empty()) path = positional.back();
     scale = std::clamp(scale, 0.5f, 4.f);
     if (ov.haveFc) gp.fc = txc.fc = ov.fc;
     if (ov.haveRate) gp.rate = ov.rate;
@@ -804,7 +853,7 @@ int main(int argc, char** argv) {
             const size_t x = path.find_last_of(':');
             if (x != std::string::npos && x + 1 < path.size() &&
                 path.find_first_not_of("0123456789", x + 1) == std::string::npos) {
-                reps = atoi(path.c_str() + x + 1);
+                reps = (int)std::min(strtol(path.c_str() + x + 1, nullptr, 10), (long)INT_MAX);
                 path.erase(x);
             }
             const size_t at = path.find_last_of('@');
