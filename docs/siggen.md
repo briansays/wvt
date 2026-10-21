@@ -210,6 +210,9 @@ Safety and limits:
 - While wvt transmits, the window title, the menu bar (**TX ON**) and a large **STOP
   TRANSMITTING** button show it.
 - If you close the generator window or stop wvt, the transmission stops.
+- If you change the center frequency during a transmission and the USRP cannot tune to it, the
+  transmitter stays on the last good frequency and the field shows that frequency. If the USRP
+  cannot go back to that frequency, the transmission stops.
 - To monitor your own signal on a receiver, put a minimum of 30 dB of attenuation between the
   ports.
 - On one B2xx, wvt can receive and transmit at the same time (full duplex). The two directions

@@ -438,6 +438,13 @@ public:
             uhd_meta_range_free(&r);
         }
         range_.agc = false;
+        if (uhd_meta_range_make(&r) == UHD_ERROR_NONE) {
+            if (uhd_usrp_get_tx_freq_range(usrp_, 0, r) == UHD_ERROR_NONE) {
+                uhd_meta_range_start(r, &freqMin_);
+                uhd_meta_range_stop(r, &freqMax_);
+            }
+            uhd_meta_range_free(&r);
+        }
         if (!setGain(cfg.gain, err)) return false;
         if (!setCenterFreq(cfg.fc, err)) return false;
 
@@ -478,26 +485,40 @@ public:
         th_.join();
     }
 
+    // UHD clips an out-of-range target and tunes anyway. While transmitting,
+    // that would move the signal to a frequency nobody chose (issue #40), so:
+    // check the range first; after a mismatch, tune back to the last good
+    // frequency; if that fails too, stop with a fatal error.
     bool setCenterFreq(double hz, std::string& err) override {
-        uhd_tune_request_t req{};
-        req.target_freq = hz;
-        req.rf_freq_policy = UHD_TUNE_REQUEST_POLICY_AUTO;
-        req.dsp_freq_policy = UHD_TUNE_REQUEST_POLICY_AUTO;
-        req.args = (char*)"";
-        uhd_tune_result_t res{};
-        if (uhd_usrp_set_tx_freq(usrp_, &req, 0, &res) != UHD_ERROR_NONE) {
-            err = lastError(("cannot tune the transmitter to " + fmtSI(hz, "Hz", 9)).c_str());
+        if (freqMax_ > freqMin_ && (hz < freqMin_ - 1 || hz > freqMax_ + 1)) {
+            err = "USRP cannot transmit at " + fmtSI(hz, "Hz", 9) + " (this device: " + fmtSI(freqMin_, "Hz", 9) + " to " +
+                  fmtSI(freqMax_, "Hz", 9) + ")";
             return false;
         }
-        double f = hz;
-        uhd_usrp_get_tx_freq(usrp_, 0, &f);
+        const double prev = fc_;
+        double f = tune(hz, err);
+        if (err.empty() && std::fabs(f - hz) <= 1) {
+            fc_ = f;
+            return true;
+        }
+        if (err.empty())
+            err = "USRP cannot transmit at " + fmtSI(hz, "Hz", 9) + " (B200/B205: 70 MHz - 6 GHz); tuned to " + fmtSI(f, "Hz", 9);
+        if (!th_.joinable()) {
+            fc_ = f;  // not transmitting yet: open() fails and nothing is sent
+            return false;
+        }
+        std::string backErr;
+        f = tune(prev, backErr);
         fc_ = f;
-        if (std::fabs(f - hz) > 1) {
-            err = "USRP cannot transmit at " + fmtSI(hz, "Hz", 9) + " (B200/B205: 70 MHz - 6 GHz); tuned to " +
-                  fmtSI(f, "Hz", 9);
+        if (backErr.empty() && std::fabs(f - prev) <= 1) {
+            err += "; still transmitting at " + fmtSI(prev, "Hz", 9);
+            LOG_WARN("tx", "retune to %s failed, back at %s", fmtSI(hz, "Hz", 9).c_str(), fmtSI(prev, "Hz", 9).c_str());
             return false;
         }
-        return true;
+        fail("retune failed and the transmitter could not return to " + fmtSI(prev, "Hz", 9) + " (now at " + fmtSI(f, "Hz", 9) +
+             "): " + err);
+        quit_ = true;  // stop sending now; the owner's stop() joins the thread
+        return false;
     }
 
     bool setGain(double db, std::string& err) override {
@@ -535,6 +556,21 @@ public:
     }
 
 private:
+    // Tunes and returns the frequency the device reports. Sets err if UHD fails.
+    double tune(double hz, std::string& err) {
+        uhd_tune_request_t req{};
+        req.target_freq = hz;
+        req.rf_freq_policy = UHD_TUNE_REQUEST_POLICY_AUTO;
+        req.dsp_freq_policy = UHD_TUNE_REQUEST_POLICY_AUTO;
+        req.args = (char*)"";
+        uhd_tune_result_t res{};
+        if (uhd_usrp_set_tx_freq(usrp_, &req, 0, &res) != UHD_ERROR_NONE)
+            err = lastError(("cannot tune the transmitter to " + fmtSI(hz, "Hz", 9)).c_str());
+        double f = hz;
+        uhd_usrp_get_tx_freq(usrp_, 0, &f);
+        return f;
+    }
+
     void run() {
         std::vector<std::complex<float>> buf(spb_);
         const void* b[1] = {buf.data()};
@@ -603,6 +639,7 @@ private:
     size_t spb_ = 0;
     double rate_ = 0;
     std::atomic<double> fc_{0}, gain_{0};
+    double freqMin_ = 0, freqMax_ = 0;  // the tunable range; 0, 0 = unknown
     GainRange range_{0, 89.75, 0.25, {}, false};
     std::string desc_;
     FillFn fill_;
