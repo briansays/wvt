@@ -296,6 +296,14 @@ void App::pollResults() {
             dbMin_ = std::floor(r->p5 - 3);
             dbMax_ = std::ceil(std::max(r->p999 + 3, dbMin_ + 20.f));
         }
+        // Issue #29: which request the result is for, and the colour range it sets.
+        const bool stale = r->req.src.file != file_ || r->req.src.fp.fmt != fp_.fmt || r->req.src.fs != fs_;
+        LOG_DEBUG("app", "waterfall result: samples %lld to %lld, %d x %d, %s, dB range %.0f to %.0f (%s)%s",
+                  (long long)r->req.s0, (long long)r->req.s1, r->rows, r->cols, r->gpu ? "GPU" : "CPU", dbMin_, dbMax_,
+                  autoDb_ ? "auto" : "manual", stale ? ", FOR A PREVIOUS FILE OR FORMAT" : "");
+        if (stale) LOG_WARN("app", "waterfall result for a previous file or format was taken");
+        if (!std::isfinite(dbMin_) || !std::isfinite(dbMax_))
+            LOG_WARN("app", "waterfall dB range is not finite: %g to %g (p5 %g, p99.9 %g)", dbMin_, dbMax_, r->p5, r->p999);
         if (fitSpecY_) needRecolor_ = true;
         needRecolor_ = true;
     }
@@ -716,6 +724,44 @@ void App::drawTimeMarkersHorizontal() {
     ImPlot::TagY(tm2_, kColT, "T2");
 }
 
+// Issue #29: once for each waterfall result, what the spectrum of view gets and
+// how much of it is inside the plot's axes. Called inside the spectrum plot.
+void App::logViewSpectrum() {
+    if (!wf_) {
+        if (!specLoggedEmpty_) LOG_DEBUG("app", "spectrum of view: no waterfall result yet (computing), plot empty");
+        specLoggedEmpty_ = true;
+        specLogged_.reset();
+        return;
+    }
+    specLoggedEmpty_ = false;
+    if (wf_ == specLogged_) return;
+    specLogged_ = wf_;
+    const WaterfallRes* w = wf_.get();
+    const ImPlotRect lim = ImPlot::GetPlotLimits();
+    size_t finite = 0, inX = 0, inside = 0;
+    double ymin = INFINITY, ymax = -INFINITY;
+    for (size_t i = 0; i < w->specF.size() && i < w->specAvg.size(); ++i) {
+        const double x = w->specF[i], y = w->specAvg[i];
+        if (!std::isfinite(x) || !std::isfinite(y)) continue;
+        ++finite;
+        ymin = std::min(ymin, y);
+        ymax = std::max(ymax, y);
+        if (x < lim.X.Min || x > lim.X.Max) continue;
+        ++inX;
+        inside += y >= lim.Y.Min && y <= lim.Y.Max;
+    }
+    LOG_DEBUG("app",
+              "spectrum of view: %zu points, %zu finite (%.4g to %.4g dB), %zu in the X range, %zu inside the plot; "
+              "plot X %s to %s, Y %.4g to %.4g dB",
+              w->specF.size(), finite, ymin, ymax, inX, inside, fmtSI(lim.X.Min, "Hz", 9).c_str(),
+              fmtSI(lim.X.Max, "Hz", 9).c_str(), lim.Y.Min, lim.Y.Max);
+    if (!w->specF.empty() && inside == 0 && specWarnings_++ < 5)
+        LOG_WARN("app",
+                 "spectrum of view is empty: %zu of %zu points are finite, %zu are in the X range, none inside "
+                 "Y %.4g to %.4g dB (data %.4g to %.4g dB)",
+                 finite, w->specF.size(), inX, lim.Y.Min, lim.Y.Max, ymin, ymax);
+}
+
 void App::drawLeft() {
     // --- waterfall parameters: the main ones on the row, the rest in the options popup ---
     flowBegin();
@@ -797,6 +843,8 @@ void App::drawLeft() {
     if (fitSpecY_ && wf_) {
         ImPlot::SetNextAxisLimits(ImAxis_Y1, dbMin_ - 5, dbMax_ + 10, ImGuiCond_Always);
         fitSpecY_ = false;
+        LOG_INFO("app", "spectrum of view: Y axis fitted to %.4g to %.4g dB (waterfall dB range %.4g to %.4g, %s)",
+                 dbMin_ - 5, dbMax_ + 10, dbMin_, dbMax_, autoDb_ ? "auto" : "manual");
     }
     if (ImPlot::BeginPlot("##spectrum", ImVec2(avail.x - cbW - ImGui::GetStyle().ItemSpacing.x, specH),
                           ImPlotFlags_NoTitle | ImPlotFlags_NoLegend)) {
@@ -813,6 +861,7 @@ void App::drawLeft() {
             ImPlot::SetNextLineStyle(ImVec4(0.6f, 0.85f, 1.f, 1.f));
             ImPlot::PlotLine("avg", wf_->specF.data(), wf_->specAvg.data(), (int)wf_->specF.size());
         }
+        logViewSpectrum();
         drawChannelOverlay(false);
         drawAudioOverlay();
         drawFreqMarkers();
