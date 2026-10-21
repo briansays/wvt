@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "imgui.h"
 
@@ -29,6 +30,8 @@ public:
 
     bool usingGL() const;
     bool screenshot(const std::string& path);  // writes a binary PPM
+    // The last rendered frame as RGB, top row first (3 bytes per pixel).
+    void readFrame(int& w, int& h, std::vector<uint8_t>& rgb);
     int width() const;
     int height() const;
 

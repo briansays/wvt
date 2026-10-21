@@ -29,6 +29,7 @@ getting-started
 viewer
 segments
 export
+snapshots
 live
 siggen
 audio

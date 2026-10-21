@@ -508,8 +508,10 @@ bool X11Window::usingGL() const { return d->gl; }
 int X11Window::width() const { return d->w; }
 int X11Window::height() const { return d->h; }
 
-bool X11Window::screenshot(const std::string& path) {
-    std::vector<uint8_t> rgb((size_t)d->w * d->h * 3);
+void X11Window::readFrame(int& w, int& h, std::vector<uint8_t>& rgb) {
+    w = d->w;
+    h = d->h;
+    rgb.resize((size_t)d->w * d->h * 3);
     if (d->gl) {
         std::vector<uint8_t> px((size_t)d->w * d->h * 4);
         glPixelStorei(GL_PACK_ALIGNMENT, 1);
@@ -527,9 +529,15 @@ bool X11Window::screenshot(const std::string& path) {
             rgb[i * 3 + 2] = (p[i] >> 16) & 0xff;
         }
     }
+}
+
+bool X11Window::screenshot(const std::string& path) {
+    int w, h;
+    std::vector<uint8_t> rgb;
+    readFrame(w, h, rgb);
     FILE* f = fopen(path.c_str(), "wb");
     if (!f) return false;
-    fprintf(f, "P6\n%d %d\n255\n", d->w, d->h);
+    fprintf(f, "P6\n%d %d\n255\n", w, h);
     fwrite(rgb.data(), 1, rgb.size(), f);
     fclose(f);
     return true;

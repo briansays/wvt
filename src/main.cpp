@@ -947,6 +947,7 @@ int main(int argc, char** argv) {
             app.frame();
             ImGui::Render();
             win.render(ImGui::GetDrawData(), ImVec4(0.06f, 0.06f, 0.07f, 1.f));
+            app.afterRender();
             ++frame;
             if (!shotPath.empty()) {
                 idleFrames = app.busy() ? 0 : idleFrames + 1;

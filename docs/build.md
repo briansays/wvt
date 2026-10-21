@@ -197,6 +197,7 @@ cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
 | `log_check` | Self-check for the logger |
 | `segment_check` | Self-check for the time segment rules |
 | `extract_check` | Self-check for the region export |
+| `snapshot_check` | Self-check for the plot snapshots |
 | `gpu_check` | Compares the GPU results with the CPU results, and measures the speed |
 
 For the self-checks, refer to [Self-checks and test signals](self-checks.md).

@@ -69,7 +69,9 @@ App::~App() {
 bool App::workersBusy() const { return wfWorker_->busy() || dmWorker_->busy() || ovWorker_->busy(); }
 
 // While a device streams, the main loop keeps running at frame rate.
-bool App::busy() const { return workersBusy() || (live_ && live_->running()) || sigGenBusy() || exportBusy(); }
+bool App::busy() const {
+    return workersBusy() || (live_ && live_->running()) || sigGenBusy() || exportBusy() || snapCountdown_ > 0;
+}
 
 // ---------------------------------------------------------------------------
 // Source / view management
@@ -386,6 +388,7 @@ void App::frame() {
     nextHoverT_ = NAN;
     nextHoverF_ = NAN;
     liveNextHoverAgo_ = NAN;
+    snapClipReset();
 
     drawToolbar();
     ImGui::Separator();
@@ -428,6 +431,7 @@ void App::frame() {
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Q)) quit_ = true;
     handleShortcuts();
     ImGui::End();
+    drawSnapshotWindow();
     drawHelpWindows();
     drawSigGenWindow();
     drawAudioWindow();
@@ -666,6 +670,7 @@ void App::drawOverview(float h) {
         double mx = ImPlot::GetPlotMousePos().x;
         ImGui::SetTooltip("%s\nclick to jump, drag box to move, drag edges to resize", fmtSI(mx, "s", 6).c_str());
     }
+    snapNotePlot(SnapPlot::Overview);
     ImPlot::EndPlot();
 }
 
@@ -820,6 +825,7 @@ void App::drawLeft() {
             demod_.chanEnable = true;
             demod_.chanOffset = ImPlot::GetPlotMousePos().x - fc_;
         }
+        snapNotePlot(SnapPlot::Spectrum);
         ImPlot::EndPlot();
     }
     ImGui::SameLine();
@@ -876,12 +882,14 @@ void App::drawLeft() {
             if (ImGui::GetIO().KeyShift && ImGui::IsMouseClicked(0)) playFrom(m.y);
         }
         waterfallExportInput(openWfMenu);
+        snapNotePlot(SnapPlot::Waterfall);
         ImPlot::EndPlot();
     }
     if (openWfMenu) ImGui::OpenPopup("##wfmenu");
     drawWaterfallMenu();
     ImGui::SameLine();
     colorbar("##cbar", dbMin_, dbMax_, wfH - 6, cmap_);
+    snapNoteItem(SnapPlot::Waterfall);
 }
 
 // ---------------------------------------------------------------------------
@@ -907,7 +915,7 @@ bool App::beginTimePlot(const char* id, const char* ylabel, float h, bool autoY,
     return true;
 }
 
-void App::endTimePlot() {
+void App::endTimePlot(SnapPlot p) {
     drawTimeMarkersVertical();
     drawExportRegion(false);
     drawPlayhead(true);
@@ -924,6 +932,7 @@ void App::endTimePlot() {
         openMenu = ImGui::IsMouseReleased(ImGuiMouseButton_Right) &&
                    io.MouseDragMaxDistanceSqr[ImGuiMouseButton_Right] < io.MouseDragThreshold * io.MouseDragThreshold;
     }
+    snapNotePlot(p, snapHeaderTop_);  // with the header (name and readout)
     ImPlot::EndPlot();
     if (openMenu) ImGui::OpenPopup("##opts");
 }
@@ -932,6 +941,7 @@ void App::endTimePlot() {
 // button and the measurement readout (which wraps to the next line when the
 // row is full). The options popup ("##opts") is drawn by the caller.
 void App::plotHeader(const char* name, bool* show, const ImVec4& col, const char* readout) {
+    snapHeaderTop_ = ImGui::GetCursorScreenPos().y;
     flowBegin();
     flow(ImGui::GetFrameHeight() * 6);
     ImGui::PushStyleColor(ImGuiCol_Text, col);
@@ -1014,6 +1024,7 @@ void App::drawRight() {
 
     // --- scrollable plot stack ---
     ImGui::BeginChild("##plots", ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_AlwaysVerticalScrollbar);
+    snapClipToWindow();  // the plots scroll: a snapshot keeps only the part on the screen
     const ImGuiStyle& st = ImGui::GetStyle();
     const float gap = ImGui::GetFontSize() * 0.4f;
     int nVis = (int)showIQ_ + showAM_ + showFM_ + showPM_;
@@ -1043,7 +1054,7 @@ void App::drawRight() {
             ImPlot::SetNextLineStyle(kColQ);
             ImPlot::PlotLine("Q", dm_->q.t.data(), dm_->q.y.data(), (int)dm_->q.t.size());
         }
-        endTimePlot();
+        endTimePlot(SnapPlot::IQ);
     }
     if (ImGui::BeginPopup("##opts")) {
         if (beginForm("##iqform", 5.5f, 14)) {
@@ -1068,7 +1079,7 @@ void App::drawRight() {
             ImPlot::SetNextLineStyle(kColAM);
             ImPlot::PlotLine("AM", dm_->am.t.data(), dm_->am.y.data(), (int)dm_->am.t.size());
         }
-        endTimePlot();
+        endTimePlot(SnapPlot::AM);
     }
     if (ImGui::BeginPopup("##opts")) {
         if (beginForm("##amform", 5.5f, 18)) {
@@ -1099,7 +1110,7 @@ void App::drawRight() {
             ImPlot::SetNextLineStyle(kColFM);
             ImPlot::PlotLine("FM", dm_->fm.t.data(), dm_->fm.y.data(), (int)dm_->fm.t.size());
         }
-        endTimePlot();
+        endTimePlot(SnapPlot::FM);
     }
     if (ImGui::BeginPopup("##opts")) {
         if (beginForm("##fmform", 7.5f, 18)) {
@@ -1126,7 +1137,7 @@ void App::drawRight() {
             ImPlot::SetNextLineStyle(kColPM);
             ImPlot::PlotLine("PM", dm_->pm.t.data(), dm_->pm.y.data(), (int)dm_->pm.t.size());
         }
-        endTimePlot();
+        endTimePlot(SnapPlot::PM);
     }
     if (ImGui::BeginPopup("##opts")) {
         if (beginForm("##pmform", 5.5f, 20)) {
@@ -1142,6 +1153,7 @@ void App::drawRight() {
         ImGui::EndPopup();
     }
     ImGui::PopID();
+    snapClipReset();
     ImGui::EndChild();
 }
 
@@ -1150,6 +1162,9 @@ void App::drawRight() {
 // ---------------------------------------------------------------------------
 void App::drawStatusBar() {
     ImGui::Separator();
+    if (ImGui::Button("Snapshot...")) openSnapshot();
+    ImGui::SetItemTooltip("Save the plots as PNG files");
+    ImGui::SameLine();
     if (liveMode_) {
         drawLiveStatusBar();
         return;
@@ -1167,7 +1182,7 @@ void App::drawStatusBar() {
             s += b;
         }
     } else {
-        s = status_;
+        s = statusText();
     }
     if (exSelecting_) s = "Drag a box on the waterfall to export it; Esc cancels   | " + s;
     if (tMarkers_) {

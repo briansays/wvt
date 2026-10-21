@@ -640,6 +640,7 @@ void App::drawLiveLeft() {
             demod_.chanEnable = true;
             demod_.chanOffset = ImPlot::GetPlotMousePos().x - fc_;
         }
+        snapNotePlot(SnapPlot::Spectrum);
         ImPlot::EndPlot();
     }
     ImGui::SameLine();
@@ -695,10 +696,12 @@ void App::drawLiveLeft() {
                 demod_.chanOffset = m.x - fc_;
             }
         }
+        snapNotePlot(SnapPlot::Waterfall);
         ImPlot::EndPlot();
     }
     ImGui::SameLine();
     colorbar("##lcbar", dbMin_, dbMax_, wfH - 6, cmap_);
+    snapNoteItem(SnapPlot::Waterfall);
 }
 
 // ---------------------------------------------------------------------------
@@ -718,7 +721,7 @@ void App::drawLiveStatusBar() {
             }
         }
     } else {
-        s = status_;
+        s = statusText();
     }
     if (fMarkers_) s += "   | dF=" + fmtSI(std::fabs(fm2_ - fm1_), "Hz", 6);
 
