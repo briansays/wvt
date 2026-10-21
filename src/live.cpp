@@ -30,6 +30,12 @@ bool LiveEngine::start(const StreamConfig& cfg, std::string& err) {
     const int64_t bytes = std::clamp<int64_t>((int64_t)(2.0 * dev->sampleRate()) * bps, 16 << 20, 256 << 20);
     ring_ = std::make_shared<SampleRing>(bytes / bps, bps);
     auto ring = ring_;
+    // A device that restarts its stream to retune marks the boundary itself,
+    // between the last old sample and the first new one.
+    dev->setRetuneMark([this, ring](double fc) {
+        freshFrom_ = ring->written();
+        rec_.noteRetune(fc);
+    });
     if (!dev->start([ring](const uint8_t* p, int64_t n) { ring->push(p, n); },
                     [ring](int64_t lost, const char* why) { ring->noteGap(lost, why); }, err)) {
         LOG_DEBUG("live", "stream start failed: %s", err.c_str());
@@ -80,8 +86,10 @@ bool LiveEngine::setCenterFreq(double hz, std::string& err) {
     }
     LOG_INFO("live", "tuned to %s", fmtSI(dev_->centerFreq(), "Hz", 9).c_str());
     cfg_.fc = hz;
-    freshFrom_ = ring_->written();
-    rec_.noteRetune(dev_->centerFreq());
+    if (!dev_->usesRetuneMark()) {
+        freshFrom_ = ring_->written();
+        rec_.noteRetune(dev_->centerFreq());
+    }
     std::lock_guard<std::mutex> lk(m_);
     ++gen_;
     return true;

@@ -169,6 +169,123 @@ if(NOT WVT_WITH_UHD STREQUAL "OFF")
 endif()
 
 # ---------------------------------------------------------------------------
+# Optional Signal Hound BB60 backend (issue #2) through bb_api from the Signal
+# Hound SDK. The SDK has no pkg-config file and ships the library versioned in
+# per-platform folders (Linux x86-64 and aarch64 .so, macOS arm64 .dylib), so
+# search SIGNALHOUND_SDK_DIR for the header and a library for this CPU. The
+# library is copied into the build folder under its runtime name, and wvt
+# finds it there through its rpath. WVT_BB_SIM builds the backend against a
+# simulated device instead (tools/bb_sim), for CI and tests.
+# ---------------------------------------------------------------------------
+set(WVT_WITH_BB AUTO CACHE STRING "Build the Signal Hound BB60 backend (AUTO, ON, OFF)")
+set_property(CACHE WVT_WITH_BB PROPERTY STRINGS AUTO ON OFF)
+set(SIGNALHOUND_SDK_DIR "" CACHE PATH "Signal Hound SDK folder (or a prefix with include/ and lib/)")
+option(WVT_BB_SIM "Build the BB60 backend against a simulated device (no SDK, no hardware)" OFF)
+set(WVT_BB_OK FALSE)
+set(WVT_BB_WHY "")
+if(WVT_BB_SIM)
+  add_library(bb_api_sim STATIC tools/bb_sim/bb_api_sim.cpp)
+  target_include_directories(bb_api_sim PUBLIC tools/bb_sim)
+  set(WVT_BB_TARGET bb_api_sim)
+  set(WVT_BB_OK TRUE)
+  set(WVT_BB_WHAT "simulated device, tools/bb_sim")
+elseif(WVT_WITH_BB STREQUAL "OFF")
+  set(WVT_BB_WHY "WVT_WITH_BB=OFF")
+else()
+  find_path(BB_API_INCLUDE_DIR bb_api.h
+    HINTS ${SIGNALHOUND_SDK_DIR}
+    PATH_SUFFIXES include device_apis/bb_series/include bb_series/include)
+  find_library(BB_API_LIBRARY NAMES bb_api HINTS ${SIGNALHOUND_SDK_DIR} PATH_SUFFIXES lib lib64)
+  if(CMAKE_OSX_ARCHITECTURES)
+    set(_bb_cpu "${CMAKE_OSX_ARCHITECTURES}")
+  else()
+    set(_bb_cpu "${CMAKE_SYSTEM_PROCESSOR}")
+  endif()
+  if(NOT BB_API_LIBRARY AND SIGNALHOUND_SDK_DIR)
+    if(APPLE)
+      if(_bb_cpu MATCHES "arm64")
+        file(GLOB_RECURSE _bb_libs "${SIGNALHOUND_SDK_DIR}/libbb_api*.dylib")
+      else()
+        set(WVT_BB_WHY "the macOS bb_api is arm64 only; configure with -DCMAKE_OSX_ARCHITECTURES=arm64 (this build is ${_bb_cpu})")
+      endif()
+    else()
+      file(GLOB_RECURSE _bb_libs "${SIGNALHOUND_SDK_DIR}/libbb_api.so.*")
+      set(_bb_keep "")
+      foreach(_lib IN LISTS _bb_libs)
+        string(TOLOWER "${_lib}" _l)
+        # Ubuntu 14.04 has the old version 3 API.
+        if(_l MATCHES "14\\.04" OR IS_SYMLINK "${_lib}")
+          continue()
+        endif()
+        if((_l MATCHES "aarch64|arm64") STREQUAL (_bb_cpu MATCHES "aarch64|arm64"))
+          list(APPEND _bb_keep "${_lib}")
+        endif()
+      endforeach()
+      set(_bb_libs ${_bb_keep})
+    endif()
+    # The newest version: sort by the version suffix.
+    set(_bb_best "")
+    set(_bb_best_ver "0")
+    foreach(_lib IN LISTS _bb_libs)
+      string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]+" _ver "${_lib}")
+      if(_ver VERSION_GREATER _bb_best_ver)
+        set(_bb_best "${_lib}")
+        set(_bb_best_ver "${_ver}")
+      endif()
+    endforeach()
+    if(_bb_best)
+      set(BB_API_LIBRARY "${_bb_best}" CACHE FILEPATH "bb_api library" FORCE)
+    endif()
+  endif()
+  if(BB_API_INCLUDE_DIR AND BB_API_LIBRARY)
+    # Copy the library under the name the runtime loader looks for.
+    set(_bb_dir "${CMAKE_BINARY_DIR}/bb_api")
+    file(MAKE_DIRECTORY "${_bb_dir}")
+    get_filename_component(_bb_src_dir "${BB_API_LIBRARY}" DIRECTORY)
+    string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]+" _ver "${BB_API_LIBRARY}")
+    string(REGEX MATCH "^[0-9]+" _major "${_ver}")
+    if(APPLE)
+      # The dylib's install name is a bare "libbb_api.5.dylib"; give the copy an
+      # @rpath name so wvt finds it next to the build.
+      set(_bb_lib "${_bb_dir}/libbb_api.${_major}.dylib")
+      configure_file("${BB_API_LIBRARY}" "${_bb_lib}" COPYONLY)
+      execute_process(COMMAND install_name_tool -id "@rpath/libbb_api.${_major}.dylib" "${_bb_lib}" RESULT_VARIABLE _r)
+      execute_process(COMMAND codesign --force --sign - "${_bb_lib}" OUTPUT_QUIET ERROR_QUIET)
+    else()
+      set(_bb_lib "${_bb_dir}/libbb_api.so.${_ver}")
+      configure_file("${BB_API_LIBRARY}" "${_bb_lib}" COPYONLY)
+      foreach(_n libbb_api.so.${_major} libbb_api.so)
+        file(CREATE_LINK "libbb_api.so.${_ver}" "${_bb_dir}/${_n}" SYMBOLIC)
+      endforeach()
+    endif()
+    add_library(bb_api SHARED IMPORTED)
+    set_target_properties(bb_api PROPERTIES IMPORTED_LOCATION "${_bb_lib}"
+      INTERFACE_INCLUDE_DIRECTORIES "${BB_API_INCLUDE_DIR}")
+    # The x86-64 Linux library needs FTDI's libftd2xx, which the SDK ships next to it.
+    if(EXISTS "${_bb_src_dir}/libftd2xx.so")
+      configure_file("${_bb_src_dir}/libftd2xx.so" "${_bb_dir}/libftd2xx.so" COPYONLY)
+      set_property(TARGET bb_api PROPERTY INTERFACE_LINK_LIBRARIES "${_bb_dir}/libftd2xx.so")
+    endif()
+    set(WVT_BB_TARGET bb_api)
+    set(WVT_BB_OK TRUE)
+    set(WVT_BB_WHAT "bb_api ${_ver}, ${BB_API_LIBRARY}")
+    set_property(TARGET wvt APPEND PROPERTY BUILD_RPATH "${_bb_dir}")
+  elseif(NOT WVT_BB_WHY)
+    set(WVT_BB_WHY "bb_api not found; download the Signal Hound SDK and set -DSIGNALHOUND_SDK_DIR=...")
+  endif()
+endif()
+if(WVT_BB_OK)
+  target_sources(wvt PRIVATE src/sdr_bb60.cpp)
+  target_link_libraries(wvt PRIVATE ${WVT_BB_TARGET})
+  target_compile_definitions(wvt PRIVATE WVT_HAVE_BB)
+  message(STATUS "wvt: Signal Hound BB60 support enabled (${WVT_BB_WHAT})")
+elseif(WVT_WITH_BB STREQUAL "ON")
+  message(FATAL_ERROR "WVT_WITH_BB=ON but the BB60 backend cannot be built: ${WVT_BB_WHY}")
+else()
+  message(STATUS "wvt: Signal Hound BB60 support disabled (${WVT_BB_WHY})")
+endif()
+
+# ---------------------------------------------------------------------------
 # Optional NVIDIA GPU acceleration (issue #3). AUTO builds the CUDA backend
 # when the CUDA toolkit (12.0 or later, with cuFFT) is found, ON requires it.
 # A CUDA build still runs on computers without a GPU: wvt checks at start.
@@ -360,3 +477,14 @@ target_compile_options(gpu_check PRIVATE -Wall -Wextra -Wno-unused-parameter)
 add_executable(snapshot_check tools/snapshot_check.cpp src/snapshot.cpp)
 target_include_directories(snapshot_check PRIVATE src third_party/stb)
 target_compile_options(snapshot_check PRIVATE -Wall -Wextra -Wno-unused-parameter)
+
+# BB60 backend self-test against the simulated device (only with WVT_BB_SIM)
+if(WVT_BB_SIM)
+  add_executable(bb_check tools/bb_check.cpp src/sdr_bb60.cpp src/live.cpp src/recorder.cpp src/sdr_device.cpp
+    src/sdr_sim.cpp src/sdr_siggen.cpp src/siggen.cpp src/siggen_out.cpp src/json.cpp src/engine.cpp src/iq_file.cpp
+    src/dsp.cpp src/ui_util.cpp src/log.cpp)
+  target_include_directories(bb_check PRIVATE src)
+  target_compile_definitions(bb_check PRIVATE WVT_HAVE_BB)
+  target_link_libraries(bb_check PRIVATE bb_api_sim wvt_gpu imgui_implot Threads::Threads)
+  target_compile_options(bb_check PRIVATE -Wall -Wextra -Wno-unused-parameter)
+endif()

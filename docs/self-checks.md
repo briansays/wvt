@@ -36,6 +36,7 @@ code if a check fails.
 | `build/segment_check` | The time segment rules and the overview on a sample range |
 | `build/extract_check` | The region export: copies, the band filter, metadata, input checks and cancel |
 | `build/snapshot_check` | Plot snapshots: file names, numbering, the crop and the PNG files |
+| `build/bb_check` | The BB60 backend with the simulated device: open, rates, bandwidths, streaming, overload, unplug, and the capture segments of a recording across retunes. Only with `-DWVT_BB_SIM=ON` |
 | `build/gpu_check` | The GPU results against the CPU results. `--bench` measures the speed |
 
 To run all of them:
@@ -52,6 +53,6 @@ GitHub Actions builds each pull request and each push to `main` (`.github/workfl
 
 | Job | Contents |
 |---|---|
-| Linux (CPU, RTL-SDR, UHD) | Builds with the two device backends, runs all self-checks and some command-line runs |
+| Linux (CPU, RTL-SDR, UHD) | Builds with the two device backends and the simulated BB60, runs all self-checks and some command-line runs |
 | Linux CUDA 12.0 and 12.8 | Builds the CUDA backend. The runners have no GPU, so the job makes sure that a CUDA build runs on the CPU |
 | Documentation | Builds these pages with Sphinx. A warning causes the job to fail |

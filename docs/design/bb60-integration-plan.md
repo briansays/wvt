@@ -1,8 +1,10 @@
 # Plan: Signal Hound BB60 as a wvt live device
 
-Branch: `wvt-sh-dev` (commit `72f9d8a`, compared against `main`)
-Status: implementation in the branch; **not yet run against hardware**. This document
-reconstructs the plan from the branch, and records review findings and remaining work.
+Issue: #2. Branch: `2-signal-hound` (from `main`; the first version was on `wvt-sh-dev`, commit
+`72f9d8a`).
+Status: **implemented on `2-signal-hound` (2026-10-20)** against bb_api 5.0.11 (SDK
+2026-10-05), tested with a simulated BB60 (section 7). **Not yet run against hardware.** Sections
+1 to 6 are the first plan and its review; section 7 records the second pass.
 
 ## 1. Goal
 
@@ -160,3 +162,53 @@ Ordered by expected impact.
 | `src/main.cpp` | CLI options and defaults |
 | `src/app_live.cpp` | Rate combo, ref-level slider, BB60 option row |
 | `README.md` | Build, setup, usage, device table |
+
+## 7. Second pass (2026-10-20)
+
+The first version (`72f9d8a`) was ported to the current `main` and checked against the SDK of
+2026-10-05 (bb_api 5.0.12 for Linux ARM64, 5.0.11 for macOS ARM, 5.0.9 for Linux x86-64).
+
+### 7.1 Review findings: outcome
+
+| # | Finding | Outcome |
+|---|---|---|
+| 1 | Platform support | The SDK now has a macOS ARM library (5.0.11). CMake finds the `.dylib`, copies it to `build/bb_api/` with an `@rpath` install name, and refuses an x86-64 macOS build with a clear reason. The macOS library decimates by 128 at most, so the rate list on macOS stops at 312.5 kS/s. It needs libusb from the ARM Homebrew at run time |
+| 2 | Rescan while streaming | `scanDevices` no longer changes the selection while a device streams. The device box shows the description of the streaming device, because an open BB60 is not listed |
+| 3 | Bandwidth table | Replaced with the manual's table (`bbMaxBandwidth`): 27, 17.8, 8, 3.75, 2, 1 MHz, 500, 250, 140, 65, 30, 15, 8, 4 kHz |
+| 4 | Retune marker timing | Fixed: `SdrDevice::setRetuneMark` / `usesRetuneMark`. The BB60 calls the mark after its thread stopped and before the new stream starts, so the capture segment starts at the first new sample. `bb_check` verifies it on both sides of each boundary |
+| 5 | UI stall on retune | The restart time is logged (DEBUG `retune applied in N ms`). To measure on hardware |
+| 6 | Ext ref on the BB60A | The BB60A and BB60C share the port 1 constants (header documentation); kept |
+| 7 | `setGain` lock | Fixed |
+| 8 | `--ext-ref` style | Fixed |
+| 9 | `--gain auto` with the BB60 | Refused: "the BB60 has no automatic gain: use --ref-level DBM" |
+
+### 7.2 Other changes
+
+- Linux x86-64: the SDK has a folder for each distribution. CMake takes the newest version 5
+  library and skips Ubuntu 14.04 (the old version 3 API). It copies `libftd2xx.so` next to it and
+  links it, so the loader finds it through wvt's rpath. It makes the `libbb_api.so.5` and
+  `libbb_api.so` links that the loader needs.
+- `file(COPY_FILE)` (CMake 3.21) is not used, because the minimum is CMake 3.16.
+- Open-time notes (a snapped rate, a limited bandwidth) show before the stream starts.
+- Logging: `[bb]` component (open, configure, stream start time, restart time, errors).
+
+### 7.3 Simulated BB60
+
+`tools/bb_sim/` has a header with the part of `bb_api.h` that wvt uses (the same declarations
+and values as 5.0.x) and a simulated BB60D (serial 12345678). It checks the arguments as the
+manual documents them (power-of-2 decimation, the bandwidth table, frequency range), streams in
+real time, and makes a 100.2 MHz, −30 dBm tone with noise. It returns `bbADCOverflow` when the
+tone is above the reference level. `WVT_BB_SIM_NONE=1` hides the device and `WVT_BB_SIM_UNPLUG=S`
+disconnects it after S seconds. `-DWVT_BB_SIM=ON` builds wvt and `bb_check` with it; the Linux CI
+job uses it.
+
+### 7.4 Verification
+
+| Check | State |
+|---|---|
+| `bb_check` with the simulator (39 checks): rules, open errors, streaming rate, tone frequency, overload note, unplug, capture segments across two retunes | Done (macOS x86-64) |
+| The window with the simulator: device list, rate list, reference level, options popup, status bar | Done (Xvfb) |
+| `--record ... --no-gui` with the simulator: SigMF with `core:hw` | Done |
+| macOS ARM build against the real SDK: configures, links `@rpath/libbb_api.5.dylib` | Done. It runs only with ARM libusb (`/opt/homebrew`), which this computer does not have |
+| Linux x86-64 and ARM64 builds against the real SDK | To do |
+| The hardware test matrix of section 5.3 | To do (needs a BB60) |
