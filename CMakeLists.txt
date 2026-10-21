@@ -6,7 +6,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
+# CMake's Release flags for GCC and Clang are -O3 -DNDEBUG. They are not set
+# here, so flags from the user or a distribution package stay (issue #54).
 
 # Sanitizer builds for the self-checks (issue #52): "address" is ASan with
 # UBSan, "thread" is TSan (the two cannot be combined). Every target gets the
@@ -25,6 +26,14 @@ if(WVT_SAN_FLAGS)
   add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX,OBJCXX>:${WVT_SAN_FLAGS};-fno-omit-frame-pointer;-g>")
   add_link_options(${WVT_SAN_FLAGS})
   message(STATUS "wvt: sanitizers enabled (${WVT_SANITIZE}: ${WVT_SAN_FLAGS})")
+endif()
+
+# Warnings for wvt's own code (not third_party/). WVT_WERROR makes them errors;
+# CI uses it.
+option(WVT_WERROR "Treat compiler warnings in wvt's own code as errors" OFF)
+set(WVT_WARNINGS -Wall -Wextra -Wno-unused-parameter)
+if(WVT_WERROR)
+  list(APPEND WVT_WARNINGS -Werror)
 endif()
 
 set(IMGUI_DIR  ${CMAKE_SOURCE_DIR}/third_party/imgui)
@@ -113,7 +122,7 @@ add_executable(wvt
   ${FONT_CPP})
 target_include_directories(wvt PRIVATE src third_party/stb ${PLATFORM_INCLUDES})
 target_link_libraries(wvt PRIVATE imgui_implot ${PLATFORM_LIBS} Threads::Threads)
-target_compile_options(wvt PRIVATE -Wall -Wextra -Wno-unused-parameter)
+target_compile_options(wvt PRIVATE ${WVT_WARNINGS})
 
 # The git revision goes into the log file header. It is read at configure time.
 execute_process(COMMAND git describe --always --dirty
@@ -205,6 +214,7 @@ set(WVT_BB_WHY "")
 if(WVT_BB_SIM)
   add_library(bb_api_sim STATIC tools/bb_sim/bb_api_sim.cpp)
   target_include_directories(bb_api_sim PUBLIC tools/bb_sim)
+  target_compile_options(bb_api_sim PRIVATE ${WVT_WARNINGS})
   set(WVT_BB_TARGET bb_api_sim)
   set(WVT_BB_OK TRUE)
   set(WVT_BB_WHAT "simulated device, tools/bb_sim")
@@ -371,7 +381,7 @@ endif()
 
 add_library(wvt_gpu STATIC src/gpu_common.cpp)
 target_include_directories(wvt_gpu PUBLIC src)
-target_compile_options(wvt_gpu PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wno-unused-parameter>)
+target_compile_options(wvt_gpu PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:${WVT_WARNINGS}>")
 if(WVT_CUDA_OK)
   target_sources(wvt_gpu PRIVATE src/gpu_cuda.cu)
   if(NOT WVT_CUDA_ARCHS_GIVEN)
@@ -402,7 +412,7 @@ if(WVT_CUDA_OK)
 elseif(WVT_METAL_OK)
   target_sources(wvt_gpu PRIVATE src/gpu_metal.mm)
   set_target_properties(wvt_gpu PROPERTIES OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON)
-  target_compile_options(wvt_gpu PRIVATE $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc -Wall -Wextra -Wno-unused-parameter>)
+  target_compile_options(wvt_gpu PRIVATE "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc;${WVT_WARNINGS}>")
   target_link_libraries(wvt_gpu PUBLIC "-framework Foundation" "-framework Metal" "-framework MetalPerformanceShaders"
                         "-framework MetalPerformanceShadersGraph")
   message(STATUS "wvt: Metal support enabled (MPSGraph FFT; the GPU path needs macOS 14 at run time)")
@@ -455,54 +465,59 @@ endif()
 
 # Synthetic test-signal generator
 add_executable(iqgen tools/iqgen.cpp)
+target_compile_options(iqgen PRIVATE ${WVT_WARNINGS})
 
 # Signal generator self-test (DSP and file output; no device needed)
 add_executable(siggen_check tools/siggen_check.cpp src/siggen.cpp src/siggen_out.cpp src/json.cpp src/recorder.cpp
   src/sdr_device.cpp src/sdr_sim.cpp src/sdr_siggen.cpp src/iq_file.cpp src/dsp.cpp src/ui_util.cpp src/log.cpp)
 target_include_directories(siggen_check PRIVATE src)
 target_link_libraries(siggen_check PRIVATE imgui_implot Threads::Threads)
+target_compile_options(siggen_check PRIVATE ${WVT_WARNINGS})
 
 # Audio demodulator self-test (no sound device needed)
 add_executable(audio_check tools/audio_check.cpp src/audio_dsp.cpp src/wav_writer.cpp src/recorder.cpp
   src/iq_file.cpp src/dsp.cpp src/log.cpp)
 target_include_directories(audio_check PRIVATE src)
 target_link_libraries(audio_check PRIVATE Threads::Threads)
+target_compile_options(audio_check PRIVATE ${WVT_WARNINGS})
 
 # Logger self-test (levels, argument parsing, log file, threads)
 add_executable(log_check tools/log_check.cpp src/log.cpp)
 target_include_directories(log_check PRIVATE src)
 target_link_libraries(log_check PRIVATE Threads::Threads)
+target_compile_options(log_check PRIVATE ${WVT_WARNINGS})
 
 # Time segment self-test (segment rules, overview on a sample range)
 add_executable(segment_check tools/segment_check.cpp src/engine.cpp src/dsp.cpp src/iq_file.cpp src/ui_util.cpp
   src/log.cpp)
 target_include_directories(segment_check PRIVATE src)
 target_link_libraries(segment_check PRIVATE wvt_gpu imgui_implot Threads::Threads)
+target_compile_options(segment_check PRIVATE ${WVT_WARNINGS})
 
 # Region export self-test (copies, band filter, metadata, checks, cancel)
 add_executable(extract_check tools/extract_check.cpp src/extract.cpp src/recorder.cpp src/engine.cpp src/dsp.cpp
   src/iq_file.cpp src/ui_util.cpp src/log.cpp)
 target_include_directories(extract_check PRIVATE src)
 target_link_libraries(extract_check PRIVATE wvt_gpu imgui_implot Threads::Threads)
-target_compile_options(extract_check PRIVATE -Wall -Wextra -Wno-unused-parameter)
+target_compile_options(extract_check PRIVATE ${WVT_WARNINGS})
 
 # GPU self-test and benchmark (CPU times; GPU vs CPU once a GPU backend exists)
 add_executable(gpu_check tools/gpu_check.cpp src/engine.cpp src/dsp.cpp src/iq_file.cpp src/ui_util.cpp src/log.cpp)
 target_include_directories(gpu_check PRIVATE src)
 target_link_libraries(gpu_check PRIVATE wvt_gpu imgui_implot Threads::Threads)
-target_compile_options(gpu_check PRIVATE -Wall -Wextra -Wno-unused-parameter)
+target_compile_options(gpu_check PRIVATE ${WVT_WARNINGS})
 
 # Plot snapshot self-test (file names, numbering, crop, PNG writer)
 add_executable(snapshot_check tools/snapshot_check.cpp src/snapshot.cpp)
 target_include_directories(snapshot_check PRIVATE src third_party/stb)
-target_compile_options(snapshot_check PRIVATE -Wall -Wextra -Wno-unused-parameter)
+target_compile_options(snapshot_check PRIVATE ${WVT_WARNINGS})
 
 # Device self-test (UHD search results, device arguments, sample rate rules)
 add_executable(device_check tools/device_check.cpp src/siggen.cpp src/siggen_out.cpp src/json.cpp src/recorder.cpp
   src/sdr_device.cpp src/sdr_sim.cpp src/sdr_siggen.cpp src/iq_file.cpp src/dsp.cpp src/ui_util.cpp src/log.cpp)
 target_include_directories(device_check PRIVATE src)
 target_link_libraries(device_check PRIVATE imgui_implot Threads::Threads)
-target_compile_options(device_check PRIVATE -Wall -Wextra -Wno-unused-parameter)
+target_compile_options(device_check PRIVATE ${WVT_WARNINGS})
 
 # BB60 backend self-test against the simulated device (only with WVT_BB_SIM)
 if(WVT_BB_SIM)
@@ -512,7 +527,7 @@ if(WVT_BB_SIM)
   target_include_directories(bb_check PRIVATE src)
   target_compile_definitions(bb_check PRIVATE WVT_HAVE_BB)
   target_link_libraries(bb_check PRIVATE bb_api_sim wvt_gpu imgui_implot Threads::Threads)
-  target_compile_options(bb_check PRIVATE -Wall -Wextra -Wno-unused-parameter)
+  target_compile_options(bb_check PRIVATE ${WVT_WARNINGS})
 endif()
 
 # ---------------------------------------------------------------------------
@@ -548,7 +563,7 @@ if(WVT_FUZZ)
   foreach(_f json chain meta parse_si)
     add_executable(fuzz_${_f} tools/fuzz/fuzz_${_f}.cpp ${_fuzz_${_f}})
     target_include_directories(fuzz_${_f} PRIVATE src tools/fuzz)
-    target_compile_options(fuzz_${_f} PRIVATE ${_fuzz_flags})
+    target_compile_options(fuzz_${_f} PRIVATE ${_fuzz_flags} ${WVT_WARNINGS})
     target_link_options(fuzz_${_f} PRIVATE ${_fuzz_flags})
     target_link_libraries(fuzz_${_f} PRIVATE Threads::Threads)
     if(_f STREQUAL "chain" OR _f STREQUAL "parse_si")

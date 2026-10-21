@@ -27,7 +27,7 @@ jobs:
           sudo apt-get install -y build-essential cmake libx11-dev libgl1-mesa-dev librtlsdr-dev libuhd-dev
       - name: Configure
         # WVT_BB_SIM builds the BB60 backend against the simulated device (no SDK in CI).
-        run: cmake -S . -B build -DWVT_WITH_RTLSDR=ON -DWVT_WITH_UHD=ON -DWVT_WITH_CUDA=OFF -DWVT_BB_SIM=ON
+        run: cmake -S . -B build -DWVT_WERROR=ON -DWVT_WITH_RTLSDR=ON -DWVT_WITH_UHD=ON -DWVT_WITH_CUDA=OFF -DWVT_BB_SIM=ON
       - name: Build
         run: cmake --build build -j "$(nproc)"
       - name: Self-tests
@@ -51,7 +51,7 @@ jobs:
           brew install pkgconf librtlsdr uhd
       - name: Configure
         run: >
-          cmake -S . -B build -DWVT_WITH_METAL=ON -DWVT_WITH_RTLSDR=ON -DWVT_WITH_UHD=ON -DWVT_BB_SIM=ON
+          cmake -S . -B build -DWVT_WERROR=ON -DWVT_WITH_METAL=ON -DWVT_WITH_RTLSDR=ON -DWVT_WITH_UHD=ON -DWVT_BB_SIM=ON
       - name: Build
         run: cmake --build build -j "$(sysctl -n hw.ncpu)"
       - name: Self-tests
@@ -144,7 +144,7 @@ jobs:
           DEBIAN_FRONTEND=noninteractive apt-get install -y cmake g++ make git libx11-dev libgl-dev
       - uses: actions/checkout@v5
       - name: Configure
-        run: cmake -S . -B build -DWVT_WITH_CUDA=ON -DWVT_WITH_RTLSDR=OFF -DWVT_WITH_UHD=OFF
+        run: cmake -S . -B build -DWVT_WERROR=ON -DWVT_WITH_CUDA=ON -DWVT_WITH_RTLSDR=OFF -DWVT_WITH_UHD=OFF
       - name: Build
         run: cmake --build build -j "$(nproc)"
       - name: Self-tests (no GPU, so the CUDA build must run on the CPU)

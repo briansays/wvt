@@ -32,6 +32,7 @@ to the default of an option, delete `build/CMakeCache.txt`, or give the default 
 | [`WVT_CUDA_STATIC`](#wvt_cuda_static) | `ON`, `OFF` | `ON` | Linux |
 | [`CMAKE_CUDA_ARCHITECTURES`](#cmake_cuda_architectures) | A list of GPU architectures | Refer to the section | Linux |
 | [`WVT_WITH_METAL`](#wvt_with_metal) | `AUTO`, `ON`, `OFF` | `AUTO` | macOS |
+| [`WVT_WERROR`](#wvt_werror) | `ON`, `OFF` | `OFF` | All |
 | [`WVT_SANITIZE`](#wvt_sanitize) | `address`, `thread` or empty | Empty | All |
 | [`WVT_FUZZ`](#wvt_fuzz) | `ON`, `OFF` | `OFF` | All (clang only) |
 
@@ -54,8 +55,8 @@ Use `ON` in scripts and CI jobs, where a missing library must cause an error.
 
 Sets the compiler optimization. If you do not give a value, wvt uses `Release`.
 
-- `Release` compiles with `-O3 -DNDEBUG`. Use this value for normal use. The waterfall and the
-  demodulators are much slower without optimization.
+- `Release` compiles with `-O3 -DNDEBUG` (the CMake default for GCC and clang). Use this value for
+  normal use. The waterfall and the demodulators are much slower without optimization.
 - `Debug` compiles with `-g` and no optimization. Use it with a debugger.
 - `RelWithDebInfo` compiles with optimization and debug symbols.
 
@@ -184,6 +185,15 @@ to [GPU processing](gpu.md).
 - On Linux, `ON` causes an error, and `AUTO` disables the backend.
 
 Output: `wvt: Metal support enabled (MPSGraph FFT; the GPU path needs macOS 14 at run time)`.
+
+### WVT_WERROR
+
+`ON` makes the compiler warnings in the wvt code errors (`-Werror`). The code in `third_party/` is
+not included. All CI build jobs use `ON`, so a change that adds a warning fails CI. All the wvt
+targets compile with `-Wall -Wextra -Wno-unused-parameter`.
+
+To add your own compiler flags, use `CMAKE_CXX_FLAGS` or `CMAKE_CXX_FLAGS_RELEASE`. wvt does not
+replace them.
 
 ### WVT_SANITIZE
 
