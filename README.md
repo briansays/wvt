@@ -12,6 +12,7 @@ that share one time axis. When you pan or zoom one plot, all the other plots fol
   view, or transmitted with a USRP.
 - **Audio:** AM, NFM, WFM, USB, LSB and CW demodulation to the speakers or to a WAV file.
 - **Region export:** a time range, and as an option a frequency band, to a new file.
+- **Plot snapshots:** PNG files of the plots, as they show on the screen.
 - **GPU processing:** CUDA on NVIDIA GPUs (Linux) and Metal on Apple GPUs (macOS).
 
 ## Quick start
@@ -42,6 +43,7 @@ sphinx-build -W -b html docs build/docs      # then open build/docs/index.html
 | [The file viewer](docs/viewer.md) | File formats, metadata, screen layout, linked views |
 | [Load a segment](docs/segments.md) | Work on a part of a large file |
 | [Export a region](docs/export.md) | Write a time range or a band to a new file |
+| [Plot snapshots](docs/snapshots.md) | Save the plots as PNG files |
 | [Live devices](docs/live.md) | RTL-SDR and USRP setup, the live view, recording |
 | [Signal generator](docs/siggen.md) | Waveforms, sweeps, playback, chains, outputs, transmit safety |
 | [Audio](docs/audio.md) | Demodulation, playback and WAV files |

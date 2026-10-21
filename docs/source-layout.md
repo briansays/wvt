@@ -12,6 +12,7 @@
 | `src/ui_util.*` | SI-unit inputs and formatters, the scrollbar widget, forms, the gear button, the color bar, the style |
 | `src/log.*` | The logger |
 | `src/json.*` | A small JSON reader (chain files) |
+| `src/snapshot.*`, `src/app_snapshot.cpp` | Plot snapshots: names, crop, PNG writer, the snapshot window and the capture |
 
 ## File viewer and signal processing
 
@@ -77,13 +78,14 @@
 | `tools/log_check.cpp` | The self-check for the logger |
 | `tools/segment_check.cpp` | The self-check for the time segment rules |
 | `tools/extract_check.cpp` | The self-check for the region export |
+| `tools/snapshot_check.cpp` | The self-check for the plot snapshots |
 | `tools/gpu_check.cpp` | The GPU self-check and benchmark |
 
 ## Other folders
 
 | Folder | Contents |
 |---|---|
-| `third_party/` | Dear ImGui 1.91.9, ImPlot 0.16 and miniaudio 0.11.25 |
+| `third_party/` | Dear ImGui 1.91.9, ImPlot 0.16, miniaudio 0.11.25 and stb_image_write 1.16 |
 | `cmake/` | `embed.cmake`, which puts the UI font in the binary |
 | `docs/` | These pages. `docs/design/` has the design records |
 | `.github/workflows/` | The CI jobs |

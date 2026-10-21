@@ -10,6 +10,7 @@
 #include "implot.h"
 #include "live.h"
 #include "siggen_out.h"
+#include "snapshot.h"
 #include "ui_util.h"
 
 class X11Window;
@@ -61,6 +62,11 @@ public:
     // Opens the export window with the channel's band when the channel
     // filter is on, else with the view.
     void openExport() { exportFrom(demod_.chanEnable ? 1 : 0); }
+    // Plot snapshots (issue #13): call after the frame is rendered. Writes the
+    // PNG files when an export is due on this frame.
+    void afterRender();
+    // Opens the snapshot window (File > Save plot snapshots..., the status bar button).
+    void openSnapshot() { snapOpen_ = true; }
 
 private:
     // UI sections
@@ -80,7 +86,7 @@ private:
     // plot helpers
     bool beginTimePlot(const char* id, const char* ylabel, float h, bool autoY, ImPlotFormatter yfmt = nullptr,
                        void* yud = nullptr, bool legend = false);
-    void endTimePlot();
+    void endTimePlot(SnapPlot p);
     void plotHeader(const char* name, bool* show, const ImVec4& col, const char* readout);
     void drawChannelOverlay(bool vertical);
     void drawFreqMarkers();
@@ -167,6 +173,17 @@ private:
     void startExport(bool overwrite);
     void pollExport();
 
+    // plot snapshots (app_snapshot.cpp, issue #13)
+    void drawSnapshotWindow();
+    void snapNote(SnapPlot p, ImVec2 a, ImVec2 b);  // where plot p is drawn on this frame
+    void snapNotePlot(SnapPlot p, float top = -1);  // the current ImPlot frame (from top, if given)
+    void snapNoteItem(SnapPlot p);                  // add the last item (the colour bar)
+    void snapClipToWindow();  // plots noted from now on are clipped to the current window
+    void snapClipReset();     // ... or not clipped (the default)
+    bool snapVisible(SnapPlot p) const;
+    std::string statusText() const;  // the status line, or a recent snapshot note
+    void saveSnapshots();
+
     // audio (app_audio.cpp)
     void drawAudioWindow();
     void drawAudioOverlay();
@@ -226,6 +243,25 @@ private:
     bool showIQ_ = true, showAM_ = true, showFM_ = true, showPM_ = true;
     bool autoY_[4] = {true, true, true, true};
     float plotH_ = 0;  // 0 = fit to window
+
+    // plot snapshots: the plot rectangles of the current frame, the clip of their
+    // window, and the frame number they are from (only that frame's are valid).
+    struct SnapArea {
+        ImVec2 a, b, clipA, clipB;
+        int frame = -1;
+    };
+    SnapArea snapArea_[kSnapPlots];
+    bool snapOpen_ = false;
+    bool snapSel_[kSnapPlots] = {true, true, true, true, true, true, true};
+    char snapDir_[1024] = "~/wvt-recordings/";
+    int snapCountdown_ = 0;  // frames until the capture; 0 = none due
+    ImVec2 snapMouse_;       // the pointer, put back after the capture
+    std::string snapErr_;      // the folder could not be made
+    float snapHeaderTop_ = 0;  // top of the current time plot's header
+    ImVec2 snapClipA_, snapClipB_;  // the clip for snapNote
+    std::string snapNoteMsg_;
+    bool snapNoteErr_ = false;
+    double snapNoteUntil_ = 0;
 
     // region export
     bool exOpen_ = false;

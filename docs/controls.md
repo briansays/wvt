@@ -13,6 +13,7 @@
 | Tune the channel | Ctrl+click the spectrum or the waterfall. Or drag the cyan lines: the center line moves the channel, and the edge lines change the bandwidth |
 | Play audio from a point | Shift+click a time plot or the waterfall |
 | Export a region | Right-click the waterfall |
+| Save plot snapshots | Click **Snapshot...** in the status bar |
 | Plot options | Right-click a time plot (I/Q, AM, FM, PM), or click its ⚙ button |
 
 ## Keyboard

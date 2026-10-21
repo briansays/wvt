@@ -9,7 +9,8 @@ recording. For all the build settings, refer to [Build reference](build.md).
 - CMake 3.16 or later. A CUDA build needs CMake 3.18 or later.
 - The X11 and OpenGL headers and libraries.
 
-The repository contains Dear ImGui 1.91.9, ImPlot 0.16 and miniaudio 0.11.25 in `third_party/`.
+The repository contains Dear ImGui 1.91.9, ImPlot 0.16, miniaudio 0.11.25 and stb_image_write 1.16
+in `third_party/`.
 Thus the build does not need network access. The UI font is in the binary.
 
 ## Install the packages

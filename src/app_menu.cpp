@@ -46,6 +46,7 @@ const Key kMouse[] = {
     {"Shift+click", "Play audio from there (waterfall and time plots)"},
     {"Right-click", "Waterfall: export menu. Time plot: its options."},
     {"Overview strip", "Click to jump, drag the box to move, drag its edges to resize"},
+    {"Snapshot...", "Status bar: save the plots as PNG files"},
 };
 
 void keyTable(const char* id, const Key* keys, size_t n) {
@@ -74,6 +75,7 @@ void App::drawMenuBar() {
         }
         ImGui::SetItemTooltip("Type or paste the path in the File box and press Enter");
         if (ImGui::MenuItem("Export region...", "Ctrl+E", exOpen_, !liveMode_ && file_)) toggleExport();
+        if (ImGui::MenuItem("Save plot snapshots...")) openSnapshot();
         ImGui::Separator();
         if (ImGui::MenuItem("Quit", "Ctrl+Q")) quit_ = true;
         ImGui::EndMenu();

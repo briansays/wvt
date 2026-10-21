@@ -31,7 +31,7 @@ jobs:
         run: cmake --build build -j "$(nproc)"
       - name: Self-tests
         run: |
-          for t in siggen_check audio_check log_check segment_check gpu_check extract_check; do
+          for t in siggen_check audio_check log_check segment_check gpu_check extract_check snapshot_check; do
             echo "::group::$t"
             ./build/$t
             echo "::endgroup::"
@@ -67,7 +67,7 @@ jobs:
         run: cmake --build build -j "$(nproc)"
       - name: Self-tests (no GPU, so the CUDA build must run on the CPU)
         run: |
-          for t in siggen_check audio_check log_check segment_check gpu_check extract_check; do
+          for t in siggen_check audio_check log_check segment_check gpu_check extract_check snapshot_check; do
             echo "::group::$t"
             ./build/$t
             echo "::endgroup::"

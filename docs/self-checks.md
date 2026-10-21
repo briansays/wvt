@@ -35,12 +35,13 @@ code if a check fails.
 | `build/log_check` | The logger: levels, options, the log file and threads |
 | `build/segment_check` | The time segment rules and the overview on a sample range |
 | `build/extract_check` | The region export: copies, the band filter, metadata, input checks and cancel |
+| `build/snapshot_check` | Plot snapshots: file names, numbering, the crop and the PNG files |
 | `build/gpu_check` | The GPU results against the CPU results. `--bench` measures the speed |
 
 To run all of them:
 
 ```sh
-for t in siggen_check audio_check log_check segment_check gpu_check extract_check; do
+for t in siggen_check audio_check log_check segment_check gpu_check extract_check snapshot_check; do
   ./build/$t || echo "$t FAILED"
 done
 ```

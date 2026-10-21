@@ -89,8 +89,10 @@ add_executable(wvt
   src/extract.cpp
   src/app_export.cpp
   src/app_menu.cpp
+  src/app_snapshot.cpp
+  src/snapshot.cpp
   ${FONT_CPP})
-target_include_directories(wvt PRIVATE src ${PLATFORM_INCLUDES})
+target_include_directories(wvt PRIVATE src third_party/stb ${PLATFORM_INCLUDES})
 target_link_libraries(wvt PRIVATE imgui_implot ${PLATFORM_LIBS} Threads::Threads)
 target_compile_options(wvt PRIVATE -Wall -Wextra -Wno-unused-parameter)
 
@@ -353,3 +355,8 @@ add_executable(gpu_check tools/gpu_check.cpp src/engine.cpp src/dsp.cpp src/iq_f
 target_include_directories(gpu_check PRIVATE src)
 target_link_libraries(gpu_check PRIVATE wvt_gpu imgui_implot Threads::Threads)
 target_compile_options(gpu_check PRIVATE -Wall -Wextra -Wno-unused-parameter)
+
+# Plot snapshot self-test (file names, numbering, crop, PNG writer)
+add_executable(snapshot_check tools/snapshot_check.cpp src/snapshot.cpp)
+target_include_directories(snapshot_check PRIVATE src third_party/stb)
+target_compile_options(snapshot_check PRIVATE -Wall -Wextra -Wno-unused-parameter)

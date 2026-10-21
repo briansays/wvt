@@ -16,6 +16,7 @@ is correct.
 | [UI cleanup](ui-cleanup-plan.md) | #12, #19 | Implemented (PR #26) |
 | [Signal generator sweeps](siggen-sweep-plan.md) | #28 | Implemented (PR #30) |
 | [Signal generator chains](siggen-chain-plan.md) | #27 | Implemented (PR #31) |
+| [Plot snapshots](plot-snapshot-plan.md) | #13 | Implemented |
 | [Signal Hound BB60](bb60-integration-plan.md) | #2 | Not merged. Needs the SDK and hardware |
 | [Epiq Sidekiq](sidekiq-integration-plan.md) | #4 | Plan only |
 
@@ -31,6 +32,7 @@ apple-gpu-plan
 ui-cleanup-plan
 siggen-sweep-plan
 siggen-chain-plan
+plot-snapshot-plan
 bb60-integration-plan
 sidekiq-integration-plan
 ```
