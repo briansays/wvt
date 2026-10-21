@@ -209,6 +209,6 @@ job uses it.
 | `bb_check` with the simulator (39 checks): rules, open errors, streaming rate, tone frequency, overload note, unplug, capture segments across two retunes | Done (macOS x86-64) |
 | The window with the simulator: device list, rate list, reference level, options popup, status bar | Done (Xvfb) |
 | `--record ... --no-gui` with the simulator: SigMF with `core:hw` | Done |
-| macOS ARM build against the real SDK: configures, links `@rpath/libbb_api.5.dylib` | Done. It runs only with ARM libusb (`/opt/homebrew`), which this computer does not have |
+| macOS ARM build against the real SDK, with the ARM Homebrew (RTL-SDR, UHD, BB60, Metal together) | Done: builds without warnings, all self-checks pass, `--list-devices` loads bb_api and shows "Signal Hound BB60 (none detected)", the window runs |
 | Linux x86-64 and ARM64 builds against the real SDK | To do |
 | The hardware test matrix of section 5.3 | To do (needs a BB60) |

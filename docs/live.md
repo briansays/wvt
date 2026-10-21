@@ -75,11 +75,17 @@ The SDK has libraries for these computers:
 | macOS ARM (Apple silicon) | `lib/macos_arm/libbb_api.5.x.dylib` | Needs libusb from the ARM Homebrew (`/opt/homebrew`): `brew install libusb`. The rates go down to 312.5 kS/s only (decimation up to 128) |
 
 :::{note}
-The macOS library is for ARM only. A wvt build for x86-64 (for example with the Intel Homebrew
-CMake and UHD) cannot use it. Make a separate ARM build:
-`cmake -S . -B build-arm -DCMAKE_OSX_ARCHITECTURES=arm64 -DSIGNALHOUND_SDK_DIR=...`. The x86-64
-UHD and librtlsdr libraries do not link in an ARM build, so add `-DWVT_WITH_UHD=OFF
--DWVT_WITH_RTLSDR=OFF`, or install the ARM versions of these libraries.
+The macOS library is for ARM only. A wvt build for x86-64 (for example with the Intel Homebrew in
+`/usr/local`) cannot use it. On Apple silicon, build with the ARM Homebrew in `/opt/homebrew`.
+Then all the backends (RTL-SDR, UHD, BB60, Metal) build together:
+
+```sh
+brew install cmake pkgconf libusb librtlsdr uhd      # the ARM Homebrew
+PATH=/opt/homebrew/bin:$PATH cmake -S . -B build -DSIGNALHOUND_SDK_DIR=$HOME/signal_hound_sdk
+PATH=/opt/homebrew/bin:$PATH cmake --build build -j
+```
+
+If CMake shows `this build is x86_64`, the CMake in the `PATH` is the Intel one.
 :::
 
 ## Start a stream

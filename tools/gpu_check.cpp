@@ -345,7 +345,16 @@ void testSpectrogram(const std::string& dir) {
         setenv("WVT_GPU_FORCE_FAIL", "1", 1);
         auto f = computeWaterfall(r, never);
         unsetenv("WVT_GPU_FORCE_FAIL");
-        check(f && !f->gpu && f->db == c->db, "a GPU failure falls back to the CPU result");
+        // The details go in the message, so that a failure says what differed.
+        size_t diff = 0;
+        if (f && f->db.size() == c->db.size())
+            for (size_t i = 0; i < f->db.size(); ++i) diff += f->db[i] != c->db[i];
+        check(f && !f->gpu && f->db == c->db,
+              "a GPU failure falls back to the CPU result" +
+                  (f ? " (gpu " + std::to_string(f->gpu) + ", " + std::to_string(f->fftsPerRow) + "/" +
+                           std::to_string(c->fftsPerRow) + " FFTs per row, " + std::to_string(diff) + " of " +
+                           std::to_string(c->db.size()) + " pixels differ)"
+                     : std::string(" (no result)")));
         check(!gpuSpectrogramUsable(), "after a failure the waterfall stays on the CPU");
         std::string e2;
         gpuInit(GpuMode::Auto, -1, e2);

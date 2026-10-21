@@ -377,7 +377,13 @@ void testCancel(const std::string& dir) {
     c.fHi = 2e3;
     ExtractJob job;
     const bool started = job.start(c, err);
-    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    // Cancel once the job has written part of the output (a fixed wait is too
+    // long on a fast computer: the job can finish first).
+    for (int i = 0; i < 2000 && started; ++i) {
+        const auto s = job.status();
+        if (s.progress > 0 || s.done) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
     job.cancel();
     const auto st = job.status();
     check(started && st.cancelled && !st.done && !exists(dir + "/cancel_out.sigmf-data") && !exists(dir + "/cancel_out.sigmf-meta"),
