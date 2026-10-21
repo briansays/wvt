@@ -55,3 +55,12 @@ sphinx-build -W -b html docs build/docs      # then open build/docs/index.html
 | [Self-checks](docs/self-checks.md) | Test signals, self-check programs, CI |
 | [Source layout](docs/source-layout.md) | The source files and their functions |
 | [Design records](docs/design/index.md) | The plan and decisions for each feature |
+
+## License
+
+wvt is released under the [MIT License](LICENSE).
+
+The bundled third-party code in [`third_party/`](third_party) keeps its own licenses:
+[Dear ImGui](third_party/imgui/LICENSE.txt) (MIT), [ImPlot](third_party/implot/LICENSE) (MIT),
+[miniaudio](third_party/miniaudio/LICENSE) (public domain or MIT-0) and
+[stb_image_write](third_party/stb/stb_image_write.h) (public domain or MIT).
