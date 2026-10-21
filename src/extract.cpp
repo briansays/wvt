@@ -11,6 +11,7 @@
 #include <regex>
 
 #include "gpu.h"
+#include "json.h"
 #include "log.h"
 #include "ui_util.h"
 
@@ -34,25 +35,6 @@ std::string stripExt(const std::string& path) {
         if (lp.size() > n && lp.compare(lp.size() - n, n, e) == 0) return path.substr(0, path.size() - n);
     }
     return path;
-}
-
-std::string num(double v, const char* f = "%.17g") {
-    char b[48];
-    snprintf(b, sizeof b, f, v);
-    return b;
-}
-
-std::string jsonText(const std::string& s) {
-    std::string o = "\"";
-    for (char ch : s) {
-        if (ch == '"' || ch == '\\') o += '\\';
-        if ((unsigned char)ch < 0x20) {
-            o += ' ';
-            continue;
-        }
-        o += ch;
-    }
-    return o + "\"";
 }
 
 bool sameFile(const std::string& a, const std::string& b) {
@@ -80,7 +62,9 @@ double freeSpace(const std::string& path) {
 
 // "%.6g" without a trailing "." or zeros.
 std::string shortNum(double v) {
-    std::string s = num(v, "%.6f");
+    char b[48];
+    snprintf(b, sizeof b, "%.6f", v);
+    std::string s = b;
     while (!s.empty() && s.back() == '0') s.pop_back();
     if (!s.empty() && s.back() == '.') s.pop_back();
     return s.empty() ? "0" : s;
@@ -219,13 +203,13 @@ bool ExtractJob::start(const ExtractConfig& c, std::string& err) {
     std::string band = c.fullBand ? "full band"
                                   : fmtSI(std::min(c.fLo, c.fHi), "Hz", 9) + " to " + fmtSI(std::max(c.fLo, c.fHi), "Hz", 9);
     rc.description = "Extract of " + name + ": " + fmtSI(c.s0 / s.fs, "s", 9) + " to " + fmtSI(c.s1 / s.fs, "s", 9) + ", " + band;
-    rc.extraGlobal = "\"wvt:extract\": {\"source\": " + jsonText(s.file->path()) + ", \"sample_start\": " + std::to_string(c.s0) +
-                     ", \"sample_count\": " + std::to_string(c.s1 - c.s0) + ", \"source_sample_rate\": " + num(s.fs) +
-                     ", \"source_frequency\": " + num(s.fc);
+    rc.extraGlobal = "\"wvt:extract\": {\"source\": " + jsonQuote(s.file->path()) + ", \"sample_start\": " + std::to_string(c.s0) +
+                     ", \"sample_count\": " + std::to_string(c.s1 - c.s0) + ", \"source_sample_rate\": " + jsonNumber(s.fs) +
+                     ", \"source_frequency\": " + jsonNumber(s.fc);
     if (!c.fullBand)
-        rc.extraGlobal += ", \"band\": [" + num(std::min(c.fLo, c.fHi)) + ", " + num(std::max(c.fLo, c.fHi)) +
+        rc.extraGlobal += ", \"band\": [" + jsonNumber(std::min(c.fLo, c.fHi)) + ", " + jsonNumber(std::max(c.fLo, c.fHi)) +
                           "], \"decimation\": " + std::to_string(plan_.decim) + ", \"taps\": " + std::to_string(plan_.taps) +
-                          ", \"cutoff\": " + num(plan_.cutoff) + ", \"filter\": \"Blackman windowed sinc\"";
+                          ", \"cutoff\": " + jsonNumber(plan_.cutoff) + ", \"filter\": \"Blackman windowed sinc\"";
     rc.extraGlobal += "}";
     if (!rec_.start(ring_, rs, rc, err)) return false;
 

@@ -11,7 +11,7 @@
 | `src/app_menu.cpp` | The menu bar, the keyboard help and the About window |
 | `src/ui_util.*` | SI-unit inputs and formatters, the scrollbar widget, forms, the gear button, the color bar, the style |
 | `src/log.*` | The logger |
-| `src/json.*` | A small JSON reader (chain files) |
+| `src/json.*` | The JSON module: a small reader (chain files, SigMF metadata) and the writer functions `jsonQuote` and `jsonNumber` |
 | `src/snapshot.*`, `src/app_snapshot.cpp` | Plot snapshots: names, crop, PNG writer, the snapshot window and the capture |
 
 ## File viewer and signal processing

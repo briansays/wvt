@@ -476,7 +476,7 @@ target_compile_options(siggen_check PRIVATE ${WVT_WARNINGS})
 
 # Audio demodulator self-test (no sound device needed)
 add_executable(audio_check tools/audio_check.cpp src/audio_dsp.cpp src/wav_writer.cpp src/recorder.cpp
-  src/iq_file.cpp src/dsp.cpp src/log.cpp)
+  src/iq_file.cpp src/json.cpp src/dsp.cpp src/log.cpp)
 target_include_directories(audio_check PRIVATE src)
 target_link_libraries(audio_check PRIVATE Threads::Threads)
 target_compile_options(audio_check PRIVATE ${WVT_WARNINGS})
@@ -488,21 +488,22 @@ target_link_libraries(log_check PRIVATE Threads::Threads)
 target_compile_options(log_check PRIVATE ${WVT_WARNINGS})
 
 # Time segment self-test (segment rules, overview on a sample range)
-add_executable(segment_check tools/segment_check.cpp src/engine.cpp src/dsp.cpp src/iq_file.cpp src/ui_util.cpp
-  src/log.cpp)
+add_executable(segment_check tools/segment_check.cpp src/engine.cpp src/dsp.cpp src/iq_file.cpp src/json.cpp
+  src/ui_util.cpp src/log.cpp)
 target_include_directories(segment_check PRIVATE src)
 target_link_libraries(segment_check PRIVATE wvt_gpu imgui_implot Threads::Threads)
 target_compile_options(segment_check PRIVATE ${WVT_WARNINGS})
 
 # Region export self-test (copies, band filter, metadata, checks, cancel)
 add_executable(extract_check tools/extract_check.cpp src/extract.cpp src/recorder.cpp src/engine.cpp src/dsp.cpp
-  src/iq_file.cpp src/ui_util.cpp src/log.cpp)
+  src/iq_file.cpp src/json.cpp src/ui_util.cpp src/log.cpp)
 target_include_directories(extract_check PRIVATE src)
 target_link_libraries(extract_check PRIVATE wvt_gpu imgui_implot Threads::Threads)
 target_compile_options(extract_check PRIVATE ${WVT_WARNINGS})
 
 # GPU self-test and benchmark (CPU times; GPU vs CPU once a GPU backend exists)
-add_executable(gpu_check tools/gpu_check.cpp src/engine.cpp src/dsp.cpp src/iq_file.cpp src/ui_util.cpp src/log.cpp)
+add_executable(gpu_check tools/gpu_check.cpp src/engine.cpp src/dsp.cpp src/iq_file.cpp src/json.cpp src/ui_util.cpp
+  src/log.cpp)
 target_include_directories(gpu_check PRIVATE src)
 target_link_libraries(gpu_check PRIVATE wvt_gpu imgui_implot Threads::Threads)
 target_compile_options(gpu_check PRIVATE ${WVT_WARNINGS})
@@ -558,7 +559,7 @@ if(WVT_FUZZ)
   set(_fuzz_json src/json.cpp)
   set(_fuzz_chain src/siggen.cpp src/siggen_out.cpp src/json.cpp src/recorder.cpp src/sdr_device.cpp src/sdr_sim.cpp
     src/sdr_siggen.cpp src/iq_file.cpp src/dsp.cpp src/ui_util.cpp src/log.cpp)
-  set(_fuzz_meta src/iq_file.cpp src/log.cpp)
+  set(_fuzz_meta src/iq_file.cpp src/json.cpp src/log.cpp)
   set(_fuzz_parse_si src/ui_util.cpp src/log.cpp)
   foreach(_f json chain meta parse_si)
     add_executable(fuzz_${_f} tools/fuzz/fuzz_${_f}.cpp ${_fuzz_${_f}})

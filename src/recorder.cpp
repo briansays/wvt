@@ -14,6 +14,7 @@
 #include <cstring>
 #include <ctime>
 
+#include "json.h"
 #include "log.h"
 
 namespace {
@@ -32,33 +33,6 @@ std::string isoTime(double t) {
     snprintf(buf, sizeof buf, "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
              tm.tm_hour, tm.tm_min, tm.tm_sec, ms);
     return buf;
-}
-
-std::string jsonEscape(const std::string& s) {
-    std::string o;
-    for (char c : s) {
-        switch (c) {
-            case '"': o += "\\\""; break;
-            case '\\': o += "\\\\"; break;
-            case '\n': o += "\\n"; break;
-            case '\t': o += "\\t"; break;
-            default:
-                if ((unsigned char)c < 0x20) {
-                    char b[8];
-                    snprintf(b, sizeof b, "\\u%04x", c);
-                    o += b;
-                } else {
-                    o += c;
-                }
-        }
-    }
-    return o;
-}
-
-std::string num(double v) {
-    char b[40];
-    snprintf(b, sizeof b, "%.17g", v);
-    return b;
 }
 
 // "%.6f" without trailing zeros, keeping at least `keep` decimals.
@@ -380,18 +354,18 @@ bool Recorder::writeMeta(std::string& err) {
         metaPath = metaPath_;
         j += "{\n  \"global\": {\n";
         j += "    \"core:datatype\": \"" + std::string(sigmfType(cfg_.cf32 ? SampleFormat::CF32 : src_.fmt)) + "\",\n";
-        j += "    \"core:sample_rate\": " + num(src_.rate) + ",\n";
+        j += "    \"core:sample_rate\": " + jsonNumber(src_.rate) + ",\n";
         j += "    \"core:version\": \"1.0.0\",\n";
         j += "    \"core:recorder\": \"wvt\",\n";
-        if (!src_.hw.empty()) j += "    \"core:hw\": \"" + jsonEscape(src_.hw) + "\",\n";
-        if (!cfg_.description.empty()) j += "    \"core:description\": \"" + jsonEscape(cfg_.description) + "\",\n";
+        if (!src_.hw.empty()) j += "    \"core:hw\": " + jsonQuote(src_.hw) + ",\n";
+        if (!cfg_.description.empty()) j += "    \"core:description\": " + jsonQuote(cfg_.description) + ",\n";
         if (!cfg_.extraGlobal.empty()) j += "    " + cfg_.extraGlobal + ",\n";
         j += "    \"core:num_channels\": 1\n  },\n  \"captures\": [";
         for (size_t i = 0; i < captures_.size(); ++i) {
             const auto& c = captures_[i];
             j += std::string(i ? "," : "") + "\n    {\"core:sample_start\": " + std::to_string(c.start) +
-                 ", \"core:frequency\": " + num(c.fc);
-            if (!c.datetime.empty()) j += ", \"core:datetime\": \"" + c.datetime + "\"";
+                 ", \"core:frequency\": " + jsonNumber(c.fc);
+            if (!c.datetime.empty()) j += ", \"core:datetime\": " + jsonQuote(c.datetime);
             j += "}";
         }
         j += "\n  ],\n  \"annotations\": [";
@@ -402,8 +376,8 @@ bool Recorder::writeMeta(std::string& err) {
             const auto& a = annotations_[i];
             j += std::string(i ? "," : "") + "\n    {\"core:sample_start\": " + std::to_string(a.start);
             if (a.count > 0) j += ", \"core:sample_count\": " + std::to_string(a.count);
-            if (!a.label.empty()) j += ", \"core:label\": \"" + jsonEscape(a.label) + "\"";
-            if (!a.comment.empty()) j += ", \"core:comment\": \"" + jsonEscape(a.comment) + "\"";
+            if (!a.label.empty()) j += ", \"core:label\": " + jsonQuote(a.label);
+            if (!a.comment.empty()) j += ", \"core:comment\": " + jsonQuote(a.comment);
             j += "}";
         }
         j += annotations_.empty() ? "]\n}\n" : "\n  ]\n}\n";

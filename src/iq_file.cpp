@@ -15,6 +15,7 @@
 #include <regex>
 #include <sstream>
 
+#include "json.h"
 #include "log.h"
 
 const char* formatName(SampleFormat f) {
@@ -215,27 +216,6 @@ bool parseFormatName(const std::string& in, SampleFormat& fmt, bool& bigEndian) 
     return true;
 }
 
-// Finds `"key"` in a JSON-ish text and returns the raw value token after ':'.
-static bool jsonValue(const std::string& text, const std::string& key, std::string& out) {
-    size_t p = text.find("\"" + key + "\"");
-    if (p == std::string::npos) return false;
-    p = text.find(':', p + key.size() + 2);
-    if (p == std::string::npos) return false;
-    ++p;
-    while (p < text.size() && std::isspace((unsigned char)text[p])) ++p;
-    if (p >= text.size()) return false;
-    if (text[p] == '"') {
-        size_t e = text.find('"', p + 1);
-        if (e == std::string::npos) return false;
-        out = text.substr(p + 1, e - p - 1);
-    } else {
-        size_t e = p;
-        while (e < text.size() && (std::isdigit((unsigned char)text[e]) || strchr("+-.eE", text[e]))) ++e;
-        out = text.substr(p, e - p);
-    }
-    return !out.empty();
-}
-
 // "2026-10-20T13:50:22.125Z" (SigMF core:datetime, UTC) -> seconds since
 // 1970; 0 when it does not parse.
 double parseIsoTime(const std::string& s) {
@@ -273,13 +253,38 @@ static FileMetaGuess guessMetaImpl(const std::string& path) {
         if (in) {
             std::stringstream ss;
             ss << in.rdbuf();
-            std::string text = ss.str(), v;
-            if (jsonValue(text, "core:datatype", v) && parseFormatName(v, g.fmt, g.bigEndian)) g.haveFmt = true;
-            if (jsonValue(text, "core:sample_rate", v)) { g.rate = atof(v.c_str()); g.haveRate = g.rate > 0; }
-            if (jsonValue(text, "core:frequency", v)) { g.fc = atof(v.c_str()); g.haveFc = true; }
-            if (jsonValue(text, "core:datetime", v)) g.startTime = parseIsoTime(v);
-            g.source = "SigMF metadata";
-            return g;
+            JsonValue meta;
+            std::string err;
+            if (parseJson(ss.str(), meta, err)) {
+                // SigMF puts the datatype and the rate in "global", the frequency and the
+                // time in each capture; the first capture describes sample 0. A key in the
+                // other place is accepted too.
+                const JsonValue* caps = meta.get("captures");
+                const JsonValue* cap0 = caps && !caps->arr.empty() ? &caps->arr[0] : nullptr;
+                const JsonValue* global = meta.get("global");
+                auto find = [&](const char* key, JsonValue::Type type) -> const JsonValue* {
+                    for (const JsonValue* o : {global, cap0}) {
+                        const JsonValue* v = o ? o->get(key) : nullptr;
+                        if (v && v->type == type) return v;
+                    }
+                    return nullptr;
+                };
+                using T = JsonValue::Type;
+                if (const JsonValue* v = find("core:datatype", T::String); v && parseFormatName(v->str, g.fmt, g.bigEndian))
+                    g.haveFmt = true;
+                if (const JsonValue* v = find("core:sample_rate", T::Number)) {
+                    g.rate = v->num;
+                    g.haveRate = std::isfinite(g.rate) && g.rate > 0;
+                }
+                if (const JsonValue* v = find("core:frequency", T::Number); v && std::isfinite(v->num)) {
+                    g.fc = v->num;
+                    g.haveFc = true;
+                }
+                if (const JsonValue* v = find("core:datetime", T::String)) g.startTime = parseIsoTime(v->str);
+                g.source = "SigMF metadata";
+                return g;
+            }
+            LOG_WARN("file", "SigMF metadata %s is not valid JSON (%s); guessing from the name", metaPath.c_str(), err.c_str());
         }
     }
 

@@ -11,6 +11,7 @@
 #include <complex>
 #include <cstdio>
 #include <fstream>
+#include <random>
 #include <sstream>
 #include <string>
 #include <sys/stat.h>
@@ -1107,6 +1108,49 @@ int main(int argc, char** argv) {
         remove(pa.c_str());
         remove(pb.c_str());
         remove(pc.c_str());
+    }
+
+    // --- the JSON writer and the SigMF reader (issue #54) ---
+    {
+        check(jsonNumber(915e6) == "915000000" && jsonNumber(0.1) == "0.1" && jsonNumber(-2.5e-7) == "-2.5e-07" &&
+                  jsonNumber(NAN) == "null" && jsonNumber(INFINITY) == "null",
+              "jsonNumber: plain digits, no NaN or infinity",
+              jsonNumber(915e6) + " " + jsonNumber(0.1) + " " + jsonNumber(-2.5e-7) + " " + jsonNumber(NAN));
+        bool same = true;
+        std::mt19937_64 rng(12345);
+        std::uniform_real_distribution<double> mant(-1, 1);
+        std::uniform_int_distribution<int> expo(-20, 20);
+        for (int i = 0; i < 1000 && same; ++i) {
+            const double v = mant(rng) * std::pow(10.0, expo(rng));
+            JsonValue j;
+            std::string e;
+            same = parseJson(jsonNumber(v), j, e) && j.num == v;
+        }
+        check(same, "jsonNumber: 1000 values read back exactly");
+        const std::string text = std::string("a \"q\" \\ / \n\t\x01 \xc2\xb5 end");
+        JsonValue j;
+        std::string e;
+        check(parseJson("{\"k\": " + jsonQuote(text) + "}", j, e) && j.string("k") == text,
+              "jsonQuote: quotes, backslash and control characters read back", e);
+
+        const std::string meta = "/tmp/wvt_siggen_check_meta.sigmf-meta";
+        auto guess = [&](const std::string& body) {
+            std::ofstream(meta) << body;
+            return guessMeta(meta);
+        };
+        FileMetaGuess g = guess(R"({"global": {"core:datatype": "ci16_le", "core:sample_rate": 2.4e6},
+            "captures": [{"core:sample_start": 0, "core:frequency": 915e6, "core:datetime": "2026-10-21T12:00:00Z"},
+                         {"core:sample_start": 100, "core:frequency": 433e6}],
+            "annotations": [{"core:sample_start": 0, "core:frequency": 1}]})");
+        check(g.haveFmt && g.fmt == SampleFormat::CI16 && g.haveRate && g.rate == 2.4e6 && g.haveFc && g.fc == 915e6 &&
+                  g.startTime == parseIsoTime("2026-10-21T12:00:00Z") && g.source == "SigMF metadata",
+              "SigMF: global datatype and rate, frequency and time of the first capture",
+              fmt("rate %g fc %g", g.rate, g.fc));
+        g = guess(R"({"global": {"core:sample_rate": "fast"}, "captures": []})");
+        check(!g.haveRate && !g.haveFc && g.source == "SigMF metadata", "SigMF: a string rate and no captures give no values");
+        g = guess("{\"global\": {\"core:sample_rate\": 2e6");
+        check(g.source != "SigMF metadata", "SigMF: invalid JSON falls back to the file name", g.source);
+        remove(meta.c_str());
     }
 
     // --- JSON reader ---

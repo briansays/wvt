@@ -1,7 +1,9 @@
 #pragma once
-// A small JSON reader (issue #27, chain files): objects, arrays, strings,
-// numbers, true / false / null. Enough for wvt's own files; not a validator
-// for every corner of RFC 8259 (it accepts what it can read).
+// wvt's one JSON module (issue #54). The reader (issue #27, chain files)
+// handles objects, arrays, strings, numbers, true / false / null: enough for
+// wvt's own files and SigMF metadata, not a validator for every corner of
+// RFC 8259 (it accepts what it can read). The writer is two functions,
+// jsonQuote and jsonNumber; the files that write JSON keep their own layout.
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -33,3 +35,7 @@ bool parseJson(const std::string& text, JsonValue& out, std::string& err);
 
 // A JSON string literal, quotes included, with the needed escapes.
 std::string jsonQuote(const std::string& s);
+
+// A JSON number: the fewest digits (%g, 15 to 17) that read back as the same
+// double ("0.1", "915000000", "1e+21"). NaN and infinity are not JSON: "null".
+std::string jsonNumber(double v);
