@@ -233,6 +233,31 @@ Safety and limits:
 - Between pulses, the USRP transmits zeros. Thus a small LO leakage stays at the center frequency.
   A non-zero offset keeps the signal away from this leakage.
 
+### Transmit limits
+
+For a lab, you can set limits that wvt cannot go past. The command line and the window both obey
+them.
+
+| Limit | Option | Environment variable |
+|---|---|---|
+| The maximum TX gain, in dB | `--tx-max-gain DB` | `WVT_TX_MAX_GAIN` |
+| The frequency bands where wvt can transmit | `--tx-allow LO:HI[,LO:HI...]` | `WVT_TX_ALLOW` |
+
+- An option replaces the value of its environment variable.
+- The full transmit band (the center frequency ± half the sample rate) must be in one allowed
+  band, because the generator can put a signal anywhere in that band.
+- wvt does not start a transmission, change the gain or change the frequency past a limit. The
+  TX gain slider stops at the maximum gain. The **Transmit** dialog shows the limits, and why it
+  cannot transmit.
+- If the value of an environment variable is not correct, wvt does not start.
+
+For example, put this in your shell profile:
+
+```sh
+export WVT_TX_MAX_GAIN=30
+export WVT_TX_ALLOW=902M:928M,2.4G:2.4835G
+```
+
 ## Command line
 
 `-c` sets the center frequency and `-r` sets the sample rate.
@@ -276,7 +301,15 @@ Safety and limits:
 | `--tx-gain DB` | The transmit gain (default 0 dB) |
 | `--tx-args ARGS` | The UHD device arguments. The default is the first USRP found |
 | `--tx-antenna NAME` | The transmit port. The default is the first transmit port of the channel |
+| `--tx-dry-run` | Show what `--tx` transmits, check the limits, then stop. wvt does not open the USRP |
+| `--tx-confirm` | Transmit, and do not ask first. Use this in a script |
+| `--tx-max-gain DB` | The maximum TX gain (see [Transmit limits](#transmit-limits)) |
+| `--tx-allow LO:HI[,LO:HI...]` | The bands where wvt can transmit (see [Transmit limits](#transmit-limits)) |
 | `--usrp-channel N`, `--ref SRC` | The USRP channel and reference, as for the receiver |
+
+Before `--tx` transmits, wvt shows the signal, the frequency, the rate, the gain, the device, the
+duration and the limits. Then it asks you to type `yes`. If the input is not a terminal (for
+example, in a script), wvt cannot ask: it stops, unless you give `--tx-confirm`.
 
 ### Examples
 
@@ -289,6 +322,8 @@ wvt --sweep -1M:1M --sweep-time 10m --level-sweep -40:-6 -r 5M -c 915M --gen-out
 wvt --sweep -200k:200k --sweep-step 25k:5m -r 1M -c 915M --tx --tx-gain 10        # stepped, transmit
 wvt --gen pulsed --pri 1m --pw 20u --sweep -2M:2M --sweep-step 500k:10m --level-sweep -30:-6 -r 10M -c 915M
 wvt --gen cw --offset 100k -c 915M -r 1M --tx --tx-gain 10 --gen-duration 5         # transmit 5 s
+wvt --gen cw --offset 100k -c 915M -r 1M --tx-gain 10 --tx-dry-run                   # only show the plan
+wvt --gen cw -c 915M -r 1M --tx --tx-confirm --tx-max-gain 20 --gen-duration 5      # from a script
 wvt --play ~/caps/b13_*.sigmf-meta --play-gap 5m --gen-out ~/caps/b13x10 --gen-pulses 10  # 10 plays
 wvt --play capture.cs16 --play-rate 2.4M -r 10M -c 915M --play-segment 1.5:0.2 --tx    # replay a burst
 wvt --chain-add ~/caps/b13.sigmf-meta:3 --chain-add ~/caps/lfm.sigmf-meta@250k --chain-loops 5 --tx

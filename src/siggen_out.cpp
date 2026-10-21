@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
+#include <cstdio>
 #include <vector>
 
 #include "dsp.h"
@@ -182,6 +184,80 @@ void FileGenJob::run() {
 // ---------------------------------------------------------------------------
 // Transmit
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Transmit limits (issue #49)
+// ---------------------------------------------------------------------------
+bool parseTxBands(const std::string& s, std::vector<TxBand>& out, std::string& err) {
+    out.clear();
+    size_t pos = 0;
+    while (pos <= s.size()) {
+        size_t end = s.find(',', pos);
+        if (end == std::string::npos) end = s.size();
+        const std::string item = s.substr(pos, end - pos);
+        const size_t colon = item.find(':');
+        TxBand b;
+        if (colon == std::string::npos || !parseSI(item.substr(0, colon).c_str(), b.lo) ||
+            !parseSI(item.substr(colon + 1).c_str(), b.hi) || !(b.lo >= 0) || !(b.hi > b.lo)) {
+            err = "bad band '" + item + "': want LO:HI with LO < HI, e.g. 902M:928M";
+            return false;
+        }
+        out.push_back(b);
+        pos = end + 1;
+    }
+    return true;
+}
+
+bool txLimitsFromEnv(TxLimits& l, std::string& err) {
+    if (const char* v = envVar("WVT_TX_MAX_GAIN"); v && *v) {
+        if (!parseSI(v, l.maxGain)) {
+            err = std::string("WVT_TX_MAX_GAIN: bad value '") + v + "'";
+            return false;
+        }
+    }
+    if (const char* v = envVar("WVT_TX_ALLOW"); v && *v) {
+        if (!parseTxBands(v, l.allow, err)) {
+            err = "WVT_TX_ALLOW: " + err;
+            return false;
+        }
+    }
+    return true;
+}
+
+namespace {
+std::string bandText(double lo, double hi) { return fmtSI(lo, "Hz", 9) + " to " + fmtSI(hi, "Hz", 9); }
+}  // namespace
+
+bool txFreqAllowed(const TxLimits& l, double fc, double rate, std::string& err) {
+    if (l.allow.empty()) return true;
+    const double lo = fc - rate / 2, hi = fc + rate / 2;
+    for (const TxBand& b : l.allow)
+        if (lo >= b.lo - 1 && hi <= b.hi + 1) return true;
+    err = "the transmit band " + bandText(lo, hi) + " (center " + fmtSI(fc, "Hz", 9) + " +- rate/2) is not inside an allowed band (" +
+          describeTxLimits({NAN, l.allow}) + "; --tx-allow or WVT_TX_ALLOW)";
+    return false;
+}
+
+bool txGainAllowed(const TxLimits& l, double db, std::string& err) {
+    if (std::isnan(l.maxGain) || db <= l.maxGain + 1e-9) return true;
+    char buf[160];
+    snprintf(buf, sizeof buf, "transmit gain %.2f dB is above the limit of %.2f dB (--tx-max-gain or WVT_TX_MAX_GAIN)", db,
+             l.maxGain);
+    err = buf;
+    return false;
+}
+
+std::string describeTxLimits(const TxLimits& l) {
+    std::string s;
+    if (!std::isnan(l.maxGain)) {
+        char buf[48];
+        snprintf(buf, sizeof buf, "max gain %.2f dB", l.maxGain);
+        s = buf;
+    }
+    for (size_t i = 0; i < l.allow.size(); ++i)
+        s += (i ? ", " : s.empty() ? "" : "; ") + bandText(l.allow[i].lo, l.allow[i].hi);
+    return s.empty() ? "none" : s;
+}
+
 bool TxEngine::start(const TxConfig& cfg, std::string& err) {
     stop();
     WaveformParams p = sigGenBus().get();
@@ -192,6 +268,10 @@ bool TxEngine::start(const TxConfig& cfg, std::string& err) {
         LOG_DEBUG("tx", "rejected: %s", err.c_str());
         return false;
     }
+    if (!txGainAllowed(cfg.limits, cfg.gain, err) || !txFreqAllowed(cfg.limits, cfg.fc, cfg.rate, err)) {
+        LOG_DEBUG("tx", "outside the limits: %s", err.c_str());
+        return false;
+    }
     // Load the recordings now, not in the transmit thread where it would underflow.
     if (!preload(p, err)) {
         LOG_DEBUG("tx", "playback file: %s", err.c_str());
@@ -200,6 +280,11 @@ bool TxEngine::start(const TxConfig& cfg, std::string& err) {
     auto tx = openTx(cfg, err);
     if (!tx) {
         LOG_DEBUG("tx", "open failed: %s", err.c_str());
+        return false;
+    }
+    // The device rounds the gain, rate and frequency: check what it set too.
+    if (!txGainAllowed(cfg.limits, tx->gain(), err) || !txFreqAllowed(cfg.limits, tx->centerFreq(), tx->sampleRate(), err)) {
+        LOG_DEBUG("tx", "outside the limits after setup: %s", err.c_str());
         return false;
     }
     // The transmitter is tuned to the generator's fc, so the generator needs no extra shift.
@@ -213,6 +298,7 @@ bool TxEngine::start(const TxConfig& cfg, std::string& err) {
     if (!tx->notes().empty()) LOG_WARN("tx", "%s", tx->notes().c_str());
     gen_ = std::move(gen);
     tx_ = std::move(tx);
+    limits_ = cfg.limits;
     return true;
 }
 
@@ -231,6 +317,10 @@ void TxEngine::stop() {
 
 bool TxEngine::setCenterFreq(double hz, std::string& err) {
     if (!tx_) return false;
+    if (!txFreqAllowed(limits_, hz, tx_->sampleRate(), err)) {
+        LOG_DEBUG("tx", "retune refused: %s", err.c_str());
+        return false;
+    }
     if (!tx_->setCenterFreq(hz, err)) {
         LOG_DEBUG("tx", "retune to %s failed: %s", fmtSI(hz, "Hz", 9).c_str(), err.c_str());
         return false;
@@ -241,8 +331,19 @@ bool TxEngine::setCenterFreq(double hz, std::string& err) {
 
 bool TxEngine::setGain(double db, std::string& err) {
     if (!tx_) return false;
+    if (!txGainAllowed(limits_, db, err)) {
+        LOG_DEBUG("tx", "gain change refused: %s", err.c_str());
+        return false;
+    }
+    const double prev = tx_->gain();
     if (!tx_->setGain(db, err)) {
         LOG_DEBUG("tx", "gain change failed: %s", err.c_str());
+        return false;
+    }
+    if (!txGainAllowed(limits_, tx_->gain(), err)) {  // the device rounded it up
+        std::string e;
+        tx_->setGain(prev, e);
+        LOG_DEBUG("tx", "gain change refused: %s", err.c_str());
         return false;
     }
     LOG_INFO("tx", "transmit gain %.2f dB", tx_->gain());

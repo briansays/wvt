@@ -913,9 +913,13 @@ void App::drawSigGenTx() {
         ImGui::EndDisabled();
 
         row("TX gain");
+        const TxLimits& lim = txCfg_.limits;
         const GainRange g = txOn ? txStats_.range : GainRange{0, 89.75, 0.25, {}, false};
+        const double gMax = std::isnan(lim.maxGain) ? g.max : std::clamp(lim.maxGain, g.min, g.max);
+        if (!txOn && txCfg_.gain > gMax) txCfg_.gain = gMax;
         float gain = (float)txCfg_.gain;
-        if (ImGui::SliderFloat("##txgain", &gain, (float)g.min, (float)g.max, "%.2f dB")) {
+        if (ImGui::SliderFloat("##txgain", &gain, (float)g.min, (float)gMax, "%.2f dB",
+                               ImGuiSliderFlags_AlwaysClamp)) {
             txCfg_.gain = gain;
             std::string err;
             if (txOn && !tx_->setGain(gain, err)) {
@@ -926,6 +930,13 @@ void App::drawSigGenTx() {
         tooltipAlways(txOn ? "Transmit gain of this USRP. Start low."
                            : "Transmit gain (B200/B205: 0-89.75 dB; the slider shows the device's range while it\n"
                              "transmits). Start low: a B2xx gives about 0 dBm near the top of the range.");
+        if (lim.any()) {
+            row("Limits");
+            ImGui::TextWrapped("%s", describeTxLimits(lim).c_str());
+            tooltipAlways("Set with --tx-max-gain and --tx-allow, or WVT_TX_MAX_GAIN and WVT_TX_ALLOW.\n"
+                          "wvt refuses a gain above the maximum, and a frequency where the band\n"
+                          "center +- rate/2 is not inside an allowed band.");
+        }
         ImGui::EndTable();
     }
 
@@ -970,15 +981,26 @@ void App::drawSigGenTx() {
                     fmtSI(sg_.rate, "S/s", 6).c_str(), txCfg_.gain, txAntenna_[0] ? txAntenna_ : "default",
                     txCfg_.channel);
         ImGui::Text("Device: %s", txArgs_[0] ? txArgs_ : "the first USRP found");
+        std::string limErr;
+        const bool inLimits = txGainAllowed(txCfg_.limits, txCfg_.gain, limErr) &&
+                              txFreqAllowed(txCfg_.limits, sg_.fc, sg_.rate, limErr);
+        if (txCfg_.limits.any()) ImGui::Text("Limits: %s", describeTxLimits(txCfg_.limits).c_str());
         ImGui::PushTextWrapPos(fs * 30);
         ImGui::TextDisabled("%s", describeParams(sg_).c_str());
         ImGui::Spacing();
         ImGui::TextUnformatted("Only transmit into a dummy load or an attenuated cable, or on a frequency and power "
                                "you are licensed for. Never connect a transmit port straight to a receiver input "
                                "without at least 30 dB of attenuation.");
+        if (!inLimits) {
+            ImGui::Spacing();
+            ImGui::TextColored(kColErr, "Not allowed: %s", limErr.c_str());
+        }
         ImGui::PopTextWrapPos();
         ImGui::Spacing();
-        if (redButton("Transmit")) {
+        ImGui::BeginDisabled(!inLimits);
+        const bool go = redButton("Transmit");
+        ImGui::EndDisabled();
+        if (go) {
             startTx();
             txArmed_ = false;
             ImGui::CloseCurrentPopup();
