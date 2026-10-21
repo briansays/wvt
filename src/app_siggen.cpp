@@ -252,8 +252,12 @@ void App::drawSigGenWaveform() {
         if (InputSI("##sgfc", &p.fc, "Hz", -FLT_MIN) && txOn) {
             std::string err;
             if (!tx_->setCenterFreq(p.fc, err)) {
-                status_ = "Transmit tune failed: " + err;
                 LOG_ERROR("app", "transmit tune failed: %s", err.c_str());
+                // Show where the transmitter is, not the frequency that failed (issue #40).
+                txStats_ = tx_->stats();
+                p.fc = txStats_.fc;
+                if (!txStats_.error.empty()) stopTx("Transmitter stopped: " + txStats_.error);
+                else status_ = "Transmit tune failed: " + err;
             }
         }
         tooltipAlways("RF center frequency: the transmit tuning and the file's frequency.\n"
