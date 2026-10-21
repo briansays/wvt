@@ -1055,6 +1055,40 @@ int main(int argc, char** argv) {
         remove(cf.c_str());
         check(!loadChain(dir + "/no-such.wvtchain.json", r, err), "a missing chain file is an error", err);
 
+        // Bad numbers in a chain file (issue #39): a negative header put sample 0
+        // before the mapped file, and casting a huge count was undefined.
+        auto chainWith = [&](const std::string& item, const std::string& top) {
+            std::ofstream(cf) << "{\"wvt_chain\": 1" << top << ", \"items\": [{\"path\": " << jsonQuote(pa) << item << "}]}";
+            const bool ok = loadChain(cf, r, err);
+            remove(cf.c_str());
+            return ok;
+        };
+        const bool negLoads = chainWith(", \"header_bytes\": -65536", "");
+        check(negLoads && r.chain[0].fp.headerBytes == -65536 && !checkParams(r).ok(),
+              "chain file: a negative header loads, then checkParams() rejects it",
+              negLoads && !checkParams(r).ok() ? checkParams(r).errors.front() : err);
+        if (negLoads) {
+            check(!loadPlayback(chainItemParams(r, 0), err), "chain file: playback refuses a negative header", err);
+            forgetPlayback();
+        }
+        check(!chainWith(", \"repeats\": 1e30", "") && err.find("repeats must be a whole number") != std::string::npos,
+              "chain file: rejects repeats 1e30", err);
+        check(!chainWith(", \"header_bytes\": 1.5", "") && err.find("header_bytes") != std::string::npos,
+              "chain file: rejects a fractional header", err);
+        check(!chainWith("", ", \"loops\": -1e300") && err.find("loops") != std::string::npos, "chain file: rejects loops -1e300",
+              err);
+        {
+            std::string e;
+            auto f = IqFile::open(pa, e);
+            FormatParams fp;
+            fp.headerBytes = -65536;
+            std::vector<::cf> x(64, ::cf(1, 1));
+            if (f) f->read(fp, 0, (int64_t)x.size(), x.data());
+            bool zero = true;
+            for (const ::cf& s : x) zero &= s == ::cf(0, 0);
+            check(f && f->numSamples(fp) == 0 && zero, "IqFile: a negative header gives no samples (zero-filled read)", e);
+        }
+
         // The cache keeps waveforms in use and drops the least recently used others.
         forgetPlayback();
         setPlaybackCacheBudget(2000);

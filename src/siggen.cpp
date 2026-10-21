@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <climits>
 #include <cstdio>
 #include <cstring>
 
@@ -219,9 +220,19 @@ bool loadChain(const std::string& path, WaveformParams& p, std::string& err) {
         err = full + " is not a wvt chain file";
         return false;
     }
+    // Counts must be whole numbers that fit: casting 1e30 or NaN is undefined. The
+    // ranges only make the cast safe; checkParams() says which values make sense.
+    auto whole = [&](const JsonValue& o, const char* key, int64_t lo, int64_t hi, int64_t def, int64_t& out,
+                     const std::string& where) {
+        if (o.integer(key, lo, hi, def, out)) return true;
+        err = full + ": " + where + key + " must be a whole number";
+        return false;
+    };
+    constexpr int64_t kExact = int64_t(1) << 53;  // whole numbers a double holds exactly
     std::vector<ChainItem> chain;
     for (const JsonValue& it : items->arr) {
         ChainItem c;
+        const std::string where = "item " + std::to_string(chain.size() + 1) + ": ";
         c.path = it.string("path");
         if (c.path.empty()) {
             err = full + ": an item has no path";
@@ -236,7 +247,11 @@ bool loadChain(const std::string& path, WaveformParams& p, std::string& err) {
         }
         c.fp.bigEndian = be;
         c.fp.swapIQ = it.boolean("swap_iq");
-        c.fp.headerBytes = (int64_t)it.number("header_bytes");
+        int64_t header, repeats;
+        if (!whole(it, "header_bytes", -kExact, kExact, 0, header, where) ||
+            !whole(it, "repeats", INT_MIN, INT_MAX, 1, repeats, where))
+            return false;
+        c.fp.headerBytes = header;
         c.fileRate = it.number("file_rate");
         c.start = it.number("start_s");
         c.len = it.number("length_s");
@@ -244,12 +259,14 @@ bool loadChain(const std::string& path, WaveformParams& p, std::string& err) {
         const JsonValue* lvl = it.get("level_dbfs");
         c.keepLevel = !lvl || lvl->type != JsonValue::Type::Number;
         if (!c.keepLevel) c.ampDb = lvl->num;
-        c.repeats = (int)it.number("repeats", 1);
+        c.repeats = (int)repeats;
         c.gapAfter = it.number("gap_after_s");
         chain.push_back(std::move(c));
     }
+    int64_t loops;
+    if (!whole(v, "loops", INT_MIN, INT_MAX, 0, loops, "")) return false;
     p.chain = std::move(chain);
-    p.chainLoops = (int)v.number("loops");
+    p.chainLoops = (int)loops;
     p.startDelay = v.number("start_delay_s");
     if (v.number("sample_rate") > 0) p.rate = v.number("sample_rate");
     if (v.get("center_freq")) p.fc = v.number("center_freq");
@@ -387,6 +404,7 @@ ParamCheck checkParams(const WaveformParams& p) {
             if (c.fileRate < 0) err(n + "the recording's sample rate can't be negative");
             else if (fr / p.rate > 64 || p.rate / fr > 64) err(n + "the recording's rate and the output rate differ by more than 64x");
             if (c.start < 0 || c.len < 0) err(n + "the segment start and length can't be negative");
+            if (c.fp.headerBytes < 0) err(n + "the header size can't be negative");
             if (!(std::fabs(c.offset) < nyq)) err(n + "the offset must be inside the band (|offset| < " + fmtSI(nyq, "Hz") + ")");
             if (!c.keepLevel && !(c.ampDb <= 0)) err(n + "the level must be 0 dBFS or less");
             if (c.repeats < 1) err(n + "repeats must be at least 1");
@@ -403,6 +421,7 @@ ParamCheck checkParams(const WaveformParams& p) {
             warn("The recording (" + fmtSI(fr, "S/s") + ") is resampled down to " + fmtSI(p.rate, "S/s") +
                  ": anything outside +-" + fmtSI(nyq, "Hz") + " of its center is filtered out");
         if (p.playStart < 0 || p.playLen < 0) err("The segment start and length can't be negative");
+        if (p.playFp.headerBytes < 0) err("The header size can't be negative");
         if (p.playGap < 0) err("The repeat gap can't be negative");
         if (p.startDelay < 0) err("Start delay can't be negative");
     } else {
@@ -1178,6 +1197,10 @@ std::shared_ptr<const PlaybackWave> loadPlayback(const WaveformParams& p, std::s
     const double fr = playFileRate(p);
     if (!(fr > 0) || !(p.rate > 0)) {
         err = "sample rates must be positive";
+        return nullptr;
+    }
+    if (p.playFp.headerBytes < 0) {
+        err = "the header size can't be negative";
         return nullptr;
     }
     auto f = IqFile::open(p.playPath, err);
