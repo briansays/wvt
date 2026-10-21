@@ -4,18 +4,20 @@
 // of recordings (looping, gaps, segments, resampling, SigMF round trip),
 // CW frequency and level sweeps, and chains of recordings (order, repeats,
 // gaps, levels, offsets, loops, changes while running, chain files, the
-// waveform cache, the JSON reader).
+// waveform cache, the JSON reader) and the transmit limits.
 //
 //   siggen_check [scratch_dir]     exit status 0 = all checks passed
 #include <cmath>
 #include <complex>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <random>
 #include <sstream>
 #include <string>
 #include <sys/stat.h>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "dsp.h"
@@ -1164,6 +1166,57 @@ int main(int argc, char** argv) {
               "JSON: arrays, numbers, escapes, unicode", err);
         check(!parseJson("{\"a\": [1, 2}", v, err) && err.find("line 1") != std::string::npos, "JSON: reports errors", err);
         check(jsonQuote("a\"b\\c\n") == "\"a\\\"b\\\\c\\n\"", "JSON: quoting");
+    }
+
+    // --- transmit limits (issue #49) ---
+    {
+        std::vector<TxBand> b;
+        std::string err;
+        check(parseTxBands("902M:928M,2.4G:2.4835G", b, err) && b.size() == 2 && b[0].lo == 902e6 && b[0].hi == 928e6 &&
+                  b[1].lo == 2.4e9 && b[1].hi == 2.4835e9,
+              "TX limits: two bands", err);
+        bool allBad = true;
+        for (const char* s : {"", "902M", "928M:902M", "a:b", "902M:928M,", "-1M:1M"}) allBad = allBad && !parseTxBands(s, b, err);
+        check(allBad, "TX limits: bad bands are refused");
+
+        TxLimits l;
+        check(txFreqAllowed(l, 6e9, 50e6, err) && txGainAllowed(l, 89, err) && describeTxLimits(l) == "none",
+              "TX limits: none set, nothing refused");
+        l.maxGain = 30;
+        parseTxBands("902M:928M,2.4G:2.4835G", l.allow, err);
+        check(txGainAllowed(l, 30, err) && !txGainAllowed(l, 30.25, err), "TX limits: gain at and above the maximum", err);
+        check(txFreqAllowed(l, 915e6, 1e6, err) && txFreqAllowed(l, 902.5e6, 1e6, err) && txFreqAllowed(l, 2.44e9, 20e6, err),
+              "TX limits: bands inside, at the edge, in the second band", err);
+        check(!txFreqAllowed(l, 927.8e6, 1e6, err) && !txFreqAllowed(l, 1.5e9, 1e6, err) && !txFreqAllowed(l, 915e6, 30e6, err),
+              "TX limits: a band that crosses an edge, outside, wider than the band", err);
+        check(describeTxLimits(l) == "max gain 30.00 dB; 902 MHz to 928 MHz, 2.4 GHz to 2.4835 GHz", "TX limits: description",
+              describeTxLimits(l));
+
+        setenv("WVT_TX_MAX_GAIN", "12.5", 1);
+        setenv("WVT_TX_ALLOW", "1G:2G", 1);
+        TxLimits e;
+        const bool envOk = txLimitsFromEnv(e, err) && e.maxGain == 12.5 && e.allow.size() == 1 && e.allow[0].hi == 2e9;
+        setenv("WVT_TX_ALLOW", "2G:1G", 1);
+        const bool envBad = !txLimitsFromEnv(e, err) && err.find("WVT_TX_ALLOW") != std::string::npos;
+        unsetenv("WVT_TX_MAX_GAIN");
+        unsetenv("WVT_TX_ALLOW");
+        check(envOk && envBad, "TX limits: from the environment", err);
+
+        // TxEngine refuses before it opens a device, so this needs no USRP.
+        WaveformParams p;
+        p.rate = 1e6;
+        sigGenBus().publish(p);
+        TxEngine tx;
+        TxConfig c;
+        c.fc = 915e6;
+        c.rate = 1e6;
+        c.limits = std::move(l);
+        c.gain = 40;
+        const bool gainRefused = !tx.start(c, err) && err.find("limit") != std::string::npos;
+        c.gain = 10;
+        c.fc = 950e6;
+        check(gainRefused && !tx.start(c, err) && err.find("allowed band") != std::string::npos && !tx.running(),
+              "TX limits: the transmit engine refuses gain and frequency", err);
     }
 
     printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "all checks passed", failures, failures == 1 ? "" : "s");

@@ -546,6 +546,11 @@ foreach(_t IN LISTS WVT_CHECKS)
 endforeach()
 # The option table: --help fails if an option name is defined twice.
 add_test(NAME cli_help COMMAND wvt --no-log-file --help)
+# --tx-dry-run checks the transmit limits and opens no device (issue #49).
+add_test(NAME tx_dry_run COMMAND wvt --no-log-file --gen cw -c 915M -r 1M --tx-gain 10 --tx-max-gain 20
+  --tx-allow 902M:928M --tx-dry-run)
+add_test(NAME tx_dry_run_refused COMMAND wvt --no-log-file --gen cw -c 927.8M -r 1M --tx-allow 902M:928M --tx-dry-run)
+set_tests_properties(tx_dry_run_refused PROPERTIES WILL_FAIL TRUE)
 
 # ---------------------------------------------------------------------------
 # libFuzzer targets for the parsers of user-supplied text (issue #53), clang

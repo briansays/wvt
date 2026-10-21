@@ -72,7 +72,9 @@ For the full list, refer to [Signal generator](siggen.md#command-line).
 | `--play` and related options | Playback |
 | `--chain`, `--chain-add`, `--chain-loops` | Chains |
 | `--gen-out PREFIX` | Write to a file, then stop |
-| `--tx` | Transmit with a USRP |
+| `--tx` | Transmit with a USRP. wvt asks before it transmits |
+| `--tx-dry-run`, `--tx-confirm` | Only show the plan, or transmit and do not ask |
+| `--tx-max-gain`, `--tx-allow` | Transmit limits |
 
 ## Region export
 
@@ -104,5 +106,7 @@ For the full list, refer to [Signal generator](siggen.md#command-line).
 | `WVT_GPU` | `auto`, `on` or `off`, as `--gpu` |
 | `WVT_LOG_DIR` | The folder for the log file, as `--log-dir` |
 | `TMPDIR` | The folder for the log file, if `WVT_LOG_DIR` is not set |
+| `WVT_TX_MAX_GAIN` | The maximum TX gain, as `--tx-max-gain` |
+| `WVT_TX_ALLOW` | The bands where wvt can transmit, as `--tx-allow` |
 | `WVT_GPU_FORCE_FAIL` | Set to `1` to make each GPU call fail. For tests of the CPU fallback |
 | `DISPLAY` | The X server |

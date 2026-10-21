@@ -51,6 +51,7 @@ public:
 
     // Signal generator window (app_siggen.cpp)
     void openSigGen(const WaveformParams* p = nullptr);
+    void setTxLimits(const TxLimits& l) { txCfg_.limits = l; }  // issue #49
     bool sigGenPreviewReady() const { return sgPrev_ != nullptr; }
 
     // Audio window (app_audio.cpp)

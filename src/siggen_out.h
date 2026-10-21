@@ -9,6 +9,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "engine.h"
 #include "recorder.h"
@@ -55,6 +56,17 @@ private:
     std::string error_;
 };
 
+// "LO:HI[,LO:HI...]" with SI suffixes, e.g. "902M:928M,2.4G:2.4835G".
+bool parseTxBands(const std::string& s, std::vector<TxBand>& out, std::string& err);
+// Reads WVT_TX_MAX_GAIN and WVT_TX_ALLOW into `l`. False on a bad value.
+bool txLimitsFromEnv(TxLimits& l, std::string& err);
+// The transmitter sends anything in fc +- rate/2, so all of that band must
+// be inside one allowed band.
+bool txFreqAllowed(const TxLimits& l, double fc, double rate, std::string& err);
+bool txGainAllowed(const TxLimits& l, double db, std::string& err);
+// "max gain 30 dB; 902 MHz to 928 MHz" or "none".
+std::string describeTxLimits(const TxLimits& l);
+
 class TxEngine {
 public:
     struct Stats {
@@ -80,6 +92,7 @@ public:
 private:
     std::unique_ptr<SdrTx> tx_;
     std::shared_ptr<BusSigGen> gen_;
+    TxLimits limits_;
 };
 
 // Data for the generator window's preview plots.

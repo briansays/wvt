@@ -12,6 +12,7 @@
 #include <functional>
 #include <string>
 #include <thread>
+#include <unistd.h>
 #include <vector>
 
 #include "app.h"
@@ -94,6 +95,52 @@ static int runGenFile(const WaveformParams& p, const FileGenConfig& c) {
     logStatus("siggen", "wrote %s (%s, %s)", st.rec.dataPath.c_str(), fmtSI(st.rec.seconds, "s", 5).c_str(),
             fmtSI((double)st.rec.bytes, "B", 4).c_str());
     if (!st.rec.metaPath.empty()) logStatus("siggen", "metadata %s", st.rec.metaPath.c_str());
+    return 0;
+}
+
+// What --tx is about to send, for --tx-dry-run and the confirmation (issue #49).
+static std::string txPlan(const WaveformParams& p, const TxConfig& c, double seconds) {
+    char gain[32];
+    snprintf(gain, sizeof gain, "%.2f dB", c.gain);
+    std::string len = "until Ctrl+C";
+    if (seconds > 0) len = fmtSI(seconds, "s", 6);
+    else if (p.mode == GenMode::Chain && p.chainLoops > 0) len = std::to_string(p.chainLoops) + " chain passes";
+    const std::string ch = std::to_string(c.channel);
+    return "  signal     " + describeParams(p) + "\n" +
+           "  frequency  " + fmtSI(c.fc + p.offset, "Hz", 9) + " (center " + fmtSI(c.fc, "Hz", 9) + ", band " +
+           fmtSI(c.fc - c.rate / 2, "Hz", 9) + " to " + fmtSI(c.fc + c.rate / 2, "Hz", 9) + ")\n" +
+           "  rate       " + fmtSI(c.rate, "S/s", 6) + "\n" +
+           "  gain       " + gain + "\n" +
+           "  device     " + (c.args.empty() ? "the first USRP found" : c.args) + ", antenna " +
+           (c.antenna.empty() ? "default" : c.antenna) + ", channel " + ch + "\n" +
+           "  duration   " + len + "\n" +
+           "  limits     " + describeTxLimits(c.limits) + "\n";
+}
+
+// Checks the limits, then prints the plan and asks (issue #49): "yes" on a
+// terminal, or --tx-confirm when stdin is not one. 0 = transmit, else the
+// exit status.
+static int confirmTx(const WaveformParams& p, const TxConfig& c, double seconds, bool dryRun, bool confirmed) {
+    std::string err;
+    if (!txGainAllowed(c.limits, c.gain, err) || !txFreqAllowed(c.limits, c.fc, c.rate, err)) {
+        LOG_ERROR("tx", "%s", err.c_str());
+        return 2;
+    }
+    printf("%s:\n%s", dryRun ? "--tx would transmit (dry run: no device is opened)" : "wvt is about to TRANSMIT",
+           txPlan(p, c, seconds).c_str());
+    fflush(stdout);
+    if (dryRun || confirmed) return dryRun ? -1 : 0;
+    if (!isatty(STDIN_FILENO)) {
+        LOG_ERROR("tx", "stdin is not a terminal, so wvt cannot ask: add --tx-confirm to transmit from a script");
+        return 2;
+    }
+    printf("Type yes to transmit: ");
+    fflush(stdout);
+    char line[64] = "";
+    if (!fgets(line, sizeof line, stdin) || strcmp(line, "yes\n") != 0) {
+        logStatus("tx", "not transmitting");
+        return 1;
+    }
     return 0;
 }
 
@@ -336,6 +383,8 @@ int main(int argc, char** argv) {
     FileGenConfig gc;
     TxConfig txc;
     bool haveGen = false, openGen = false, haveGenOut = false, haveTx = false, haveOffset = false, haveSweep = false;
+    bool txDryRun = false, txConfirm = false;
+    TxLimits cliLimits;  // over WVT_TX_MAX_GAIN / WVT_TX_ALLOW
     std::string playFile, chainFile;
     std::vector<std::string> chainAdds;
     int chainLoops = -1;
@@ -755,6 +804,18 @@ int main(int argc, char** argv) {
     cli.add(nullptr, "--tx-gain", "DB", "transmit gain (default 0)", si("--tx-gain", txc.gain));
     cli.add(nullptr, "--tx-args", "ARGS", "the USRP to transmit with (default: the first USRP)", text(txc.args));
     cli.add(nullptr, "--tx-antenna", "NAME", "transmit port (default: the channel's first, e.g. TX/RX)", text(txc.antenna));
+    cli.add(nullptr, "--tx-dry-run", nullptr, "show what --tx would transmit, check the limits, and exit", [&](const char*) {
+        return haveTx = txDryRun = true;
+    });
+    cli.add(nullptr, "--tx-confirm", nullptr, "transmit without asking (needed when stdin is not a terminal)", flag(txConfirm));
+    cli.add(nullptr, "--tx-max-gain", "DB", "refuse a higher transmit gain, also in the GUI (env WVT_TX_MAX_GAIN)",
+            si("--tx-max-gain", cliLimits.maxGain));
+    cli.add(nullptr, "--tx-allow", "LO:HI,..", "transmit only inside these bands, also in the GUI (env WVT_TX_ALLOW)",
+            [&](const char* v) {
+                std::string err;
+                if (!parseTxBands(v, cliLimits.allow, err)) return bad("--tx-allow: %s", err.c_str());
+                return true;
+            });
 
     cli.section("export part of a file (the --segment limits it; --record-format sigmf|raw):");
     cli.add(nullptr, "--extract-out", "PATH", "write it to PATH (.sigmf-data / .sigmf-meta, or raw) and exit",
@@ -822,6 +883,12 @@ int main(int argc, char** argv) {
     }
     if (!parsed) return exitNow > 0 ? exitNow : 2;
     if (exitNow >= 0) return exitNow;
+    if (std::string err; !txLimitsFromEnv(txc.limits, err)) {
+        LOG_ERROR("main", "%s", err.c_str());
+        return 2;
+    }
+    if (!std::isnan(cliLimits.maxGain)) txc.limits.maxGain = cliLimits.maxGain;
+    if (!cliLimits.allow.empty()) txc.limits.allow = cliLimits.allow;
     if (!positional.empty()) path = positional.back();
     scale = std::clamp(scale, 0.5f, 4.f);
     if (ov.haveFc) gp.fc = txc.fc = ov.fc;
@@ -916,6 +983,7 @@ int main(int argc, char** argv) {
         }
         txc.rate = gp.rate;
         txc.fc = gp.fc;
+        if (const int rc = confirmTx(gp, txc, genSeconds, txDryRun, txConfirm); rc != 0) return std::max(rc, 0);
         return runTx(gp, txc, genSeconds);
     }
     if (haveDevice) {
@@ -1006,6 +1074,7 @@ int main(int argc, char** argv) {
 
     {
         App app(win);
+        app.setTxLimits(txc.limits);
         if (haveGen || openGen) app.openSigGen(haveGen ? &gp : nullptr);
         if (haveDevice) {
             LOG_INFO("main", "starting device %s%s%s", dev.driver.c_str(), dev.args.empty() ? "" : ":", dev.args.c_str());

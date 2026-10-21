@@ -2,13 +2,27 @@
 // SDR transmitter abstraction (a USRP through UHD). The device thread
 // asks for samples with a fill callback and streams them continuously until
 // stop(); stop() ends the burst so the transmitter goes quiet.
+#include <cmath>
 #include <complex>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "sdr_device.h"
+
+// Transmit safety limits (issue #49): --tx-max-gain and --tx-allow, or
+// WVT_TX_MAX_GAIN and WVT_TX_ALLOW. TxEngine applies them, so the command
+// line and the GUI both obey them.
+struct TxBand {
+    double lo = 0, hi = 0;  // Hz
+};
+struct TxLimits {
+    double maxGain = NAN;       // dB; NaN = no limit but the device's range
+    std::vector<TxBand> allow;  // empty = any frequency the device can tune
+    bool any() const { return !std::isnan(maxGain) || !allow.empty(); }
+};
 
 struct TxConfig {
     std::string driver = "uhd";
@@ -20,6 +34,7 @@ struct TxConfig {
     double bandwidth = 0;  // analog filter, 0 = automatic
     int channel = 0;       // transmit channel
     std::string ref;       // clock and time source; empty = device default
+    TxLimits limits;
 };
 
 class SdrTx {
