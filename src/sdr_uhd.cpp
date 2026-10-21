@@ -502,7 +502,7 @@ public:
             return true;
         }
         if (err.empty())
-            err = "USRP cannot transmit at " + fmtSI(hz, "Hz", 9) + " (B200/B205: 70 MHz - 6 GHz); tuned to " + fmtSI(f, "Hz", 9);
+            err = "USRP cannot transmit at " + fmtSI(hz, "Hz", 9) + "; it tuned to " + fmtSI(f, "Hz", 9);
         if (!th_.joinable()) {
             fc_ = f;  // not transmitting yet: open() fails and nothing is sent
             return false;
