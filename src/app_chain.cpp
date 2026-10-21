@@ -1,4 +1,4 @@
-// Signal generator: chain playback (issue #27, docs/siggen-chain-plan.md).
+// Signal generator: chain playback (issue #27, docs/design/siggen-chain-plan.md).
 // A list of recordings that play in turn, each with its own segment, offset,
 // level, repeats and gap, looped forever or a set number of times.
 #include <algorithm>

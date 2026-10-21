@@ -2,7 +2,7 @@
 // Optional GPU acceleration: CUDA on NVIDIA (issue #3), Metal on Apple
 // (issue #21). Plain C++: no CUDA or Metal headers. In a build without a GPU
 // backend every call reports "not available", and callers use their CPU
-// code. See docs/cuda-gpu-plan.md and docs/apple-gpu-plan.md.
+// code. See docs/design/cuda-gpu-plan.md and docs/design/apple-gpu-plan.md.
 #include <cmath>
 #include <cstdint>
 #include <functional>

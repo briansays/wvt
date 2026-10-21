@@ -1,4 +1,4 @@
-// Metal GPU backend for Apple GPUs (issue #21, docs/apple-gpu-plan.md).
+// Metal GPU backend for Apple GPUs (issue #21, docs/design/apple-gpu-plan.md).
 // Our kernels are Metal Shading Language, compiled at run time (no Xcode
 // needed). FFTs that fit in threadgroup memory (N <= 4096 on Apple GPUs) run
 // in one pass: decode, window, FFT and |X|^2 per threadgroup, so each sample
@@ -436,7 +436,7 @@ bool gpuBackendBuilt() { return true; }
 const char* gpuBackendName() { return "Metal"; }
 bool gpuBackendImplements(GpuJob) { return true; }
 
-// From gpu_check --bench on an M5 (docs/apple-gpu-plan.md §11). The CPU uses
+// From gpu_check --bench on an M5 (docs/design/apple-gpu-plan.md §11). The CPU uses
 // vDSP there, so the GPU wins only on large jobs, and by less than CUDA does.
 GpuLimits gpuBackendLimits() {
     GpuLimits l;

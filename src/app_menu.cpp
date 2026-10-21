@@ -1,4 +1,4 @@
-// Menu bar (issue #19, docs/ui-cleanup-plan.md): File / View / Tools / Help on
+// Menu bar (issue #19, docs/design/ui-cleanup-plan.md): File / View / Tools / Help on
 // the left; on the right the source and what runs in the background
 // (transmitting, recording, audio, an export). Also the keyboard help and
 // About windows.

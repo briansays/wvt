@@ -53,7 +53,7 @@ Issue #18 asks for these items:
 | Background job | `ExtractJob` (`src/extract.*`): its own thread, chunks of about 4 M input samples, progress, cancel. Cancel **deletes** the partial files. An existing file is not overwritten unless the user confirms. | A cancelled export is not a usable file. |
 | Disk space | Before starting, check the free space (`statvfs`) against the size estimate. Too little: an error, nothing is written. | Large exports can fill a disk. |
 | GPU (#3, PR #20) | The export filter is CPU code in `src/extract.cpp`. When #20 is merged, it can use `ChanJob` / `gpuChannelize`. | #20 is not merged yet; #18 must not wait for it. |
-| Logging (#14) | INFO at start (source, range, band, D, taps, output) and at the end (file, size, time). WARN for clipping and for clamped values. ERROR for failures, once, by the code that shows them. | `docs/verbose-logging-plan.md`. |
+| Logging (#14) | INFO at start (source, range, band, D, taps, output) and at the end (file, size, time). WARN for clipping and for clamped values. ERROR for failures, once, by the code that shows them. | `docs/design/verbose-logging-plan.md`. |
 
 ### The export window
 

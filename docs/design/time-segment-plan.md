@@ -84,7 +84,7 @@ for the part of the file that the user wants.
 | Audio | "Whole file" becomes "Whole segment". The playhead slider and the play ranges stay inside the segment. | Audio follows the same limits. |
 | Siggen playback "from viewer" | No change: it plays the whole file. | Not part of the issue. It can come later. |
 | Command line | New option `--segment T0:T1`, with `-1` allowed on each side (`--segment 40:-1`). `--view` is then absolute time inside the segment. Headless audio export (`--audio-out`) also uses the segment. | The same feature from the CLI, and a way to test it without a display. |
-| Logging (#14) | INFO `segment 40 s to 50 s (200 MS of 2 GS)` or `whole file`. ERROR or WARN for the bad-value cases above. | Follows `docs/verbose-logging-plan.md`. |
+| Logging (#14) | INFO `segment 40 s to 50 s (200 MS of 2 GS)` or `whole file`. ERROR or WARN for the bad-value cases above. | Follows `docs/design/verbose-logging-plan.md`. |
 | UI labels | Row 1, after **File**: **Segment** `[from] s` `[to] s`, with the tooltip "Load only this part of the file, in seconds. -1 = file start / end. Press Enter to apply." The toolbar info text shows `segment 10 s of 100 s` when a segment is active. | Row 2 already has a **Start** box for the view. |
 
 ## 4. Implementation steps

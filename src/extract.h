@@ -1,6 +1,6 @@
 #pragma once
 // Exports a time range of a file, and optionally a frequency band, to a new
-// SigMF or raw file (issue #18, docs/region-export-plan.md).
+// SigMF or raw file (issue #18, docs/design/region-export-plan.md).
 //
 // Full band: the raw bytes of the range are copied unchanged (same format,
 // rate and center frequency). With a band: the band center is mixed to 0 Hz
