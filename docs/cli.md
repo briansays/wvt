@@ -39,13 +39,15 @@ wvt [options] [file]
 
 | Option | Function | Page |
 |---|---|---|
-| `--device DEV` | `rtlsdr[:INDEX\|SERIAL]`, `uhd[:ARGS]`, `bb[:SERIAL]`, `sim` or `siggen` | [Live devices](live.md) |
+| `--device DEV` | `rtlsdr[:INDEX\|SERIAL]`, `uhd[:ARGS]` (for example `uhd:addr=192.168.40.2`), `bb[:SERIAL]`, `sim` or `siggen` | [Live devices](live.md) |
 | `--gain DB\|auto` | The receiver gain (default 30 dB) | [Live devices](live.md) |
 | `--ref-level DBM` | BB60: the strongest expected input (default −20 dBm) | [Live devices](live.md#bb60-settings) |
 | `--atten auto\|0\|10\|20\|30` | BB60: the attenuator (default `auto`) | [Live devices](live.md#bb60-settings) |
 | `--amp auto\|0-3` | BB60: the amplifier setting (default `auto`) | [Live devices](live.md#bb60-settings) |
 | `--ext-ref` | BB60: lock to a 10 MHz reference on port 1 | [Live devices](live.md#bb60-settings) |
-| `--antenna NAME` | The USRP antenna (`RX2` or `TX/RX`) | [Live devices](live.md) |
+| `--antenna NAME` | The USRP receive antenna, for example `RX2` or `TX/RX` | [Live devices](live.md#usrp-options) |
+| `--usrp-channel N` | The USRP channel for receive and transmit (default 0) | [Live devices](live.md#usrp-options) |
+| `--ref SRC` | The USRP clock and time reference: `internal`, `external` or `gpsdo` | [Live devices](live.md#usrp-options) |
 | `--bandwidth HZ` | The USRP analog bandwidth, or the BB60 I/Q bandwidth (default: automatic) | [Live devices](live.md) |
 | `--bias-tee` | RTL-SDR: supply power to an LNA or an active antenna through the coax | [Live devices](live.md) |
 | `--direct-sampling I\|Q` | RTL-SDR: HF direct sampling (v3: `Q`) | [Live devices](live.md) |

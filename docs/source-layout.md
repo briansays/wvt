@@ -44,7 +44,7 @@
 | `src/recorder.*` | The SigMF and raw recorder |
 | `src/sdr_device.*` | The device interface, the driver list, sample-rate checks |
 | `src/sdr_rtlsdr.cpp` | The RTL-SDR backend (librtlsdr) |
-| `src/sdr_uhd.cpp` | The USRP backend (UHD C API) |
+| `src/sdr_uhd.cpp` | The USRP backend (UHD C API): all USRP models, one channel at a time |
 | `src/sdr_bb60.cpp` | The Signal Hound BB60 backend (`bb_api`) |
 | `src/sdr_sim.cpp` | The simulated device |
 | `src/sdr_siggen.cpp` | The loopback device that streams the generator into the live view |
@@ -80,6 +80,7 @@
 | `tools/segment_check.cpp` | The self-check for the time segment rules |
 | `tools/extract_check.cpp` | The self-check for the region export |
 | `tools/snapshot_check.cpp` | The self-check for the plot snapshots |
+| `tools/device_check.cpp` | The self-check for the device list and the sample rate rules |
 | `tools/bb_check.cpp` | The self-check for the BB60 backend |
 | `tools/bb_sim/` | A simulated BB60D behind the `bb_api` calls that wvt uses |
 | `tools/gpu_check.cpp` | The GPU self-check and benchmark |

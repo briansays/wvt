@@ -342,13 +342,15 @@ static void usage() {
         "\n"
         "live devices (-c and -r set the tuning):\n"
         "      --device DEV     rtlsdr[:INDEX|SERIAL] | uhd[:ARGS] | bb[:SERIAL] | sim\n"
-        "                       e.g. --device uhd:type=b200  --device rtlsdr:0  --device bb\n"
+        "                       e.g. --device uhd  --device uhd:addr=192.168.10.2  --device rtlsdr:0  --device bb\n"
         "      --gain DB|auto   receiver gain (default 30 dB)\n"
         "      --ref-level DBM  BB60: strongest expected input (default -20 dBm)\n"
         "      --atten auto|0|10|20|30   BB60 attenuator (default auto)\n"
         "      --amp auto|0-3   BB60 amplifier setting (default auto)\n"
         "      --ext-ref        BB60: lock to a 10 MHz reference on port 1\n"
-        "      --antenna NAME   USRP antenna (RX2 or TX/RX)\n"
+        "      --antenna NAME   USRP receive antenna (e.g. RX2, TX/RX; default: the device's)\n"
+        "      --usrp-channel N USRP receive / transmit channel (X310, N310, X410 have several; default 0)\n"
+        "      --ref SRC        USRP clock and time reference: internal | external | gpsdo\n"
         "      --bandwidth HZ   USRP analog / BB60 I/Q bandwidth (default: automatic)\n"
         "      --bias-tee       RTL-SDR: power an LNA / active antenna over the coax\n"
         "      --direct-sampling I|Q  RTL-SDR: HF direct sampling (v3: Q)\n"
@@ -397,7 +399,8 @@ static void usage() {
         "                       or chain passes)\n"
         "      --gen-annotate   SigMF: one annotation per pulse, play, sweep or chain item\n"
         "      --tx             TRANSMIT with a USRP until Ctrl+C (or --gen-duration)\n"
-        "      --tx-gain DB     transmit gain (default 0)   --tx-args ARGS  (default type=b200)\n"
+        "      --tx-gain DB     transmit gain (default 0)   --tx-args ARGS  (default: the first USRP)\n"
+        "      --tx-antenna NAME  transmit port (default: the channel's first, e.g. TX/RX)\n"
         "\n"
         "export part of a file (the --segment limits it; --record-format sigmf|raw):\n"
         "      --extract-out PATH    write it to PATH (.sigmf-data / .sigmf-meta, or raw) and exit\n"
@@ -568,6 +571,15 @@ int main(int argc, char** argv) {
         } else if (a == "--ext-ref") {
             dev.extRef = true;
         } else if (a == "--antenna") dev.antenna = next("--antenna");
+        else if (a == "--usrp-channel") {
+            const char* v = next("--usrp-channel");
+            char* end = nullptr;
+            long c = strtol(v, &end, 10);
+            if (end == v || *end || c < 0 || c > 63) { LOG_ERROR("main", "bad channel '%s'", v); return 2; }
+            dev.channel = txc.channel = (int)c;
+        } else if (a == "--ref") {
+            dev.ref = txc.ref = next("--ref");
+        }
         else if (a == "--bandwidth") {
             if (!parseSI(next("--bandwidth"), dev.bandwidth)) { LOG_ERROR("main", "bad bandwidth"); return 2; }
         } else if (a == "--bias-tee") dev.biasTee = true;
@@ -758,6 +770,7 @@ int main(int argc, char** argv) {
         }
         else if (a == "--tx") haveTx = true;
         else if (a == "--tx-args") txc.args = next("--tx-args");
+        else if (a == "--tx-antenna") txc.antenna = next("--tx-antenna");
         else if (!a.empty() && a[0] == '-') { LOG_ERROR("main", "unknown option %s (try --help)", a.c_str()); return 2; }
         else path = a;
     }

@@ -1,5 +1,6 @@
 #include "json.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 
@@ -211,6 +212,18 @@ std::string JsonValue::string(const std::string& key, const std::string& def) co
 bool JsonValue::boolean(const std::string& key, bool def) const {
     const JsonValue* v = get(key);
     return v && v->type == Type::Bool ? v->b : def;
+}
+
+bool JsonValue::integer(const std::string& key, int64_t lo, int64_t hi, int64_t def, int64_t& out) const {
+    const JsonValue* v = get(key);
+    if (!v) {
+        out = def;
+        return true;
+    }
+    // NaN fails the floor test, infinities the range test.
+    if (v->type != Type::Number || v->num != std::floor(v->num) || v->num < (double)lo || v->num > (double)hi) return false;
+    out = (int64_t)v->num;
+    return true;
 }
 
 bool parseJson(const std::string& text, JsonValue& out, std::string& err) {

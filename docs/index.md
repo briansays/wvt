@@ -8,7 +8,7 @@ wvt is an X11 desktop tool for raw IQ recordings from software-defined radios (S
 
 wvt has these other functions:
 
-- **Live devices:** wvt streams from an RTL-SDR v3, a USRP B200 / B205mini or a Signal Hound BB60. It shows the
+- **Live devices:** wvt streams from an RTL-SDR v3, a USRP (B200 family, N3xx, X3xx, X4xx) or a Signal Hound BB60. It shows the
   spectrum and the waterfall in real time, and it records the stream to a file.
 - **Signal generator:** wvt makes CW, pulsed, swept and recorded waveforms. It writes them to a
   file, shows them in the live view, or transmits them with a USRP.

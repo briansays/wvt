@@ -59,7 +59,7 @@ class TxEngine {
 public:
     struct Stats {
         bool running = false;
-        std::string description, notes, error;
+        std::string description, notes, error, antenna;
         double fc = 0, rate = 0, gain = 0;
         GainRange range;
         SdrTx::Stats tx;

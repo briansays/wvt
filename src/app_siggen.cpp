@@ -114,6 +114,7 @@ bool App::startLoopback() {
 
 bool App::startTx() {
     txCfg_.args = txArgs_;
+    txCfg_.antenna = txAntenna_;
     txCfg_.fc = sg_.fc;
     txCfg_.rate = sg_.rate;
     sigGenBus().publish(sg_);
@@ -181,7 +182,7 @@ void App::drawSigGenWindow() {
         }
         ImGui::EndDisabled();
         tooltipAlways("File: write the waveform to disk.\nLoopback: show it in the live spectrum and waterfall.\n"
-                      "USRP transmit: send it over the air with a B200/B205.");
+                      "USRP transmit: send it over the air with a USRP.");
         ImGui::EndTable();
     }
     ImGui::Separator();
@@ -252,8 +253,12 @@ void App::drawSigGenWaveform() {
         if (InputSI("##sgfc", &p.fc, "Hz", -FLT_MIN) && txOn) {
             std::string err;
             if (!tx_->setCenterFreq(p.fc, err)) {
-                status_ = "Transmit tune failed: " + err;
                 LOG_ERROR("app", "transmit tune failed: %s", err.c_str());
+                // Show where the transmitter is, not the frequency that failed (issue #40).
+                txStats_ = tx_->stats();
+                p.fc = txStats_.fc;
+                if (!txStats_.error.empty()) stopTx("Transmitter stopped: " + txStats_.error);
+                else status_ = "Transmit tune failed: " + err;
             }
         }
         tooltipAlways("RF center frequency: the transmit tuning and the file's frequency.\n"
@@ -883,12 +888,25 @@ void App::drawSigGenTx() {
         ImGui::BeginDisabled(txOn);
         row("Device args");
         ImGui::InputText("##txargs", txArgs_, sizeof txArgs_);
-        tooltipAlways("UHD device arguments, e.g. type=b200 or serial=31A2B3C.\n"
+        tooltipAlways("UHD device arguments, e.g. serial=31A2B3C (USB) or addr=192.168.10.2 (network).\n"
+                      "Empty: the first USRP UHD finds.\n"
                       "If the live view is receiving from the same USRP, both share it (full duplex).");
         row("Antenna");
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted("TX/RX");
-        tooltipAlways("TX/RX is the only transmit port on the B200/B205.");
+        ImGui::InputTextWithHint("##txant", "default", txAntenna_, sizeof txAntenna_);
+        tooltipAlways("The transmit port. Empty: the channel's first transmit port\n"
+                      "(TX/RX on the B2xx and N3xx, TX/RX0 on the X410).");
+        row("Channel");
+        if (ImGui::InputInt("##txchan", &txCfg_.channel)) txCfg_.channel = std::clamp(txCfg_.channel, 0, 15);
+        tooltipAlways("Transmit channel: the X310, N310 and X410 have several.");
+        row("Reference");
+        if (ImGui::BeginCombo("##txref", txCfg_.ref.empty() ? "Default" : txCfg_.ref.c_str())) {
+            if (ImGui::Selectable("Default", txCfg_.ref.empty())) txCfg_.ref.clear();
+            for (const char* r : {"internal", "external", "gpsdo"})
+                if (ImGui::Selectable(r, txCfg_.ref == r)) txCfg_.ref = r;
+            ImGui::EndCombo();
+        }
+        tooltipAlways("Clock and time reference: internal, external (10 MHz and PPS) or gpsdo.\n"
+                      "It applies to the whole USRP, so the live view on the same USRP uses it too.");
         row("Bandwidth");
         InputSI("##txbw", &txCfg_.bandwidth, "Hz", -FLT_MIN);
         tooltipAlways("Analog filter bandwidth. 0 = automatic (follows the sample rate).");
@@ -905,12 +923,15 @@ void App::drawSigGenTx() {
                 LOG_ERROR("app", "transmit gain failed: %s", err.c_str());
             }
         }
-        tooltipAlways("B200/B205 transmit gain, 0-89.75 dB. Start low: about 0 dBm comes out near the top of the range.");
+        tooltipAlways(txOn ? "Transmit gain of this USRP. Start low."
+                           : "Transmit gain (B200/B205: 0-89.75 dB; the slider shows the device's range while it\n"
+                             "transmits). Start low: a B2xx gives about 0 dBm near the top of the range.");
         ImGui::EndTable();
     }
 
     // The B2xx derives RX and TX rates from one clock: they must match while both run.
-    if (!txOn && live_ && live_->running() && devCfg_.driver == "uhd" && std::fabs(liveStats_.rate - sg_.rate) > 1) {
+    if (!txOn && live_ && live_->running() && devCfg_.driver == "uhd" && devCaps_.usb &&
+        std::fabs(liveStats_.rate - sg_.rate) > 1) {
         ImGui::TextColored(kColWarn, "Receiving at %s: transmit must use the same rate.", fmtSI(liveStats_.rate, "S/s", 6).c_str());
         ImGui::SameLine();
         if (ImGui::SmallButton("Use it")) sg_.rate = liveStats_.rate;
@@ -933,7 +954,8 @@ void App::drawSigGenTx() {
         const auto& s = txStats_;
         ImGui::TextColored(kColTx, "TX ON  %s  (signal at %s)", fmtSI(s.fc, "Hz", 9).c_str(),
                            fmtSI(s.fc + sg_.offset, "Hz", 9).c_str());
-        ImGui::Text("%s, %s, gain %.2f dB", s.description.c_str(), fmtSI(s.rate, "S/s", 6).c_str(), s.gain);
+        ImGui::Text("%s, %s, gain %.2f dB, antenna %s", s.description.c_str(), fmtSI(s.rate, "S/s", 6).c_str(), s.gain,
+                    s.antenna.c_str());
         ImGui::Text("sent %s   underflows %lld   lost packets %lld", fmtSI((double)s.tx.sent, "S", 4).c_str(),
                     (long long)s.tx.underflows, (long long)s.tx.seqErrors);
         if (!s.notes.empty()) ImGui::TextColored(kColWarn, "%s", s.notes.c_str());
@@ -944,14 +966,15 @@ void App::drawSigGenTx() {
 
     if (ImGui::BeginPopupModal("Start transmitting?", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
         ImGui::TextColored(kColTx, "Transmit at %s", fmtSI(sg_.fc + sg_.offset, "Hz", 9).c_str());
-        ImGui::Text("Center %s, %s, TX gain %.2f dB, antenna TX/RX", fmtSI(sg_.fc, "Hz", 9).c_str(),
-                    fmtSI(sg_.rate, "S/s", 6).c_str(), txCfg_.gain);
-        ImGui::Text("Device: %s", txArgs_);
+        ImGui::Text("Center %s, %s, TX gain %.2f dB, antenna %s, channel %d", fmtSI(sg_.fc, "Hz", 9).c_str(),
+                    fmtSI(sg_.rate, "S/s", 6).c_str(), txCfg_.gain, txAntenna_[0] ? txAntenna_ : "default",
+                    txCfg_.channel);
+        ImGui::Text("Device: %s", txArgs_[0] ? txArgs_ : "the first USRP found");
         ImGui::PushTextWrapPos(fs * 30);
         ImGui::TextDisabled("%s", describeParams(sg_).c_str());
         ImGui::Spacing();
         ImGui::TextUnformatted("Only transmit into a dummy load or an attenuated cable, or on a frequency and power "
-                               "you are licensed for. Never connect the TX/RX port straight to a receiver input "
+                               "you are licensed for. Never connect a transmit port straight to a receiver input "
                                "without at least 30 dB of attenuation.");
         ImGui::PopTextWrapPos();
         ImGui::Spacing();
