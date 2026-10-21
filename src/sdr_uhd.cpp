@@ -590,27 +590,39 @@ public:
         th_.join();
     }
 
+    // UHD clips an out-of-range target and tunes anyway. While transmitting,
+    // that would move the signal to a frequency nobody chose (issue #40), so:
+    // check the range first; after a mismatch, tune back to the last good
+    // frequency; if that fails too, stop with a fatal error.
     bool setCenterFreq(double hz, std::string& err) override {
-        uhd_tune_request_t req{};
-        req.target_freq = hz;
-        req.rf_freq_policy = UHD_TUNE_REQUEST_POLICY_AUTO;
-        req.dsp_freq_policy = UHD_TUNE_REQUEST_POLICY_AUTO;
-        req.args = (char*)"";
-        uhd_tune_result_t res{};
-        if (uhd_usrp_set_tx_freq(usrp_, &req, chan_, &res) != UHD_ERROR_NONE) {
-            err = lastError(("cannot tune the transmitter to " + fmtSI(hz, "Hz", 9)).c_str());
+        if (freq_.valid() && (hz < freq_.min - 1 || hz > freq_.max + 1)) {
+            err = "USRP cannot transmit at " + fmtSI(hz, "Hz", 9) + " (" + rangeText(freq_) + ")";
             return false;
         }
-        double f = hz;
-        uhd_usrp_get_tx_freq(usrp_, chan_, &f);
+        const double prev = fc_;
+        double f = tune(hz, err);
+        if (err.empty() && std::fabs(f - hz) <= 1) {
+            fc_ = f;
+            return true;
+        }
+        if (err.empty())
+            err = "USRP cannot transmit at " + fmtSI(hz, "Hz", 9) + "; it tuned to " + fmtSI(f, "Hz", 9);
+        if (!th_.joinable()) {
+            fc_ = f;  // not transmitting yet: open() fails and nothing is sent
+            return false;
+        }
+        std::string backErr;
+        f = tune(prev, backErr);
         fc_ = f;
-        if (std::fabs(f - hz) > 1) {
-            const std::string range = rangeText(freq_);
-            err = "USRP cannot transmit at " + fmtSI(hz, "Hz", 9) + (range.empty() ? "" : " (" + range + ")") +
-                  "; tuned to " + fmtSI(f, "Hz", 9);
+        if (backErr.empty() && std::fabs(f - prev) <= 1) {
+            err += "; still transmitting at " + fmtSI(prev, "Hz", 9);
+            LOG_WARN("tx", "retune to %s failed, back at %s", fmtSI(hz, "Hz", 9).c_str(), fmtSI(prev, "Hz", 9).c_str());
             return false;
         }
-        return true;
+        fail("retune failed and the transmitter could not return to " + fmtSI(prev, "Hz", 9) + " (now at " + fmtSI(f, "Hz", 9) +
+             "): " + err);
+        quit_ = true;  // stop sending now; the owner's stop() joins the thread
+        return false;
     }
 
     bool setGain(double db, std::string& err) override {
@@ -649,10 +661,28 @@ public:
     }
 
 private:
+    // Tunes and returns the frequency the device reports. Sets err if UHD fails.
+    double tune(double hz, std::string& err) {
+        uhd_tune_request_t req{};
+        req.target_freq = hz;
+        req.rf_freq_policy = UHD_TUNE_REQUEST_POLICY_AUTO;
+        req.dsp_freq_policy = UHD_TUNE_REQUEST_POLICY_AUTO;
+        req.args = (char*)"";
+        uhd_tune_result_t res{};
+        if (uhd_usrp_set_tx_freq(usrp_, &req, chan_, &res) != UHD_ERROR_NONE)
+            err = lastError(("cannot tune the transmitter to " + fmtSI(hz, "Hz", 9)).c_str());
+        double f = hz;
+        uhd_usrp_get_tx_freq(usrp_, chan_, &f);
+        return f;
+    }
+
+    // Every way out of the loop goes through the end-of-burst below: an error
+    // sets quit_ instead of returning, so the device is never left keyed (issue #43).
     void run() {
         std::vector<std::complex<float>> buf(spb_);
         const void* b[1] = {buf.data()};
         uhd_tx_metadata_handle* md = &mdFirst_;
+        timeouts_ = 0;
         while (!quit_) {
             fill_(buf.data(), (int64_t)spb_);
             size_t done = 0;
@@ -661,12 +691,14 @@ private:
                 size_t n = 0;
                 if (uhd_tx_streamer_send(tx_, b, spb_ - done, md, 0.5, &n) != UHD_ERROR_NONE) {
                     fail(lastError("transmit failed"));
-                    return;
+                    quit_ = true;
+                    break;
                 }
                 if (n == 0) {
                     if (++timeouts_ > 10) {
                         fail("USRP stopped accepting samples (unplugged?)");
-                        return;
+                        quit_ = true;
+                        break;
                     }
                     continue;
                 }
@@ -678,6 +710,7 @@ private:
             pollAsync();
         }
         // End the burst so the transmitter stops instead of underflowing forever.
+        // After an error this can fail too (device gone); there is nothing more to do then.
         std::complex<float> zero[1] = {};
         const void* z[1] = {zero};
         size_t n = 0;

@@ -76,6 +76,8 @@ IqFile::~IqFile() {
 }
 
 int64_t IqFile::numSamples(const FormatParams& fp) const {
+    // A negative header would put sample 0 before the mapping (issue #39).
+    if (fp.headerBytes < 0) return 0;
     int64_t avail = (int64_t)size_ - fp.headerBytes;
     if (avail <= 0) return 0;
     return avail / formatBytesPerSample(fp.fmt);
