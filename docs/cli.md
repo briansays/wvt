@@ -43,7 +43,7 @@ wvt [options] [file]
 | `--gain DB\|auto` | The receiver gain (default 30 dB) | [Live devices](live.md) |
 | `--ref-level DBM` | BB60: the strongest expected input (default −20 dBm) | [Live devices](live.md#bb60-settings) |
 | `--atten auto\|0\|10\|20\|30` | BB60: the attenuator (default `auto`) | [Live devices](live.md#bb60-settings) |
-| `--amp auto\|0-3` | BB60: the amplifier setting (default `auto`) | [Live devices](live.md#bb60-settings) |
+| `--bb-amp auto\|0-3` | BB60: the amplifier setting (default `auto`). The generator option `--amp` sets the amplitude | [Live devices](live.md#bb60-settings) |
 | `--ext-ref` | BB60: lock to a 10 MHz reference on port 1 | [Live devices](live.md#bb60-settings) |
 | `--antenna NAME` | The USRP receive antenna, for example `RX2` or `TX/RX` | [Live devices](live.md#usrp-options) |
 | `--usrp-channel N` | The USRP channel for receive and transmit (default 0) | [Live devices](live.md#usrp-options) |

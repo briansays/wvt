@@ -4,7 +4,8 @@
 
 | File | Function |
 |---|---|
-| `src/main.cpp` | Command-line parsing, ImGui and ImPlot setup, the event loop |
+| `src/main.cpp` | The table of command-line options, ImGui and ImPlot setup, the event loop |
+| `src/cli.*` | The table-driven command-line parser: it runs the option handlers and makes `--help` from the same table |
 | `src/platform_x11.*` | The Xlib window, input, clipboard, and GLX or software presentation |
 | `src/sw_renderer.*` | The software rasterizer for ImGui draw data |
 | `src/app.*` | The UI: toolbar, linked plots, parameter panels |

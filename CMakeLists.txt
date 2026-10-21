@@ -90,6 +90,7 @@ endif()
 
 add_executable(wvt
   src/main.cpp
+  src/cli.cpp
   src/app.cpp
   src/engine.cpp
   src/dsp.cpp
@@ -543,6 +544,8 @@ endif()
 foreach(_t IN LISTS WVT_CHECKS)
   add_test(NAME ${_t} COMMAND ${_t})
 endforeach()
+# The option table: --help fails if an option name is defined twice.
+add_test(NAME cli_help COMMAND wvt --no-log-file --help)
 
 # ---------------------------------------------------------------------------
 # libFuzzer targets for the parsers of user-supplied text (issue #53), clang
