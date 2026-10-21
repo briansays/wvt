@@ -32,6 +32,7 @@ to the default of an option, delete `build/CMakeCache.txt`, or give the default 
 | [`WVT_CUDA_STATIC`](#wvt_cuda_static) | `ON`, `OFF` | `ON` | Linux |
 | [`CMAKE_CUDA_ARCHITECTURES`](#cmake_cuda_architectures) | A list of GPU architectures | Refer to the section | Linux |
 | [`WVT_WITH_METAL`](#wvt_with_metal) | `AUTO`, `ON`, `OFF` | `AUTO` | macOS |
+| [`WVT_SANITIZE`](#wvt_sanitize) | `address`, `thread` or empty | Empty | All |
 
 The `AUTO`, `ON` and `OFF` values have the same meaning for all options:
 
@@ -183,6 +184,23 @@ to [GPU processing](gpu.md).
 
 Output: `wvt: Metal support enabled (MPSGraph FFT; the GPU path needs macOS 14 at run time)`.
 
+### WVT_SANITIZE
+
+Builds all the programs with compiler sanitizers. Use it to test, not for normal use: the
+programs are slower and use more memory.
+
+- `address`: AddressSanitizer and UndefinedBehaviorSanitizer (`-fsanitize=address,undefined`). They
+  find out-of-bounds access, use after free, memory leaks (Linux) and undefined behavior. An
+  undefined-behavior error stops the program.
+- `thread`: ThreadSanitizer (`-fsanitize=thread`). It finds data races between threads. You cannot
+  use it together with `address`.
+- Empty (the default): no sanitizers.
+
+The CUDA code (`gpu_cuda.cu`) does not get the sanitizer flags. Use a separate build folder for
+each value. Refer to [Self-checks](self-checks.md#sanitizer-builds).
+
+Output: `wvt: sanitizers enabled (address: -fsanitize=address,undefined;...)`.
+
 ## The CPU FFT
 
 The CPU FFT is not an option. On macOS, the build always links the Accelerate framework and uses
@@ -207,6 +225,12 @@ A CUDA build for one GPU type, with shared CUDA libraries:
 
 ```sh
 cmake -S . -B build -DWVT_WITH_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=89 -DWVT_CUDA_STATIC=OFF
+```
+
+A build for ThreadSanitizer, in a separate folder:
+
+```sh
+cmake -S . -B build-tsan -DWVT_SANITIZE=thread -DCMAKE_BUILD_TYPE=RelWithDebInfo
 ```
 
 A debug build:

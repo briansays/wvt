@@ -48,6 +48,27 @@ for t in siggen_check audio_check log_check segment_check gpu_check extract_chec
 done
 ```
 
+## Sanitizer builds
+
+wvt has many threads, lock-free rings and memory-mapped files. Run the self-checks in a sanitizer
+build to find memory errors and data races. Refer to [`WVT_SANITIZE`](build.md#wvt_sanitize).
+
+```sh
+cmake -S . -B build-asan -DWVT_SANITIZE=address -DWVT_BB_SIM=ON
+cmake --build build-asan -j
+cmake -S . -B build-tsan -DWVT_SANITIZE=thread -DWVT_BB_SIM=ON
+cmake --build build-tsan -j
+```
+
+Then run the self-checks from `build-asan/` and `build-tsan/`. A sanitizer error stops the
+program with a report and a non-zero exit code.
+
+:::{note}
+On Linux kernels with a high address-space randomization (for example Ubuntu 24.04), ThreadSanitizer
+can stop with `unexpected memory mapping`. Then type `sudo sysctl vm.mmap_rnd_bits=28` before you
+run the checks.
+:::
+
 ## Continuous integration
 
 GitHub Actions builds each pull request and each push to `main` (`.github/workflows/build.yml`):
@@ -56,4 +77,5 @@ GitHub Actions builds each pull request and each push to `main` (`.github/workfl
 |---|---|
 | Linux (CPU, RTL-SDR, UHD) | Builds with the two device backends and the simulated BB60, runs all self-checks and some command-line runs |
 | Linux CUDA 12.0 and 12.8 | Builds the CUDA backend. The runners have no GPU, so the job makes sure that a CUDA build runs on the CPU |
+| Sanitizers (address, thread) | Builds with `WVT_SANITIZE=address` (ASan and UBSan) and with `WVT_SANITIZE=thread` (TSan), and runs all self-checks |
 | Documentation | Builds these pages with Sphinx. A warning causes the job to fail |

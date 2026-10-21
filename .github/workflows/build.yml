@@ -44,6 +44,39 @@ jobs:
           ./build/iqgen /tmp/t.sigmf-data --fmt ci16
           ./build/wvt /tmp/t.sigmf-meta --chan 300k:150k --audio nfm --audio-out /tmp/t.wav --segment 0.5:1.5
 
+  sanitizers:
+    name: Sanitizers (${{ matrix.sanitize }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitize: [address, thread]
+    env:
+      UBSAN_OPTIONS: print_stacktrace=1
+      TSAN_OPTIONS: second_deadlock_stack=1
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libx11-dev libgl1-mesa-dev
+      - name: Allow TSan's memory layout
+        # Ubuntu 24.04 randomizes too many address bits for TSan ("unexpected memory mapping").
+        run: sudo sysctl vm.mmap_rnd_bits=28
+      - name: Configure
+        run: >
+          cmake -S . -B build -DWVT_SANITIZE=${{ matrix.sanitize }} -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DWVT_WITH_RTLSDR=OFF -DWVT_WITH_UHD=OFF -DWVT_WITH_CUDA=OFF -DWVT_BB_SIM=ON
+      - name: Build
+        run: cmake --build build -j "$(nproc)"
+      - name: Self-tests
+        run: |
+          for t in siggen_check audio_check log_check segment_check gpu_check extract_check snapshot_check device_check bb_check; do
+            echo "::group::$t"
+            ./build/$t
+            echo "::endgroup::"
+          done
+
   linux-cuda:
     name: Linux CUDA ${{ matrix.cuda }} (compile only)
     runs-on: ubuntu-24.04

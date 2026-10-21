@@ -8,6 +8,25 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
 
+# Sanitizer builds for the self-checks (issue #52): "address" is ASan with
+# UBSan, "thread" is TSan (the two cannot be combined). Every target gets the
+# flags, so one option builds wvt, the tools and the self-checks. CUDA code
+# does not: nvcc does not know these flags.
+set(WVT_SANITIZE "" CACHE STRING "Build with sanitizers: address (ASan + UBSan), thread (TSan), or empty for none")
+set_property(CACHE WVT_SANITIZE PROPERTY STRINGS "" address thread)
+if(WVT_SANITIZE STREQUAL "address")
+  set(WVT_SAN_FLAGS -fsanitize=address,undefined -fno-sanitize-recover=undefined)
+elseif(WVT_SANITIZE STREQUAL "thread")
+  set(WVT_SAN_FLAGS -fsanitize=thread)
+elseif(WVT_SANITIZE)
+  message(FATAL_ERROR "WVT_SANITIZE must be address, thread or empty (got '${WVT_SANITIZE}')")
+endif()
+if(WVT_SAN_FLAGS)
+  add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX,OBJCXX>:${WVT_SAN_FLAGS};-fno-omit-frame-pointer;-g>")
+  add_link_options(${WVT_SAN_FLAGS})
+  message(STATUS "wvt: sanitizers enabled (${WVT_SANITIZE}: ${WVT_SAN_FLAGS})")
+endif()
+
 set(IMGUI_DIR  ${CMAKE_SOURCE_DIR}/third_party/imgui)
 set(IMPLOT_DIR ${CMAKE_SOURCE_DIR}/third_party/implot)
 
