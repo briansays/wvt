@@ -2,6 +2,7 @@
 // A small JSON reader (issue #27, chain files): objects, arrays, strings,
 // numbers, true / false / null. Enough for wvt's own files; not a validator
 // for every corner of RFC 8259 (it accepts what it can read).
+#include <cstdint>
 #include <string>
 #include <utility>
 #include <vector>
@@ -22,6 +23,9 @@ struct JsonValue {
     double number(const std::string& key, double def = 0) const;
     std::string string(const std::string& key, const std::string& def = {}) const;
     bool boolean(const std::string& key, bool def = false) const;
+    // Whole-number member in [lo, hi], or `def` when missing. False if the
+    // member is there but isn't such a number (casting it would be undefined).
+    bool integer(const std::string& key, int64_t lo, int64_t hi, int64_t def, int64_t& out) const;
 };
 
 // Parses the whole text. On failure, err says what and where (line:column).
