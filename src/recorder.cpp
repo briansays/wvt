@@ -145,6 +145,21 @@ bool Recorder::start(std::shared_ptr<SampleRing> ring, const RecordSource& src, 
         LOG_DEBUG("record", "start failed: %s", err.c_str());
         return false;
     }
+    // Claim the metadata name too: writeMeta() renames over it, which would
+    // replace a .sigmf-meta left from an older recording (issue #47).
+    if (cfg.sigmf) {
+        const std::string metaPath = base + ".sigmf-meta";
+        const int mfd = ::open(metaPath.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0644);
+        if (mfd < 0) {
+            err = "cannot create '" + metaPath + "': " + errnoText(errno);
+            LOG_DEBUG("record", "start failed: %s", err.c_str());
+            ::close(fd_);
+            fd_ = -1;
+            unlink(dataPath.c_str());
+            return false;
+        }
+        ::close(mfd);
+    }
     {
         std::lock_guard<std::mutex> lk(m_);
         dataPath_ = dataPath;
@@ -163,6 +178,7 @@ bool Recorder::start(std::shared_ptr<SampleRing> ring, const RecordSource& src, 
         ::close(fd_);
         fd_ = -1;
         unlink(dataPath.c_str());
+        unlink((base + ".sigmf-meta").c_str());
         return false;
     }
 

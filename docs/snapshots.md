@@ -17,6 +17,9 @@ compare two recordings.
 The window closes, and wvt saves one PNG file for each plot. The status bar shows the result. To
 close the window without a save, click **Cancel**.
 
+wvt does not replace a snapshot file. If a different wvt window uses the same number at the same
+time, wvt uses the next number.
+
 ## Plots
 
 | Plot | Mode | Contents |
