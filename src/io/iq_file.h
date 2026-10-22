@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <complex>
 #include <cstdint>
 #include <memory>
@@ -27,6 +28,12 @@ void encodeSamples(SampleFormat fmt, const std::complex<float>* in, int64_t coun
 
 // Read-only memory-mapped IQ recording. Immutable after open(), so it can be
 // shared between threads; the mapping lives until the last reference drops.
+//
+// If another program makes the file shorter while it is open, a read past
+// the new end would raise SIGBUS and stop wvt. A SIGBUS handler for these
+// mappings puts zero pages there instead, so the read gets zeros, and
+// truncated() becomes true (issue #41). wvt does not support viewing a file
+// while it is still being written.
 class IqFile {
 public:
     static std::shared_ptr<IqFile> open(const std::string& path, std::string& err);
@@ -38,6 +45,8 @@ public:
     uint64_t sizeBytes() const { return size_; }
     int64_t numSamples(const FormatParams& fp) const;
     const uint8_t* data() const { return data_; }  // the raw mapped bytes (GPU upload)
+    // The file got shorter after open(): the samples past its new end read as zeros.
+    bool truncated() const { return truncated_.load(std::memory_order_relaxed); }
 
     // Reads `count` complex samples starting at sample `start`, normalized to
     // roughly [-1, 1]. Samples outside the file are zero-filled.
@@ -48,6 +57,9 @@ private:
     std::string path_;
     const uint8_t* data_ = nullptr;
     uint64_t size_ = 0;
+    int slot_ = -1;  // in the SIGBUS handler's table of mappings
+    std::atomic<bool> truncated_{false};
+    friend struct MapGuard;
 };
 
 // Metadata inferred from a SigMF sidecar, gqrx-style filename, or extension.

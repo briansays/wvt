@@ -60,6 +60,11 @@ wvt memory-maps the file. Thus wvt can open files that are larger than the memor
 computer. For files that are very large, load a part of the file only. Refer to
 [Load a segment](segments.md).
 
+wvt does not support a file that a different program is still writing. If the file gets shorter
+while it is open (for example, a recorder that starts the file again), the part after the new
+end shows as zeros, and the status bar shows a warning. To see the new length, open the file
+again.
+
 ## Screen layout
 
 | Area | Contents |

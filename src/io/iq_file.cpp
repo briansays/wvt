@@ -1,6 +1,7 @@
 #include "io/iq_file.h"
 
 #include <fcntl.h>
+#include <signal.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -12,6 +13,7 @@
 #include <cstring>
 #include <ctime>
 #include <fstream>
+#include <mutex>
 #include <regex>
 #include <sstream>
 
@@ -42,6 +44,84 @@ int formatBytesPerSample(SampleFormat f) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// SIGBUS guard for the mappings (issue #41)
+// ---------------------------------------------------------------------------
+// A table of the open mappings that the signal handler can read without a
+// lock. A slot is in use while its file is open.
+struct MapGuard {
+    static constexpr int kSlots = 256;
+    struct Slot {
+        std::atomic<uintptr_t> base{0};
+        std::atomic<size_t> len{0};
+        std::atomic<IqFile*> file{nullptr};
+    };
+    static Slot slots[kSlots];
+    static struct sigaction previous;
+
+    static void handler(int sig, siginfo_t* info, void* ctx) {
+        const uintptr_t a = (uintptr_t)info->si_addr;
+        for (Slot& s : slots) {
+            const uintptr_t b = s.base.load(std::memory_order_acquire);
+            if (!b || a < b || a >= b + s.len.load(std::memory_order_relaxed)) continue;
+            // The pages from the fault to the end of the mapping become zero
+            // pages; the read then goes on with zeros. mmap() is a plain
+            // system call here, as in other SIGBUS handlers of this kind.
+            const uintptr_t page = (uintptr_t)getpagesize();
+            const uintptr_t from = a & ~(page - 1);
+            const uintptr_t end = b + s.len.load(std::memory_order_relaxed);
+            const size_t len = (end - from + page - 1) & ~(page - 1);
+            if (mmap((void*)from, len, PROT_READ, MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0) == MAP_FAILED) break;
+            if (IqFile* f = s.file.load(std::memory_order_acquire)) f->truncated_.store(true, std::memory_order_relaxed);
+            return;
+        }
+        // Not one of ours: do what would have happened without this handler.
+        if (previous.sa_flags & SA_SIGINFO) {
+            if (previous.sa_sigaction) previous.sa_sigaction(sig, info, ctx);
+            return;
+        }
+        if (previous.sa_handler == SIG_IGN) return;
+        if (previous.sa_handler != SIG_DFL && previous.sa_handler) {
+            previous.sa_handler(sig);
+            return;
+        }
+        signal(sig, SIG_DFL);  // returning re-runs the access, which now stops the program
+    }
+
+    static void install() {
+        static std::once_flag once;
+        std::call_once(once, [] {
+            struct sigaction sa{};
+            sa.sa_sigaction = handler;
+            sa.sa_flags = SA_SIGINFO;
+            sigemptyset(&sa.sa_mask);
+            sigaction(SIGBUS, &sa, &previous);
+        });
+    }
+
+    static int add(IqFile* f) {
+        install();
+        for (int k = 0; k < kSlots; ++k) {
+            IqFile* none = nullptr;
+            if (!slots[k].file.compare_exchange_strong(none, f)) continue;
+            slots[k].len.store(f->size_, std::memory_order_relaxed);
+            slots[k].base.store((uintptr_t)f->data_, std::memory_order_release);
+            return k;
+        }
+        LOG_WARN("file", "more than %d files open: a file that gets shorter can stop wvt", kSlots);
+        return -1;
+    }
+
+    static void remove(int k) {
+        if (k < 0) return;
+        slots[k].base.store(0, std::memory_order_release);
+        slots[k].len.store(0, std::memory_order_relaxed);
+        slots[k].file.store(nullptr, std::memory_order_release);
+    }
+};
+MapGuard::Slot MapGuard::slots[MapGuard::kSlots];
+struct sigaction MapGuard::previous{};
+
 std::shared_ptr<IqFile> IqFile::open(const std::string& path, std::string& err) {
     int fd = ::open(path.c_str(), O_RDONLY);
     if (fd < 0) {
@@ -58,7 +138,11 @@ std::shared_ptr<IqFile> IqFile::open(const std::string& path, std::string& err) 
     f->path_ = path;
     f->size_ = (uint64_t)st.st_size;
     if (f->size_ > 0) {
-        void* p = mmap(nullptr, f->size_, PROT_READ, MAP_PRIVATE, fd, 0);
+        // MAP_SHARED: wvt never writes, so it is the same as MAP_PRIVATE, except
+        // after a truncation: macOS can go on reading stale pages of a private
+        // mapping until they are evicted, then fault. Shared, both systems
+        // fault at once, and the guard below handles it (issue #41).
+        void* p = mmap(nullptr, f->size_, PROT_READ, MAP_SHARED, fd, 0);
         if (p == MAP_FAILED) {
             err = "mmap failed for '" + path + "': " + errnoText(errno);
             ::close(fd);
@@ -66,6 +150,7 @@ std::shared_ptr<IqFile> IqFile::open(const std::string& path, std::string& err) 
         }
         madvise(p, f->size_, MADV_RANDOM);
         f->data_ = (const uint8_t*)p;
+        f->slot_ = MapGuard::add(f.get());
     }
     ::close(fd);
     LOG_DEBUG("file", "opened %s (%llu bytes)", path.c_str(), (unsigned long long)f->size_);
@@ -73,6 +158,7 @@ std::shared_ptr<IqFile> IqFile::open(const std::string& path, std::string& err) 
 }
 
 IqFile::~IqFile() {
+    MapGuard::remove(slot_);
     if (data_) munmap((void*)data_, size_);
 }
 
