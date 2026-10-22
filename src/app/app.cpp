@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "imgui_internal.h"
+#include "io/session.h"
 #include "common/log.h"
 #include "app/platform_x11.h"
 
@@ -96,6 +97,12 @@ bool App::busy() const {
 // Source / view management
 // ---------------------------------------------------------------------------
 bool App::openFile(const std::string& path, const CliOverrides& o) {
+    // A session file names a recording and the state to show it in (issue #76).
+    if (isSessionFile(path)) return openSession(expandHome(path));
+    return openFileOnly(path, o);
+}
+
+bool App::openFileOnly(const std::string& path, const CliOverrides& o) {
     FileMetaGuess g = guessMeta(path);
     std::string err;
     std::shared_ptr<IqFile> f;
@@ -468,6 +475,7 @@ void App::frame() {
     ImGui::End();
     drawSnapshotWindow();
     drawHelpWindows();
+    drawSessionWindow();
     drawSigGenWindow();
     drawAudioWindow();
     drawExportWindow();

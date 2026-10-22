@@ -26,6 +26,7 @@ their range. For more information about an option, refer to the page in the last
 | `--scale S` | The UI scale. Useful on a high-resolution display | |
 | `--geometry WxH` | The initial window size (default 1600x950) | |
 | `--screenshot F` | Show one frame, write it to `F` as a PPM file, then stop | |
+| `--session-out F` | Open the file with the other options, write a file session to `F`, then stop | [File sessions](sessions.md) |
 | `--gpu auto\|on\|off` | GPU processing | [GPU](gpu.md) |
 | `--gpu-device N` | Use GPU `N` | [GPU](gpu.md) |
 | `-h`, `--help` | Show the options, then stop | |

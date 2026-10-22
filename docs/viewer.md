@@ -11,6 +11,9 @@ Give the file on the command line, or type its path in the file row and click **
 wvt recording.sigmf-meta
 ```
 
+To open a saved session (the recording and the view, plots and channel that you saved), open the
+session file in the same way. Refer to [File sessions](sessions.md).
+
 ### Sample formats
 
 wvt reads these sample formats. Add `_be` for big-endian samples, for example `ci16_be`.
@@ -82,7 +85,7 @@ again.
 
 | Menu | Items |
 |---|---|
-| **File** | Open file, export region, save plot snapshots, quit |
+| **File** | Open file, export region, save plot snapshots, save file session (refer to [File sessions](sessions.md)), quit |
 | **View** | Time markers, frequency markers, relative frequency, peak hold, the overview strip, the time plots to show, show everything |
 | **Tools** | Signal generator, audio, use the GPU |
 | **Help** | Keyboard and mouse, about wvt |

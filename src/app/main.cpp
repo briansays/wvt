@@ -373,7 +373,7 @@ static int runAudioLive(const StreamConfig& dev, const AudioParams& ap, const st
 
 int main(int argc, char** argv) {
     CliOverrides ov;
-    std::string path, shotPath;
+    std::string path, shotPath, sessionOut;
     bool software = false, showHelp = false;
     bool haveChan = false, haveView = false, haveSeg = false;
     std::string extractOut;
@@ -516,6 +516,7 @@ int main(int argc, char** argv) {
         return true;
     });
     cli.add(nullptr, "--screenshot", "F", "render, write a PPM screenshot to F and exit", text(shotPath));
+    cli.add(nullptr, "--session-out", "F", "open the file and options, write a file session to F and exit", text(sessionOut));
     cli.add(nullptr, "--gpu", "auto|on|off", "GPU processing, CUDA or Metal (default auto, or $WVT_GPU);\non = stop if no GPU can be used",
             [&](const char* v) {
                 if (!parseGpuMode(v, gpuMode)) return bad("--gpu wants auto, on or off");
@@ -1101,6 +1102,7 @@ int main(int argc, char** argv) {
     }
     LOG_INFO("main", "window %dx%d, scale %.2f, %s renderer", winW, winH, scale, win.usingGL() ? "GLX" : "software");
 
+    int exitCode = 0;
     {
         App app(win);
         app.setTxLimits(txc.limits);
@@ -1128,7 +1130,7 @@ int main(int argc, char** argv) {
         for (;;) {
             auto now = std::chrono::steady_clock::now();
             bool active = app.busy() || app.audioBusy() || now - lastActivity < std::chrono::milliseconds(600) ||
-                          !shotPath.empty();
+                          !shotPath.empty() || !sessionOut.empty();
             if (!win.pumpEvents(active ? 1.0 / 60.0 : 0.5) || app.quitRequested()) break;
             // Any input (or worker wake-up) keeps the loop running at frame rate for a moment.
             if (io.MouseDelta.x != 0 || io.MouseDelta.y != 0 || io.MouseWheel != 0 || ImGui::IsAnyItemActive() ||
@@ -1142,15 +1144,26 @@ int main(int argc, char** argv) {
             win.render(ImGui::GetDrawData(), ImVec4(0.06f, 0.06f, 0.07f, 1.f));
             app.afterRender();
             ++frame;
-            if (!shotPath.empty()) {
+            if (!shotPath.empty() || !sessionOut.empty()) {
                 idleFrames = app.busy() ? 0 : idleFrames + 1;
                 // A live stream is never idle: wait until the waterfall has some history.
                 bool ready = app.isLive() ? app.liveRowsReceived() >= 90 : (frame > 20 && idleFrames > 10);
                 if ((haveGen || openGen) && !app.sigGenPreviewReady()) ready = false;
                 if (ready || frame > 3000) {
-                    bool ok = win.screenshot(shotPath);
-                    if (ok) logStatus("main", "screenshot %s written", shotPath.c_str());
-                    else LOG_ERROR("main", "screenshot %s FAILED", shotPath.c_str());
+                    if (!shotPath.empty()) {
+                        bool ok = win.screenshot(shotPath);
+                        if (ok) logStatus("main", "screenshot %s written", shotPath.c_str());
+                        else LOG_ERROR("main", "screenshot %s FAILED", shotPath.c_str());
+                    }
+                    if (!sessionOut.empty()) {
+                        std::string err;
+                        if (app.saveSession(sessionOut, false, err)) {
+                            logStatus("main", "session %s written", sessionOut.c_str());
+                        } else {
+                            LOG_ERROR("main", "session not written: %s", err.c_str());
+                            exitCode = 1;
+                        }
+                    }
                     break;
                 }
             }
@@ -1159,5 +1172,5 @@ int main(int argc, char** argv) {
     LOG_INFO("main", "window closed, exiting");
     ImPlot::DestroyContext();
     // Window owns the GL backend; destroy it before the ImGui context.
-    return 0;
+    return exitCode;
 }

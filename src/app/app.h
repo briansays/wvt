@@ -11,6 +11,7 @@
 #include "implot.h"
 #include "device/live.h"
 #include "siggen/siggen_out.h"
+#include "io/session.h"
 #include "io/snapshot.h"
 #include "common/ui_util.h"
 
@@ -32,7 +33,11 @@ class App {
 public:
     explicit App(X11Window& win);
     ~App();
+    // A recording, or a session file (issue #76), which opens its recording
+    // and puts back the state it saved.
     bool openFile(const std::string& path, const CliOverrides& o = {});
+    // Writes the file viewer's state as a session (File > Save File Session, --session-out).
+    bool saveSession(const std::string& path, bool overwrite, std::string& err) const;
     void frame();
     bool busy() const;
     // File > Quit or Ctrl+Q
@@ -74,6 +79,13 @@ private:
     // UI sections
     void drawMenuBar();      // app_menu.cpp
     void drawHelpWindows();  // keyboard help and About (app_menu.cpp)
+
+    // file sessions (app_session.cpp, issue #76)
+    bool openFileOnly(const std::string& path, const CliOverrides& o);  // a recording, not a session
+    bool openSession(const std::string& path);
+    Session sessionFromState() const;
+    void openSaveSession();
+    void drawSessionWindow();
     void drawToolbar();
     void drawOverview(float h);
     void drawLeft();
@@ -261,6 +273,11 @@ private:
     };
     SnapArea snapArea_[kSnapPlots];
     bool snapOpen_ = false;
+
+    // File > Save File Session
+    bool sessOpen_ = false, sessOverwrite_ = false, sessMsgErr_ = false;
+    char sessPath_[2048] = {};
+    std::string sessMsg_;
     bool snapSel_[kSnapPlots] = {true, true, true, true, true, true, true};
     char snapDir_[1024] = "~/wvt-recordings/";
     int snapCountdown_ = 0;  // frames until the capture; 0 = none due

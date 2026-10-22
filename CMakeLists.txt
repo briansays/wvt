@@ -119,6 +119,8 @@ add_executable(wvt
   src/app/app_export.cpp
   src/app/app_menu.cpp
   src/app/app_snapshot.cpp
+  src/app/app_session.cpp
+  src/io/session.cpp
   src/io/snapshot.cpp
   ${FONT_CPP})
 target_include_directories(wvt PRIVATE src third_party/stb ${PLATFORM_INCLUDES})
@@ -519,6 +521,13 @@ target_include_directories(clipboard_check PRIVATE src ${PLATFORM_INCLUDES})
 target_link_libraries(clipboard_check PRIVATE imgui_implot ${PLATFORM_LIBS} Threads::Threads)
 target_compile_options(clipboard_check PRIVATE ${WVT_WARNINGS})
 
+# Session file self-test (issue #76)
+add_executable(session_check tools/session_check.cpp src/io/session.cpp src/io/iq_file.cpp src/io/recorder.cpp
+  src/common/json.cpp src/common/log.cpp src/common/ui_util.cpp)
+target_include_directories(session_check PRIVATE src)
+target_link_libraries(session_check PRIVATE imgui_implot Threads::Threads)
+target_compile_options(session_check PRIVATE ${WVT_WARNINGS})
+
 add_executable(snapshot_check tools/snapshot_check.cpp src/io/snapshot.cpp)
 target_include_directories(snapshot_check PRIVATE src third_party/stb)
 target_compile_options(snapshot_check PRIVATE ${WVT_WARNINGS})
@@ -547,7 +556,7 @@ endif()
 # ---------------------------------------------------------------------------
 enable_testing()
 set(WVT_CHECKS siggen_check audio_check log_check segment_check gpu_check extract_check snapshot_check device_check
-  clipboard_check)
+  clipboard_check session_check)
 if(WVT_BB_SIM)
   list(APPEND WVT_CHECKS bb_check)
 endif()
@@ -555,6 +564,10 @@ foreach(_t IN LISTS WVT_CHECKS)
   add_test(NAME ${_t} COMMAND ${_t})
 endforeach()
 set_tests_properties(clipboard_check PROPERTIES SKIP_RETURN_CODE 77)
+# Open a session and save it again through wvt itself (issue #76); needs an X server.
+add_test(NAME session_roundtrip COMMAND ${CMAKE_COMMAND} -DWVT=$<TARGET_FILE:wvt> -DIQGEN=$<TARGET_FILE:iqgen>
+  -DDIR=${CMAKE_BINARY_DIR}/session_roundtrip -P ${CMAKE_SOURCE_DIR}/tools/session_roundtrip.cmake)
+set_tests_properties(session_roundtrip PROPERTIES SKIP_REGULAR_EXPRESSION "skipped")
 # The option table: --help fails if an option name is defined twice.
 add_test(NAME cli_help COMMAND wvt --no-log-file --help)
 # --tx-dry-run checks the transmit limits and opens no device (issue #49).
