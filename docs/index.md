@@ -30,6 +30,7 @@ viewer
 segments
 export
 snapshots
+sessions
 live
 siggen
 audio

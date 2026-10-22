@@ -82,6 +82,9 @@ void App::drawMenuBar() {
         ImGui::SetItemTooltip("Type or paste the path in the File box and press Enter");
         if (ImGui::MenuItem("Export region...", "Ctrl+E", exOpen_, !liveMode_ && file_)) toggleExport();
         if (ImGui::MenuItem("Save plot snapshots...")) openSnapshot();
+        if (ImGui::MenuItem("Save File Session...", nullptr, false, !liveMode_ && file_)) openSaveSession();
+        ImGui::SetItemTooltip("Save the recording, the view, the plot settings and the channel in a file.\n"
+                              "To open it again, type its path in the File box.");
         ImGui::Separator();
         if (ImGui::MenuItem("Quit", "Ctrl+Q")) quit_ = true;
         ImGui::EndMenu();
