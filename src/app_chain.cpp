@@ -50,6 +50,12 @@ void App::addChainItem(const std::string& path, bool fromViewer, bool markers) {
         }
         if (haveFc && !txOn) p.fc = fc;
     }
+    if (std::string err; !fromViewer && !metaReadable(guessMeta(expandHome(path)), err)) {
+        sgChainNote_ = err;
+        sgChainNoteErr_ = true;
+        LOG_ERROR("app", "chain: %s", err.c_str());
+        return;
+    }
     ChainItem c = makeChainItem(path, p, &sgChainNote_);
     if (fromViewer) {  // read it the way the viewer does, overrides included
         c.fp = fp_;
