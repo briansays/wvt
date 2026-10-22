@@ -1214,6 +1214,22 @@ int main(int argc, char** argv) {
               "JSON: arrays, numbers, escapes, unicode", err);
         check(!parseJson("{\"a\": [1, 2}", v, err) && err.find("line 1") != std::string::npos, "JSON: reports errors", err);
         check(jsonQuote("a\"b\\c\n") == "\"a\\\"b\\\\c\\n\"", "JSON: quoting");
+
+        // Strict JSON (issue #48): surrogate pairs, raw control characters, the number grammar.
+        check(parseJson(R"(["\ud83d\ude00"])", v, err) && v.arr[0].str == "\xf0\x9f\x98\x80", "JSON: a surrogate pair", err);
+        bool refused = true;
+        std::string which;
+        for (const char* s : {R"(["\ud83d"])", R"(["\ude00"])", R"(["\ud83dx"])", R"(["\ud83d\u0041"])", "[\"a\tb\"]",
+                              "[-inf]", "[nan]", "[0x10]", "[+1]", "[.5]", "[1.]", "[01]", "[1e]", "[-]", "[1e999]"}) {
+            if (parseJson(s, v, err)) {
+                refused = false;
+                which += std::string(" ") + s;
+            }
+        }
+        check(refused, "JSON: lone surrogates, raw tabs and non-JSON numbers are refused", which);
+        check(parseJson("[0, -0.5, 1e3, 2.5E-2, -12e+1]", v, err) && v.arr.size() == 5 && v.arr[1].num == -0.5 &&
+                  v.arr[2].num == 1000 && v.arr[3].num == 0.025 && v.arr[4].num == -120,
+              "JSON: valid numbers", err);
     }
 
     // --- SI numbers (issue #46): a unit may follow, other text may not ---

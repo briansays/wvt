@@ -90,6 +90,7 @@ bool App::openFile(const std::string& path, const CliOverrides& o) {
     }
     stopAudio("Audio stopped (new file)");
     file_ = f;
+    truncWarned_ = false;
     snprintf(pathBuf_, sizeof pathBuf_, "%s", g.dataPath.c_str());
     if (g.haveFmt) { fp_.fmt = g.fmt; fp_.bigEndian = g.bigEndian; }
     if (g.haveRate) fs_ = g.rate;
@@ -384,6 +385,11 @@ void App::frame() {
     if (liveMode_) pollLive();
     pollSigGen();
     pollAudio();
+    if (file_ && file_->truncated() && !truncWarned_) {
+        truncWarned_ = true;
+        status_ = "The file got shorter while open: its end shows as zeros. Open it again to see its new length.";
+        LOG_WARN("app", "%s got shorter while open; the part past its new end reads as zeros", file_->path().c_str());
+    }
     fFmt_.offset = relFreq_ ? fc_ : 0.0;
 
     const ImGuiViewport* vp = ImGui::GetMainViewport();

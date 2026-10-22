@@ -71,6 +71,7 @@ struct Parser {
         ++i;  // opening quote
         while (i < t.size() && t[i] != '"') {
             const char c = t[i++];
+            if ((unsigned char)c < 0x20) return fail("control character in a string");
             if (c != '\\') {
                 o += c;
                 continue;
@@ -89,10 +90,15 @@ struct Parser {
                 case 'u': {
                     unsigned cp;
                     if (!hex4(cp)) return fail("bad \\u escape");
-                    if (cp >= 0xd800 && cp < 0xdc00 && i + 1 < t.size() && t[i] == '\\' && t[i + 1] == 'u') {
+                    // A surrogate is valid only as a high-low pair (issue #48): a
+                    // lone half has no UTF-8 form.
+                    if (cp >= 0xdc00 && cp < 0xe000) return fail("lone low surrogate in \\u escape");
+                    if (cp >= 0xd800 && cp < 0xdc00) {
+                        unsigned lo = 0;
+                        if (i + 1 >= t.size() || t[i] != '\\' || t[i + 1] != 'u') return fail("lone high surrogate in \\u escape");
                         i += 2;
-                        unsigned lo;
                         if (!hex4(lo)) return fail("bad \\u escape");
+                        if (lo < 0xdc00 || lo >= 0xe000) return fail("high surrogate without a low surrogate in \\u escape");
                         cp = 0x10000 + ((cp - 0xd800) << 10) + (lo - 0xdc00);
                     }
                     utf8(o, cp);
@@ -180,12 +186,28 @@ struct Parser {
         }
         if (word("null")) return true;
         if (c == '-' || (c >= '0' && c <= '9')) {
-            const char* s = t.c_str() + i;
-            char* e = nullptr;
-            v.num = strtod(s, &e);
-            if (e == s) return fail("bad number");
+            // The JSON grammar first: strtod() also takes "inf", "nan" and hex (issue #48).
+            const size_t start = i;
+            auto digits = [&] {
+                const size_t b = i;
+                while (i < t.size() && t[i] >= '0' && t[i] <= '9') ++i;
+                return i > b;
+            };
+            if (t[i] == '-') ++i;
+            if (i < t.size() && t[i] == '0') ++i;
+            else if (!digits()) return fail("bad number");
+            if (i < t.size() && t[i] == '.') {
+                ++i;
+                if (!digits()) return fail("bad number");
+            }
+            if (i < t.size() && (t[i] == 'e' || t[i] == 'E')) {
+                ++i;
+                if (i < t.size() && (t[i] == '+' || t[i] == '-')) ++i;
+                if (!digits()) return fail("bad number");
+            }
+            v.num = strtod(t.substr(start, i - start).c_str(), nullptr);
+            if (!std::isfinite(v.num)) return fail("number out of range");
             v.type = JsonValue::Type::Number;
-            i += (size_t)(e - s);
             return true;
         }
         return fail("unexpected character");

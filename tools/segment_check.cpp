@@ -1,12 +1,17 @@
 // Time segment self-test (issue #16): segmentRange() rules for -1, clamping
 // and bad values, and computeOverview() on a sample range (it must read only
-// inside the range and report file time). Exit status is nonzero on failure.
+// inside the range and report file time). Also: a file that gets shorter
+// while it is open (issue #41). Exit status is nonzero on failure.
 #include <unistd.h>
 
 #include <cmath>
+#include <complex>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
+
+#include "io/iq_file.h"
 
 #include "dsp/engine.h"
 
@@ -102,6 +107,41 @@ void testOverview(const std::string& dir) {
 }
 }  // namespace
 
+// Another program truncates an open file: reads past the new end give zeros
+// and set truncated(), and wvt does not stop with SIGBUS.
+void testTruncated(const std::string& dir) {
+    printf("file truncated while open\n");
+    const std::string path = dir + "/trunc.cf32";
+    const int64_t n = 64 * 1024;  // 512 kB of cf32
+    {
+        std::vector<std::complex<float>> v((size_t)n, {0.5f, -0.25f});
+        FILE* f = fopen(path.c_str(), "wb");
+        fwrite(v.data(), sizeof v[0], v.size(), f);
+        fclose(f);
+    }
+    std::string err;
+    auto file = IqFile::open(path, err);
+    check(file != nullptr, "opened: " + err);
+    if (!file) return;
+    FormatParams fp;
+    std::vector<std::complex<float>> out(1024);
+    file->read(fp, 0, 1024, out.data());  // the first page is now mapped
+    check(!file->truncated() && out[5] == std::complex<float>(0.5f, -0.25f), "before: data, not truncated");
+    if (truncate(path.c_str(), 16 * 1024) != 0) perror("truncate");
+    file->read(fp, n - 1024, 1024, out.data());  // past the new end
+    bool zeros = true;
+    for (const auto& s : out) zeros = zeros && s == std::complex<float>(0, 0);
+    check(zeros, "a read past the new end gives zeros (no SIGBUS)");
+    std::vector<uint8_t> raw(4096, 0xff);
+    memcpy(raw.data(), file->data() + 300 * 1024, raw.size());  // the raw bytes (GPU upload path)
+    check(raw[0] == 0 && raw[4095] == 0, "the raw mapping past the new end reads as zeros");
+    file->read(fp, 100, 4, out.data());
+    check(out[0] == std::complex<float>(0.5f, -0.25f), "the part before the new end still reads");
+    check(file->truncated(), "truncated() reports it");
+    file.reset();
+    unlink(path.c_str());
+}
+
 int main() {
     char tmpl[] = "/tmp/wvt_segment_check_XXXXXX";
     if (!mkdtemp(tmpl)) {
@@ -110,6 +150,7 @@ int main() {
     }
     testRange();
     testOverview(tmpl);
+    testTruncated(tmpl);
     rmdir(tmpl);
     printf(failures ? "%d FAILED\n" : "all passed\n", failures);
     return failures ? 1 : 0;

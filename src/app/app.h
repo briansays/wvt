@@ -219,6 +219,7 @@ private:
     int64_t segS0_ = 0, segS1_ = 0;
     std::string status_;
     std::string metaNote_;
+    bool truncWarned_ = false;  // the file got shorter while open (issue #41)
 
     // linked view ranges (shared by all plots through ImPlot axis links)
     double tmin_ = 0, tmax_ = 1;
