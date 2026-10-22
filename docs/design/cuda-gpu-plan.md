@@ -29,14 +29,14 @@ Hard rules:
 
 | Computation | Code | Work | GPU value |
 |---|---|---|---|
-| File waterfall + spectrum | `computeWaterfall`, `src/engine.cpp` | rows × avg FFTs of size N, \|X\|², fftshift, average, column max-pool, log10. Input budget 256 M samples (`kMaxInputSamples`). Past it, "FFT sees" drops below 100 %. | **High** |
-| Live spectrum | `LiveEngine::spectrumLoop`, `src/live.cpp` | Same math on the newest ring samples. One thread. Auto averaging stops at 20 MS/s (`kMaxAnalyzeRate`). A USRP B2xx at 56 MS/s is not fully analyzed. | **High** |
-| Channel filter for the plots | `processRange`, `src/engine.cpp` | NCO mix + direct FIR with up to 8191 taps over up to 32 M input samples, then atan2 / unwrap / smoothing on the decimated output | **Medium**. Only the NCO + FIR are worth moving. |
-| Audio demod | `src/audio_dsp.cpp` | Streaming FIR + resampler on small real-time blocks | **None**. The blocks are too small, and a kernel launch would add latency. |
+| File waterfall + spectrum | `computeWaterfall`, `src/dsp/engine.cpp` | rows × avg FFTs of size N, \|X\|², fftshift, average, column max-pool, log10. Input budget 256 M samples (`kMaxInputSamples`). Past it, "FFT sees" drops below 100 %. | **High** |
+| Live spectrum | `LiveEngine::spectrumLoop`, `src/device/live.cpp` | Same math on the newest ring samples. One thread. Auto averaging stops at 20 MS/s (`kMaxAnalyzeRate`). A USRP B2xx at 56 MS/s is not fully analyzed. | **High** |
+| Channel filter for the plots | `processRange`, `src/dsp/engine.cpp` | NCO mix + direct FIR with up to 8191 taps over up to 32 M input samples, then atan2 / unwrap / smoothing on the decimated output | **Medium**. Only the NCO + FIR are worth moving. |
+| Audio demod | `src/audio/audio_dsp.cpp` | Streaming FIR + resampler on small real-time blocks | **None**. The blocks are too small, and a kernel launch would add latency. |
 | Overview strip | `computeOverview` | 4 × 2048-sample probes per bucket | None (disk bound) |
-| Siggen preview, playback resampler | `src/siggen_out.cpp`, `src/siggen.cpp` | Small or one-time work | None |
+| Siggen preview, playback resampler | `src/siggen/siggen_out.cpp`, `src/siggen/siggen.cpp` | Small or one-time work | None |
 
-The FFT (`src/dsp.cpp`) is a scalar radix-2 FFT. The waterfall uses `parallelFor` over
+The FFT (`src/dsp/dsp.cpp`) is a scalar radix-2 FFT. The waterfall uses `parallelFor` over
 rows. Each FFT reads and decodes its own samples through `IqFile::read`. The file is
 memory-mapped.
 
@@ -44,10 +44,10 @@ memory-mapped.
 
 - The UI is ImGui + ImPlot with the OpenGL 2 backend over GLX. When GLX works, the GPU
   already draws the frame.
-- When GLX does not work, `src/sw_renderer.cpp` draws on the CPU. This happens with some
+- When GLX does not work, `src/app/sw_renderer.cpp` draws on the CPU. This happens with some
   XQuartz or remote X11 setups.
 - The waterfall image is at most 1024 × 2048. The CPU changes dB values to colors with a
-  256-entry lookup table (`src/app.cpp`, `src/app_live.cpp`), then sends the image with
+  256-entry lookup table (`src/app/app.cpp`, `src/app/app_live.cpp`), then sends the image with
   `glTexImage2D`.
 
 That is a small part of the frame time. CUDA–OpenGL interop would need a direct GLX
@@ -69,19 +69,19 @@ context on the NVIDIA driver. It cannot work over remote X11, which is a main us
 | Build switch | `WVT_WITH_CUDA` = `AUTO` / `ON` / `OFF`, default `AUTO`. `AUTO` builds the CUDA code when the CUDA toolkit is found. `ON` stops the build if the toolkit is not found. | Same pattern as the other optional parts. |
 | "Based on presence of a GPU" | **Build time:** CMake checks for the CUDA toolkit (nvcc + cuFFT). **Run time:** wvt checks for the GPU and the driver. | The computer that builds wvt is often not the one that runs it. A CUDA build must still run on a computer with no GPU. |
 | CMake details | `include(CheckLanguage)`, `check_language(CUDA)`, then `enable_language(CUDA)` and `find_package(CUDAToolkit)`, all inside the CUDA block. The CUDA block needs CMake 3.18 or later; with an older CMake, skip it with a status line. On Apple, skip it, and stop the build if `ON`. | Non-CUDA builds do not change. |
-| Code layout | `src/gpu.h`: plain C++ interface, no CUDA headers. `src/gpu_cuda.cu`: kernels + cuFFT. `src/gpu_stub.cpp`: build without CUDA, "not available". `src/gpu_common.cpp`: code shared by both builds (option parsing, status text). | Callers stay plain C++. Same "one file per backend" style as `sdr_*.cpp`. The interface can later take a Vulkan or HIP backend. |
+| Code layout | `src/gpu/gpu.h`: plain C++ interface, no CUDA headers. `src/gpu/gpu_cuda.cu`: kernels + cuFFT. `src/gpu/gpu_stub.cpp`: build without CUDA, "not available". `src/gpu/gpu_common.cpp`: code shared by both builds (option parsing, status text). | Callers stay plain C++. Same "one file per backend" style as `sdr_*.cpp`. The interface can later take a Vulkan or HIP backend. |
 | FFT | cuFFT, single-precision C2C, batched plans | Fits "rows × avg" FFTs. |
 | Data transfer | Copy **raw** samples (cu8, ci16, ...) to the GPU through pinned buffers. Decode, window and FFT on the GPU. Copy back only rows × cols floats. | Two to eight times less PCIe traffic than decoded cf32. The output is small. |
 | Geometry stays in C++ | The engine still computes rows, hop, avg, cols, f0/f1, the spectrum and the percentiles. The GPU code replaces only the inner loop. | The two paths cannot drift apart on layout. |
 | Concurrency | One CUDA context. Each user thread (the waterfall worker, the live spectrum thread) owns its own stream, buffers and plan cache. | cuFFT plans are not thread-safe to share. Streams let the live and file paths overlap. |
-| Cancel | Process in chunks. Check `cancelled()` between chunks. | Keeps the "latest request wins" behavior of `Worker` (`src/engine.h`). |
+| Cancel | Process in chunks. Check `cancelled()` between chunks. | Keeps the "latest request wins" behavior of `Worker` (`src/dsp/engine.h`). |
 | Fallback | Each GPU function returns `false` on any error. The caller then runs the CPU code for that request. After an error other than "out of memory", that path stays on the CPU for the rest of the session. | Never lose a result because of the GPU. |
 | Run-time switch | `--gpu auto\|on\|off`, `--gpu-device N`, env `WVT_GPU`. `auto` uses a device with compute capability 7.5 or later and at least 1 GB of free memory. `on` stops at startup, with the reason, if no GPU is usable. | Lets the user compare with the CPU, or avoid a driver problem. |
 | Work budget | `kMaxInputSamples` and `kMaxAnalyzeRate` depend on the backend. The CPU keeps 256 M and 20 MS/s. The GPU values come from the benchmark (start at 2 G and 100 MS/s). | This is where the user sees the gain: wider views at 100 %, and full-rate live analysis. |
 | Logging (#14) | Component `gpu`. The `gpuInit` result is INFO: device, compute capability, memory, CUDA and driver versions, or why the GPU is not used. Each fallback is WARN, one time for each path. Request times are DEBUG, through the existing `Worker` "job took" line plus the GPU kernel time. | Follows the logging rules in `docs/design/verbose-logging-plan.md`. |
 | Match tolerance | Waterfall and spectrum: 0.05 dB on bins more than 20 dB above the noise floor. Channel filter I/Q: 1e-4 relative. | cuFFT and the radix-2 FFT round differently. Both are float. |
 
-## 4. Interface sketch (`src/gpu.h`)
+## 4. Interface sketch (`src/gpu/gpu.h`)
 
 ```cpp
 #pragma once
@@ -181,7 +181,7 @@ is one commit.
    - Send the `raw` slice that the loop already reads. Get back `n` powers. Column pooling
      stays in C++.
    - Make `kMaxAnalyzeRate` depend on the backend. Update the "up to 20 MS/s" tooltip in
-     `src/app_live.cpp`.
+     `src/app/app_live.cpp`.
    - Target: less than 2 ms of GPU time per row at 40 MS/s and 30 rows/s.
 6. **UI.**
    - Status bar tag `GPU <name>` or `CPU`. A tooltip with `GpuInfo` and the fallback notes.
@@ -251,12 +251,12 @@ recommendations: static cuFFT, CUDA 12.0 or later, and desktop RTX + data-center
 | File | Change |
 |---|---|
 | `tools/gpu_check.cpp` | Step 0: `--bench` CPU times. Step 1–2: checks of the setup rules (`--gpu` parsing, `auto` / `on` / `off`, the switch, the device list). |
-| `src/gpu.h` | `GpuMode`, `GpuInfo`, `gpuInit`, `gpuInfo`, `gpuEnabled`, `gpuSetEnabled`, `gpuListDevices`. `gpuSpectrogram` and `GpuLiveSpectrum` come with steps 4 and 5. |
-| `src/gpu_backend.h` | New, not in §3: the three functions a backend provides (`gpuBackendBuilt`, `gpuBackendProbe`, `gpuBackendList`). The rules and the log line stay in `gpu_common.cpp`, so both builds share them. |
-| `src/gpu_common.cpp` | Option parsing, the init rules, the INFO line, the switch. |
-| `src/gpu_stub.cpp` | "built without CUDA". |
-| `src/gpu_cuda.cu` | Device discovery: no device, no driver, driver too old, compute below 7.5, less than 1 GB free. `auto` picks the newest architecture, then the most multiprocessors. `CUDA_TRY` is ready for step 4. |
-| `src/main.cpp` | `--gpu`, `--gpu-device`, `WVT_GPU`, usage text, the GPU list in `--list-devices`. |
+| `src/gpu/gpu.h` | `GpuMode`, `GpuInfo`, `gpuInit`, `gpuInfo`, `gpuEnabled`, `gpuSetEnabled`, `gpuListDevices`. `gpuSpectrogram` and `GpuLiveSpectrum` come with steps 4 and 5. |
+| `src/gpu/gpu_backend.h` | New, not in §3: the three functions a backend provides (`gpuBackendBuilt`, `gpuBackendProbe`, `gpuBackendList`). The rules and the log line stay in `gpu_common.cpp`, so both builds share them. |
+| `src/gpu/gpu_common.cpp` | Option parsing, the init rules, the INFO line, the switch. |
+| `src/gpu/gpu_stub.cpp` | "built without CUDA". |
+| `src/gpu/gpu_cuda.cu` | Device discovery: no device, no driver, driver too old, compute below 7.5, less than 1 GB free. `auto` picks the newest architecture, then the most multiprocessors. `CUDA_TRY` is ready for step 4. |
+| `src/app/main.cpp` | `--gpu`, `--gpu-device`, `WVT_GPU`, usage text, the GPU list in `--list-devices`. |
 | `CMakeLists.txt` | `WVT_WITH_CUDA`, `WVT_CUDA_STATIC` (default `ON`), the `wvt_gpu` library, `gpu_check`. |
 
 ### Differences from the plan
@@ -320,11 +320,11 @@ nothing. It grows in step 4.
 
 | File | Change |
 |---|---|
-| `src/gpu.h` | `SpecJob` (the plan's `GpuSpecReq`, shared by the CPU and the GPU), `specFftStart`, `GpuStatus` (`Ok`, `Cancelled`, `Unavailable`, `Failed`), `gpuSpectrogram`, `gpuSpectrogramUsable`. |
-| `src/gpu_common.cpp` | The fallback rules: after a failure other than "out of memory", the waterfall stays on the CPU until the next `gpuInit`; one WARN. Out of memory: WARN once, the path stays on. `WVT_GPU_FORCE_FAIL=1` forces a failure. |
-| `src/gpu_cuda.cu` | `gpuBackendSpectrogram`, below. `CUDA_TRY` / `CUFFT_TRY` now return `Failed` with the message instead of logging. |
-| `src/engine.h`, `src/engine.cpp` | `computeWaterfall` keeps the geometry and tries the GPU first (budget 2 G samples); on any result other than `Ok` or `Cancelled` it computes `avg` again with the CPU budget and runs `spectrogramCpu`, the old loop moved out unchanged. `WaterfallRes::gpu` says which one ran. |
-| `src/iq_file.h` | `IqFile::data()`: the mapped bytes, for the upload. |
+| `src/gpu/gpu.h` | `SpecJob` (the plan's `GpuSpecReq`, shared by the CPU and the GPU), `specFftStart`, `GpuStatus` (`Ok`, `Cancelled`, `Unavailable`, `Failed`), `gpuSpectrogram`, `gpuSpectrogramUsable`. |
+| `src/gpu/gpu_common.cpp` | The fallback rules: after a failure other than "out of memory", the waterfall stays on the CPU until the next `gpuInit`; one WARN. Out of memory: WARN once, the path stays on. `WVT_GPU_FORCE_FAIL=1` forces a failure. |
+| `src/gpu/gpu_cuda.cu` | `gpuBackendSpectrogram`, below. `CUDA_TRY` / `CUFFT_TRY` now return `Failed` with the message instead of logging. |
+| `src/dsp/engine.h`, `src/dsp/engine.cpp` | `computeWaterfall` keeps the geometry and tries the GPU first (budget 2 G samples); on any result other than `Ok` or `Cancelled` it computes `avg` again with the CPU budget and runs `spectrogramCpu`, the old loop moved out unchanged. `WaterfallRes::gpu` says which one ran. |
+| `src/io/iq_file.h` | `IqFile::data()`: the mapped bytes, for the upload. |
 | `CMakeLists.txt` | CUDA C++20 (the headers use defaulted `operator==`). Static cuFFT needs `CUDA_SEPARABLE_COMPILATION` and `CUDA_RESOLVE_DEVICE_SYMBOLS` on `wvt_gpu` (device link). `segment_check` links `wvt_gpu`. |
 | `tools/gpu_check.cpp` | GPU against CPU in all 6 formats, big-endian, swapped I/Q, a 3-byte header, FFTs before and after the file, rows longer than one chunk, `computeWaterfall`, cancel, and the forced failure. `--bench` adds GPU columns. |
 
@@ -366,12 +366,12 @@ of the file than on the CPU.
 
 | File | Change |
 |---|---|
-| `src/gpu.h` | `GpuLiveSpectrum` (a class with a hidden backend object, not the virtual `create` of §4, so the fallback rules stay in `gpu_common.cpp`) and `gpuLiveUsable`. `run` takes the format, N and the frame count on each call, so the loop does not make a new object when N or the format changes. |
-| `src/gpu_common.cpp` | The fallback rules are now per path (`PathState`): a live failure turns off only the live path, and a waterfall failure only the waterfall. `gpuInit` resets both. |
-| `src/gpu_cuda.cu` | `gpuBackendLiveRun`: copy the raw row up, then `decodeWindowKernel` (no "inside the file" table), batched cuFFT, and `accumulateKernel` as one row of all the frames. Rows over 8 M samples go in chunks. The plan cache is shared (`PlanCache`). |
-| `src/live.cpp` | `spectrumLoop` tries the GPU first. Auto averaging analyzes up to 100 MS/s on the GPU (`kGpuMaxAnalyzeRate`) and 20 MS/s on the CPU. The column pooling and the "FFT sees" figure are unchanged. On a GPU failure the CPU does that row; the next rows use the CPU cap. |
-| `src/live.h` | `Stats::gpu`: the last row came from the GPU (for the status bar in step 6). |
-| `src/app_live.cpp` | The Avg tooltip: "up to 20 MS/s, or 100 MS/s on the GPU". |
+| `src/gpu/gpu.h` | `GpuLiveSpectrum` (a class with a hidden backend object, not the virtual `create` of §4, so the fallback rules stay in `gpu_common.cpp`) and `gpuLiveUsable`. `run` takes the format, N and the frame count on each call, so the loop does not make a new object when N or the format changes. |
+| `src/gpu/gpu_common.cpp` | The fallback rules are now per path (`PathState`): a live failure turns off only the live path, and a waterfall failure only the waterfall. `gpuInit` resets both. |
+| `src/gpu/gpu_cuda.cu` | `gpuBackendLiveRun`: copy the raw row up, then `decodeWindowKernel` (no "inside the file" table), batched cuFFT, and `accumulateKernel` as one row of all the frames. Rows over 8 M samples go in chunks. The plan cache is shared (`PlanCache`). |
+| `src/device/live.cpp` | `spectrumLoop` tries the GPU first. Auto averaging analyzes up to 100 MS/s on the GPU (`kGpuMaxAnalyzeRate`) and 20 MS/s on the CPU. The column pooling and the "FFT sees" figure are unchanged. On a GPU failure the CPU does that row; the next rows use the CPU cap. |
+| `src/device/live.h` | `Stats::gpu`: the last row came from the GPU (for the status bar in step 6). |
+| `src/app/app_live.cpp` | The Avg tooltip: "up to 20 MS/s, or 100 MS/s on the GPU". |
 | `tools/gpu_check.cpp` | GPU against CPU for cu8, ci16 at 20 and 61.44 MS/s, one frame, big-endian cf32 with swapped I/Q, and N 65536 over two chunks. A forced live failure turns off only the live path. `--bench` adds the GPU time per row. |
 
 The row is copied from ordinary (pageable) memory: at 100 MS/s and 30 rows/s that is
@@ -390,9 +390,9 @@ no dropped samples).
 
 | File | Change |
 |---|---|
-| `src/app.cpp` | `gpuTag`: the status bar shows `GPU <model>` or `CPU` before the renderer, by where the shown waterfall was computed (`WaterfallRes::gpu`). Its tooltip has the device, the CUDA and driver versions, "switched off", and the fallback notes. `drawGpuCheckbox`: **GPU** after **Peak**; it calls `gpuSetEnabled` and invalidates the waterfall worker, so the view is computed again. `drawStatusRight` draws the right side of both status bars. |
-| `src/app_live.cpp` | The live status bar: `FFT sees 100% (GPU)` and the same tag (from `Stats::gpu`). The GPU checkbox after **Cols**; the live loop checks it on each row. |
-| `src/gpu.h`, `src/gpu_common.cpp`, `src/gpu_cuda.cu` | `GpuInfo::model` (the name without "NVIDIA "), `gpuFallbackNotes()` (one line per path that fell back, with the error). |
+| `src/app/app.cpp` | `gpuTag`: the status bar shows `GPU <model>` or `CPU` before the renderer, by where the shown waterfall was computed (`WaterfallRes::gpu`). Its tooltip has the device, the CUDA and driver versions, "switched off", and the fallback notes. `drawGpuCheckbox`: **GPU** after **Peak**; it calls `gpuSetEnabled` and invalidates the waterfall worker, so the view is computed again. `drawStatusRight` draws the right side of both status bars. |
+| `src/app/app_live.cpp` | The live status bar: `FFT sees 100% (GPU)` and the same tag (from `Stats::gpu`). The GPU checkbox after **Cols**; the live loop checks it on each row. |
+| `src/gpu/gpu.h`, `src/gpu/gpu_common.cpp`, `src/gpu/gpu_cuda.cu` | `GpuInfo::model` (the name without "NVIDIA "), `gpuFallbackNotes()` (one line per path that fell back, with the error). |
 
 Differences from the plan:
 
@@ -430,10 +430,10 @@ filter as the slowest job (660 ms for 8191 taps on 8 MS).
 
 | File | Change |
 |---|---|
-| `src/gpu.h` | `ChanJob` (mix, FIR, decimate; shared by the CPU and the GPU), `gpuChannelize`, `gpuChannelUsable`. |
-| `src/gpu_common.cpp` | A third fallback path, "channel filter". |
-| `src/gpu_cuda.cu` | `decodeOne` (the decode rules, now shared by all kernels), `decodeMixKernel` (decode, zero outside the file, mix with the phase from the absolute index: `frac * index` in double, reduced to [0, 1), then `sincospif` in float), `firKernel` (direct FIR, only the kept outputs, taps in shared memory up to 12000), `gpuBackendChannelize` (chunks of up to 8 M input samples; the raw bytes go up straight from the mapping). |
-| `src/engine.h`, `src/engine.cpp` | `channelizeCpu`: the old mix + FIR code, moved unchanged. `processRange` tries the GPU in dense mode when the job has at least 2·10⁷ multiply-adds (`kGpuMinChanMacs`, a few ms of CPU work); sparse mode (short blocks per pixel) stays on the CPU. The atan2 / unwrap / smoothing stays on the CPU. |
+| `src/gpu/gpu.h` | `ChanJob` (mix, FIR, decimate; shared by the CPU and the GPU), `gpuChannelize`, `gpuChannelUsable`. |
+| `src/gpu/gpu_common.cpp` | A third fallback path, "channel filter". |
+| `src/gpu/gpu_cuda.cu` | `decodeOne` (the decode rules, now shared by all kernels), `decodeMixKernel` (decode, zero outside the file, mix with the phase from the absolute index: `frac * index` in double, reduced to [0, 1), then `sincospif` in float), `firKernel` (direct FIR, only the kept outputs, taps in shared memory up to 12000), `gpuBackendChannelize` (chunks of up to 8 M input samples; the raw bytes go up straight from the mapping). |
+| `src/dsp/engine.h`, `src/dsp/engine.cpp` | `channelizeCpu`: the old mix + FIR code, moved unchanged. `processRange` tries the GPU in dense mode when the job has at least 2·10⁷ multiply-adds (`kGpuMinChanMacs`, a few ms of CPU work); sparse mode (short blocks per pixel) stays on the CPU. The atan2 / unwrap / smoothing stays on the CPU. |
 | `tools/gpu_check.cpp` | GPU against CPU (1e-4 of the peak): 255 to 13001 taps, decimation 1 to 10, no mix, before and after the file, 3 chunks, cu8 / ci16 / cf32; cancel; a forced failure turns off only this path. `--bench` adds the GPU column. |
 
 Differences from the plan: no overlap-save FFT convolution for many taps. The direct

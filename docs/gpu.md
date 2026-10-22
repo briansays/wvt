@@ -80,14 +80,14 @@ wvt uses the CPU.
 
 ## How it works
 
-`src/gpu.h` is the interface that the rest of wvt uses. `src/gpu_common.cpp` applies the `--gpu`
-rules and the fallback to the CPU. Each backend implements the interface in `src/gpu_backend.h`:
+`src/gpu/gpu.h` is the interface that the rest of wvt uses. `src/gpu/gpu_common.cpp` applies the `--gpu`
+rules and the fallback to the CPU. Each backend implements the interface in `src/gpu/gpu_backend.h`:
 
 | Backend | File | FFT |
 |---|---|---|
-| CUDA | `src/gpu_cuda.cu` | cuFFT |
-| Metal | `src/gpu_metal.mm` | FFTs up to 4096 points in one pass in the on-chip memory of the GPU. Larger FFTs use MPSGraph |
-| None | `src/gpu_stub.cpp` | The CPU only |
+| CUDA | `src/gpu/gpu_cuda.cu` | cuFFT |
+| Metal | `src/gpu/gpu_metal.mm` | FFTs up to 4096 points in one pass in the on-chip memory of the GPU. Larger FFTs use MPSGraph |
+| None | `src/gpu/gpu_stub.cpp` | The CPU only |
 
 On a Mac, the GPU reads the memory-mapped file in place, because the CPU and the GPU share the
 memory. wvt sends a job to the GPU only when the job is sufficiently large. Each job type has its

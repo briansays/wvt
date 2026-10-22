@@ -146,14 +146,14 @@ must tell the user to record to a fast NVMe disk, or to use a lower rate.
 - [ ] Find `bin/sidekiq-config` in the order from §3. Run it for `--cflags`,
       `--libs-static` and `--version`. Make an `INTERFACE IMPORTED` target `sidekiq` that
       keeps the link flags in their order.
-- [ ] If found: add `src/sdr_skiq.cpp`, define `WVT_HAVE_SKIQ`, and print
+- [ ] If found: add `src/device/sdr_skiq.cpp`, define `WVT_HAVE_SKIQ`, and print
       `wvt: Sidekiq support enabled (SDK x.y.z)`. If not found: `ON` is a fatal error.
       `AUTO` prints a status line.
 - [ ] Skip on macOS with a status line. The SDK is for Linux only.
 - [ ] If an older SDK has no `sidekiq-config`, add a second lookup: `sidekiq_api.h` and
       `libsidekiq__<arch>.a` with the support libraries that the SDK manual lists.
 
-### Phase 2 — Device abstraction (`src/sdr_device.h`, `src/sdr_device.cpp`)
+### Phase 2 — Device abstraction (`src/device/sdr_device.h`, `src/device/sdr_device.cpp`)
 - [ ] Comments for the `skiq` use of `args`, `gain`, `bandwidth`, `antenna` and `extRef`.
 - [ ] `sdrDrivers()`, `enumerateDevices()` with a "Sidekiq (none detected)" entry, and
       `openDevice()` dispatch.
@@ -162,7 +162,7 @@ must tell the user to record to a fast NVMe disk, or to use a lower rate.
 - [ ] `GainRange`: add `std::vector<std::string> ports` if the RF port combo needs a list
       from the device. Else use a new `SdrDevice::rfPorts()` method. Choose the smaller change.
 
-### Phase 3 — Backend (`src/sdr_skiq.cpp`, new)
+### Phase 3 — Backend (`src/device/sdr_skiq.cpp`, new)
 - [ ] `enumerateSkiq()`: `skiq_get_cards`, then for each card the serial number and part
       type. The label is, for example, `Sidekiq X4 serial 8N3H (PCIe)`.
 - [ ] Open: find the card by serial number or `#N`. Check `skiq_is_card_avail`. Call
@@ -185,13 +185,13 @@ must tell the user to record to a fast NVMe disk, or to use a lower rate.
       mapping, the timestamp gap check and the sample shift. Phase 6 tests them without
       hardware.
 
-### Phase 4 — CLI (`src/main.cpp`)
+### Phase 4 — CLI (`src/app/main.cpp`)
 - [ ] `--device skiq[:SERIAL|#N]`. Reuse `--gain`, `--bandwidth`, `--antenna` (RF port)
       and `--ext-ref`.
 - [ ] Default rate 10 MS/s for `skiq` when `-r` is not given.
 - [ ] Help text: `--device` line, and "BB60 / Sidekiq" for `--ext-ref`.
 
-### Phase 5 — GUI (`src/app_live.cpp`)
+### Phase 5 — GUI (`src/app/app_live.cpp`)
 - [ ] Driver name "Sidekiq". Default gain range until a card is open.
 - [ ] Rate tooltip: the card's range after open, and the USB note.
 - [ ] Gain slider in dB, Auto box only if the card supports AGC.
@@ -217,13 +217,13 @@ must tell the user to record to a fast NVMe disk, or to use a lower rate.
   - A device table column, the CLI options, the source file table and roadmap row 1.3.
 
 ### Phase 7 — Optional: transmit from the signal generator
-- [ ] `openSkiqTx` for `SdrTx` (`src/sdr_tx.h`): `skiq_tx_block_allocate`,
+- [ ] `openSkiqTx` for `SdrTx` (`src/device/sdr_tx.h`): `skiq_tx_block_allocate`,
       `skiq_transmit`, `skiq_write_tx_LO_freq`, `skiq_write_tx_attenuation`,
       `skiq_start_tx_streaming` and `skiq_stop_tx_streaming`.
 - [ ] Transmit gain as attenuation (the Sidekiq controls TX power with attenuation). The
       `SdrTx` gain range shows it as negative dB, or the UI shows "Attenuation".
 - [ ] `openTx` dispatch, `--tx-args skiq[:SERIAL]`, and the signal generator window
-      (`src/app_siggen.cpp` now accepts only `uhd`).
+      (`src/app/app_siggen.cpp` now accepts only `uhd`).
 - [ ] Underrun count from `skiq_read_tx_num_underruns` into `SdrTx::Stats`.
 
 ## 6. Risks

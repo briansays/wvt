@@ -89,37 +89,37 @@ else()
 endif()
 
 add_executable(wvt
-  src/main.cpp
-  src/cli.cpp
-  src/app.cpp
-  src/engine.cpp
-  src/dsp.cpp
-  src/iq_file.cpp
-  src/platform_x11.cpp
-  src/sw_renderer.cpp
-  src/ui_util.cpp
-  src/app_live.cpp
-  src/app_siggen.cpp
-  src/app_chain.cpp
-  src/live.cpp
-  src/recorder.cpp
-  src/sdr_device.cpp
-  src/sdr_sim.cpp
-  src/sdr_siggen.cpp
-  src/siggen.cpp
-  src/siggen_out.cpp
-  src/json.cpp
-  src/audio_dsp.cpp
-  src/audio_engine.cpp
-  src/audio_out.cpp
-  src/wav_writer.cpp
-  src/app_audio.cpp
-  src/log.cpp
-  src/extract.cpp
-  src/app_export.cpp
-  src/app_menu.cpp
-  src/app_snapshot.cpp
-  src/snapshot.cpp
+  src/app/main.cpp
+  src/app/cli.cpp
+  src/app/app.cpp
+  src/dsp/engine.cpp
+  src/dsp/dsp.cpp
+  src/io/iq_file.cpp
+  src/app/platform_x11.cpp
+  src/app/sw_renderer.cpp
+  src/common/ui_util.cpp
+  src/app/app_live.cpp
+  src/app/app_siggen.cpp
+  src/app/app_chain.cpp
+  src/device/live.cpp
+  src/io/recorder.cpp
+  src/device/sdr_device.cpp
+  src/device/sdr_sim.cpp
+  src/device/sdr_siggen.cpp
+  src/siggen/siggen.cpp
+  src/siggen/siggen_out.cpp
+  src/common/json.cpp
+  src/audio/audio_dsp.cpp
+  src/audio/audio_engine.cpp
+  src/audio/audio_out.cpp
+  src/io/wav_writer.cpp
+  src/app/app_audio.cpp
+  src/common/log.cpp
+  src/dsp/extract.cpp
+  src/app/app_export.cpp
+  src/app/app_menu.cpp
+  src/app/app_snapshot.cpp
+  src/io/snapshot.cpp
   ${FONT_CPP})
 target_include_directories(wvt PRIVATE src third_party/stb ${PLATFORM_INCLUDES})
 target_link_libraries(wvt PRIVATE imgui_implot ${PLATFORM_LIBS} Threads::Threads)
@@ -149,7 +149,7 @@ if(NOT WVT_WITH_RTLSDR STREQUAL "OFF")
     pkg_check_modules(RTLSDR IMPORTED_TARGET librtlsdr)
   endif()
   if(RTLSDR_FOUND)
-    target_sources(wvt PRIVATE src/sdr_rtlsdr.cpp)
+    target_sources(wvt PRIVATE src/device/sdr_rtlsdr.cpp)
     target_link_libraries(wvt PRIVATE PkgConfig::RTLSDR)
     target_compile_definitions(wvt PRIVATE WVT_HAVE_RTLSDR)
     # rtlsdr_set_bias_tee() only exists in librtlsdr 0.6.0+ builds from 2018 on.
@@ -189,7 +189,7 @@ if(NOT WVT_WITH_UHD STREQUAL "OFF")
     endif()
   endif()
   if(WVT_UHD_OK)
-    target_sources(wvt PRIVATE src/sdr_uhd.cpp)
+    target_sources(wvt PRIVATE src/device/sdr_uhd.cpp)
     target_compile_definitions(wvt PRIVATE WVT_HAVE_UHD)
     message(STATUS "wvt: UHD support enabled (UHD ${WVT_UHD_VERSION})")
   elseif(WVT_WITH_UHD STREQUAL "ON")
@@ -307,7 +307,7 @@ else()
   endif()
 endif()
 if(WVT_BB_OK)
-  target_sources(wvt PRIVATE src/sdr_bb60.cpp)
+  target_sources(wvt PRIVATE src/device/sdr_bb60.cpp)
   target_link_libraries(wvt PRIVATE ${WVT_BB_TARGET})
   target_compile_definitions(wvt PRIVATE WVT_HAVE_BB)
   message(STATUS "wvt: Signal Hound BB60 support enabled (${WVT_BB_WHAT})")
@@ -382,11 +382,11 @@ else()
   endif()
 endif()
 
-add_library(wvt_gpu STATIC src/gpu_common.cpp)
+add_library(wvt_gpu STATIC src/gpu/gpu_common.cpp)
 target_include_directories(wvt_gpu PUBLIC src)
 target_compile_options(wvt_gpu PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:${WVT_WARNINGS}>")
 if(WVT_CUDA_OK)
-  target_sources(wvt_gpu PRIVATE src/gpu_cuda.cu)
+  target_sources(wvt_gpu PRIVATE src/gpu/gpu_cuda.cu)
   if(NOT WVT_CUDA_ARCHS_GIVEN)
     # Desktop RTX 20xx to 40xx and data-center A100 / H100, plus PTX for newer GPUs.
     set(WVT_ARCHS 75-real 80-real 86-real 89-real 90)
@@ -413,14 +413,14 @@ if(WVT_CUDA_OK)
   endif()
   message(STATUS "wvt: CUDA support enabled (CUDA ${CMAKE_CUDA_COMPILER_VERSION}, archs ${WVT_ARCHS_USED}, ${WVT_CUDA_LINK} cuFFT)")
 elseif(WVT_METAL_OK)
-  target_sources(wvt_gpu PRIVATE src/gpu_metal.mm)
+  target_sources(wvt_gpu PRIVATE src/gpu/gpu_metal.mm)
   set_target_properties(wvt_gpu PROPERTIES OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON)
   target_compile_options(wvt_gpu PRIVATE "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc;${WVT_WARNINGS}>")
   target_link_libraries(wvt_gpu PUBLIC "-framework Foundation" "-framework Metal" "-framework MetalPerformanceShaders"
                         "-framework MetalPerformanceShadersGraph")
   message(STATUS "wvt: Metal support enabled (MPSGraph FFT; the GPU path needs macOS 14 at run time)")
 else()
-  target_sources(wvt_gpu PRIVATE src/gpu_stub.cpp)
+  target_sources(wvt_gpu PRIVATE src/gpu/gpu_stub.cpp)
 endif()
 if(NOT WVT_CUDA_OK)
   if(WVT_WITH_CUDA STREQUAL "ON")
@@ -448,7 +448,7 @@ set_property(CACHE WVT_WITH_AUDIO PROPERTY STRINGS AUTO ON OFF)
 if(NOT WVT_WITH_AUDIO STREQUAL "OFF")
   set(MINIAUDIO_DIR ${CMAKE_SOURCE_DIR}/third_party/miniaudio)
   set(WVT_MA_DEFS MA_NO_DECODING MA_NO_ENCODING MA_NO_GENERATION MA_NO_RESOURCE_MANAGER MA_NO_NODE_GRAPH MA_NO_ENGINE)
-  add_library(miniaudio STATIC src/miniaudio_impl.c)
+  add_library(miniaudio STATIC src/audio/miniaudio_impl.c)
   target_include_directories(miniaudio PUBLIC ${MINIAUDIO_DIR})
   target_compile_options(miniaudio PRIVATE -w)
   if(APPLE)
@@ -471,63 +471,63 @@ add_executable(iqgen tools/iqgen.cpp)
 target_compile_options(iqgen PRIVATE ${WVT_WARNINGS})
 
 # Signal generator self-test (DSP and file output; no device needed)
-add_executable(siggen_check tools/siggen_check.cpp src/siggen.cpp src/siggen_out.cpp src/json.cpp src/recorder.cpp
-  src/sdr_device.cpp src/sdr_sim.cpp src/sdr_siggen.cpp src/iq_file.cpp src/dsp.cpp src/ui_util.cpp src/log.cpp)
+add_executable(siggen_check tools/siggen_check.cpp src/siggen/siggen.cpp src/siggen/siggen_out.cpp src/common/json.cpp src/io/recorder.cpp
+  src/device/sdr_device.cpp src/device/sdr_sim.cpp src/device/sdr_siggen.cpp src/io/iq_file.cpp src/dsp/dsp.cpp src/common/ui_util.cpp src/common/log.cpp)
 target_include_directories(siggen_check PRIVATE src)
 target_link_libraries(siggen_check PRIVATE imgui_implot Threads::Threads)
 target_compile_options(siggen_check PRIVATE ${WVT_WARNINGS})
 
 # Audio demodulator self-test (no sound device needed)
-add_executable(audio_check tools/audio_check.cpp src/audio_dsp.cpp src/wav_writer.cpp src/recorder.cpp
-  src/iq_file.cpp src/json.cpp src/dsp.cpp src/log.cpp)
+add_executable(audio_check tools/audio_check.cpp src/audio/audio_dsp.cpp src/io/wav_writer.cpp src/io/recorder.cpp
+  src/io/iq_file.cpp src/common/json.cpp src/dsp/dsp.cpp src/common/log.cpp)
 target_include_directories(audio_check PRIVATE src)
 target_link_libraries(audio_check PRIVATE Threads::Threads)
 target_compile_options(audio_check PRIVATE ${WVT_WARNINGS})
 
 # Logger self-test (levels, argument parsing, log file, threads)
-add_executable(log_check tools/log_check.cpp src/log.cpp)
+add_executable(log_check tools/log_check.cpp src/common/log.cpp)
 target_include_directories(log_check PRIVATE src)
 target_link_libraries(log_check PRIVATE Threads::Threads)
 target_compile_options(log_check PRIVATE ${WVT_WARNINGS})
 
 # Time segment self-test (segment rules, overview on a sample range)
-add_executable(segment_check tools/segment_check.cpp src/engine.cpp src/dsp.cpp src/iq_file.cpp src/json.cpp
-  src/ui_util.cpp src/log.cpp)
+add_executable(segment_check tools/segment_check.cpp src/dsp/engine.cpp src/dsp/dsp.cpp src/io/iq_file.cpp src/common/json.cpp
+  src/common/ui_util.cpp src/common/log.cpp)
 target_include_directories(segment_check PRIVATE src)
 target_link_libraries(segment_check PRIVATE wvt_gpu imgui_implot Threads::Threads)
 target_compile_options(segment_check PRIVATE ${WVT_WARNINGS})
 
 # Region export self-test (copies, band filter, metadata, checks, cancel)
-add_executable(extract_check tools/extract_check.cpp src/extract.cpp src/recorder.cpp src/engine.cpp src/dsp.cpp
-  src/iq_file.cpp src/json.cpp src/ui_util.cpp src/log.cpp)
+add_executable(extract_check tools/extract_check.cpp src/dsp/extract.cpp src/io/recorder.cpp src/dsp/engine.cpp src/dsp/dsp.cpp
+  src/io/iq_file.cpp src/common/json.cpp src/common/ui_util.cpp src/common/log.cpp)
 target_include_directories(extract_check PRIVATE src)
 target_link_libraries(extract_check PRIVATE wvt_gpu imgui_implot Threads::Threads)
 target_compile_options(extract_check PRIVATE ${WVT_WARNINGS})
 
 # GPU self-test and benchmark (CPU times; GPU vs CPU once a GPU backend exists)
-add_executable(gpu_check tools/gpu_check.cpp src/engine.cpp src/dsp.cpp src/iq_file.cpp src/json.cpp src/ui_util.cpp
-  src/log.cpp)
+add_executable(gpu_check tools/gpu_check.cpp src/dsp/engine.cpp src/dsp/dsp.cpp src/io/iq_file.cpp src/common/json.cpp src/common/ui_util.cpp
+  src/common/log.cpp)
 target_include_directories(gpu_check PRIVATE src)
 target_link_libraries(gpu_check PRIVATE wvt_gpu imgui_implot Threads::Threads)
 target_compile_options(gpu_check PRIVATE ${WVT_WARNINGS})
 
 # Plot snapshot self-test (file names, numbering, crop, PNG writer)
-add_executable(snapshot_check tools/snapshot_check.cpp src/snapshot.cpp)
+add_executable(snapshot_check tools/snapshot_check.cpp src/io/snapshot.cpp)
 target_include_directories(snapshot_check PRIVATE src third_party/stb)
 target_compile_options(snapshot_check PRIVATE ${WVT_WARNINGS})
 
 # Device self-test (UHD search results, device arguments, sample rate rules)
-add_executable(device_check tools/device_check.cpp src/siggen.cpp src/siggen_out.cpp src/json.cpp src/recorder.cpp
-  src/sdr_device.cpp src/sdr_sim.cpp src/sdr_siggen.cpp src/iq_file.cpp src/dsp.cpp src/ui_util.cpp src/log.cpp)
+add_executable(device_check tools/device_check.cpp src/siggen/siggen.cpp src/siggen/siggen_out.cpp src/common/json.cpp src/io/recorder.cpp
+  src/device/sdr_device.cpp src/device/sdr_sim.cpp src/device/sdr_siggen.cpp src/io/iq_file.cpp src/dsp/dsp.cpp src/common/ui_util.cpp src/common/log.cpp)
 target_include_directories(device_check PRIVATE src)
 target_link_libraries(device_check PRIVATE imgui_implot Threads::Threads)
 target_compile_options(device_check PRIVATE ${WVT_WARNINGS})
 
 # BB60 backend self-test against the simulated device (only with WVT_BB_SIM)
 if(WVT_BB_SIM)
-  add_executable(bb_check tools/bb_check.cpp src/sdr_bb60.cpp src/live.cpp src/recorder.cpp src/sdr_device.cpp
-    src/sdr_sim.cpp src/sdr_siggen.cpp src/siggen.cpp src/siggen_out.cpp src/json.cpp src/engine.cpp src/iq_file.cpp
-    src/dsp.cpp src/ui_util.cpp src/log.cpp)
+  add_executable(bb_check tools/bb_check.cpp src/device/sdr_bb60.cpp src/device/live.cpp src/io/recorder.cpp src/device/sdr_device.cpp
+    src/device/sdr_sim.cpp src/device/sdr_siggen.cpp src/siggen/siggen.cpp src/siggen/siggen_out.cpp src/common/json.cpp src/dsp/engine.cpp src/io/iq_file.cpp
+    src/dsp/dsp.cpp src/common/ui_util.cpp src/common/log.cpp)
   target_include_directories(bb_check PRIVATE src)
   target_compile_definitions(bb_check PRIVATE WVT_HAVE_BB)
   target_link_libraries(bb_check PRIVATE bb_api_sim wvt_gpu imgui_implot Threads::Threads)
@@ -566,11 +566,11 @@ if(WVT_FUZZ)
   endif()
   set(_fuzz_flags -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer -g)
   # name: sources beyond the target's own .cpp
-  set(_fuzz_json src/json.cpp)
-  set(_fuzz_chain src/siggen.cpp src/siggen_out.cpp src/json.cpp src/recorder.cpp src/sdr_device.cpp src/sdr_sim.cpp
-    src/sdr_siggen.cpp src/iq_file.cpp src/dsp.cpp src/ui_util.cpp src/log.cpp)
-  set(_fuzz_meta src/iq_file.cpp src/json.cpp src/log.cpp)
-  set(_fuzz_parse_si src/ui_util.cpp src/log.cpp)
+  set(_fuzz_json src/common/json.cpp)
+  set(_fuzz_chain src/siggen/siggen.cpp src/siggen/siggen_out.cpp src/common/json.cpp src/io/recorder.cpp src/device/sdr_device.cpp src/device/sdr_sim.cpp
+    src/device/sdr_siggen.cpp src/io/iq_file.cpp src/dsp/dsp.cpp src/common/ui_util.cpp src/common/log.cpp)
+  set(_fuzz_meta src/io/iq_file.cpp src/common/json.cpp src/common/log.cpp)
+  set(_fuzz_parse_si src/common/ui_util.cpp src/common/log.cpp)
   foreach(_f json chain meta parse_si)
     add_executable(fuzz_${_f} tools/fuzz/fuzz_${_f}.cpp ${_fuzz_${_f}})
     target_include_directories(fuzz_${_f} PRIVATE src tools/fuzz)

@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 
-#include "ui_util.h"
+#include "common/ui_util.h"
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     const std::string s((const char*)data, size);  // parseSI wants a NUL-terminated string

@@ -19,8 +19,8 @@ Out of scope for now: FM stereo / RDS, more than one channel at a time, network 
 
 | Area | What exists | Gap |
 |---|---|---|
-| Demodulation | `computeDemod()` (`src/engine.cpp`) — batch per view, cancellable, reduced for display | No demodulator that keeps filter / phase state across blocks, so no continuous audio |
-| Live samples | `SampleRing` (`src/sample_ring.h`) supports extra lossy readers with their own cursor | `LiveEngine` does not expose `ring_`, the format, or the rate |
+| Demodulation | `computeDemod()` (`src/dsp/engine.cpp`) — batch per view, cancellable, reduced for display | No demodulator that keeps filter / phase state across blocks, so no continuous audio |
+| Live samples | `SampleRing` (`src/common/sample_ring.h`) supports extra lossy readers with their own cursor | `LiveEngine` does not expose `ring_`, the format, or the rate |
 | Tuning | `demod_.chanEnable/chanOffset/chanBw` and the drag overlay, file mode only | Live mode is spectrum-only and has no tuner overlay |
 | Tool windows | `drawSigGenWindow()` + `drawSigGenButton()` | Pattern to copy for a floating window and toolbar button |
 | Audio output | None — the build links only X11, GL, and threads | Needs an output backend |
@@ -31,7 +31,7 @@ Out of scope for now: FM stereo / RDS, more than one channel at a time, network 
 |---|---|---|
 | Audio output | Vendor **miniaudio** (single header, public domain / MIT-0) in `third_party/` | CoreAudio on macOS; ALSA / PulseAudio / PipeWire on Linux, loaded at runtime, so no new build dependency. Matches the vendored ImGui / ImPlot approach |
 | Build switch | `WVT_WITH_AUDIO` = `AUTO` / `ON` / `OFF`, defines `WVT_HAVE_AUDIO` | Same pattern as `WVT_WITH_RTLSDR` / `WVT_WITH_UHD`. With it off, WAV export still works |
-| DSP | New stateful, block-based `AudioDemod` (`src/audio_dsp.*`) | Keeps `computeDemod` and the viewer unchanged |
+| DSP | New stateful, block-based `AudioDemod` (`src/audio/audio_dsp.*`) | Keeps `computeDemod` and the viewer unchanged |
 | Channelizer | NCO shift → cascade of half-band decimators → final FIR to the IF rate | A single direct FIR (as in `computeDemod`) is too costly in real time at 10–20 MS/s |
 | Modes | AM, NFM, WFM (mono, 50 / 75 µs de-emphasis), USB, LSB, CW (BFO) | Covers the `sim` stations and common bands |
 | Resampling | Polyphase / Farrow resampler with a variable ratio, to 48 kHz | Device and file rates are arbitrary |
@@ -44,8 +44,8 @@ Out of scope for now: FM stereo / RDS, more than one channel at a time, network 
 ## 4. Work breakdown
 
 ### Phase 1 — Build and output backend
-- [x] Vendor `third_party/miniaudio/miniaudio.h`; one `src/audio_out.cpp` with `MINIAUDIO_IMPLEMENTATION`.
-- [x] `src/audio_out.h`: `AudioOut` — open / close, device list, 48 kHz stereo float, pull from the
+- [x] Vendor `third_party/miniaudio/miniaudio.h`; one `src/audio/audio_out.cpp` with `MINIAUDIO_IMPLEMENTATION`.
+- [x] `src/audio/audio_out.h`: `AudioOut` — open / close, device list, 48 kHz stereo float, pull from the
       SPSC ring, underrun counter, latency.
 - [x] CMake: `WVT_WITH_AUDIO`; link CoreAudio / AudioToolbox / CoreFoundation on macOS, `dl` / `m` on Linux.
 - [x] `--list-audio-devices`.
@@ -68,7 +68,7 @@ Out of scope for now: FM stereo / RDS, more than one channel at a time, network 
 - [x] Stats for the UI: playhead, level (dBFS), underruns, resyncs, latency, squelch state.
 - [x] `LiveEngine`: add `ring()`, `format()`, `rate()`, `gen()` accessors.
 
-### Phase 4 — UI (`src/app_audio.cpp`, members in `src/app.h`)
+### Phase 4 — UI (`src/app/app_audio.cpp`, members in `src/app/app.h`)
 - [x] Toolbar button "Audio" (`*` while playing) and **Ctrl+D** (Ctrl+A would conflict with
       select-all in text fields).
 - [x] Window contents:
@@ -120,8 +120,8 @@ Out of scope for now: FM stereo / RDS, more than one channel at a time, network 
 
 Implemented as planned, with these details:
 
-- Files: `src/audio_dsp.*`, `src/audio_engine.*`, `src/audio_out.*`, `src/wav_writer.*`,
-  `src/miniaudio_impl.c`, `src/app_audio.cpp`, `tools/audio_check.cpp`, `third_party/miniaudio/`
+- Files: `src/audio/audio_dsp.*`, `src/audio/audio_engine.*`, `src/audio/audio_out.*`, `src/io/wav_writer.*`,
+  `src/audio/miniaudio_impl.c`, `src/app/app_audio.cpp`, `tools/audio_check.cpp`, `third_party/miniaudio/`
   (0.11.25, header + license). Small changes in `app.*`, `app_live.cpp`, `live.h`, `main.cpp`,
   `recorder.*` (exports `makeDirs`), `CMakeLists.txt`, `README.md`.
 - miniaudio on macOS uses `MA_NO_RUNTIME_LINKING` and links the CoreAudio frameworks; on Linux it

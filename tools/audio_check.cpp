@@ -11,8 +11,8 @@
 #include <string>
 #include <vector>
 
-#include "audio_dsp.h"
-#include "wav_writer.h"
+#include "audio/audio_dsp.h"
+#include "io/wav_writer.h"
 
 namespace {
 int failures = 0;

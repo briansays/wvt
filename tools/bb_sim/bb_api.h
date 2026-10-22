@@ -1,6 +1,6 @@
 // The part of Signal Hound's bb_api.h that wvt uses, for the simulated BB60
 // (bb_api_sim.cpp). The declarations and values match bb_api 5.0.x, so
-// src/sdr_bb60.cpp builds against either. Build with -DWVT_BB_SIM=ON; for a
+// src/device/sdr_bb60.cpp builds against either. Build with -DWVT_BB_SIM=ON; for a
 // real BB60, point SIGNALHOUND_SDK_DIR at the SDK instead.
 #ifndef WVT_BB_API_SIM_H
 #define WVT_BB_API_SIM_H

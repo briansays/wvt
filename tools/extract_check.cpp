@@ -15,9 +15,9 @@
 #include <thread>
 #include <vector>
 
-#include "dsp.h"
-#include "extract.h"
-#include "iq_file.h"
+#include "dsp/dsp.h"
+#include "dsp/extract.h"
+#include "io/iq_file.h"
 
 namespace {
 int failures = 0;

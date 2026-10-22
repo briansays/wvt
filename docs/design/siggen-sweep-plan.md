@@ -9,7 +9,7 @@ and keeps running until the user stops it.
 
 ## 2. Starting point
 
-- `SigGen` (`src/siggen.*`) has three modes: CW, Pulsed and Playback.
+- `SigGen` (`src/siggen/siggen.*`) has three modes: CW, Pulsed and Playback.
 - CW already changes its frequency over time: `driftHzPerSec` is a linear drift that wraps at the
   band edge. `carrier()` steps the phase in blocks of 256 samples, and gets the frequency from
   `p_.offset + drift * t` at the start of each block.
@@ -173,10 +173,10 @@ Answered in §6.
 
 | File | Change |
 |---|---|
-| `src/siggen.h/.cpp` | `SweepShape`, the sweep fields, `sweepSamples` / `sweepOffsetAt` / `sweepLevelAt`, checks, description, metadata; `SigGen::sweep()` and `seekSweep()` |
-| `src/siggen_out.h/.cpp` | `eventName()`; file length in sweeps and "sweep N" annotations; the sweep preview (curves and max-hold spectrum) |
-| `src/app_siggen.cpp`, `src/app.h` | sweep rows in the CW section, Offset / Amplitude disabled while they are swept, `drawSweepPreview`, "Sweeps" length |
-| `src/main.cpp` | `--sweep`, `--sweep-shape`, `--sweep-step`, `--sweep-time`, `--level-sweep`, `--level-shape` |
+| `src/siggen/siggen.h/.cpp` | `SweepShape`, the sweep fields, `sweepSamples` / `sweepOffsetAt` / `sweepLevelAt`, checks, description, metadata; `SigGen::sweep()` and `seekSweep()` |
+| `src/siggen/siggen_out.h/.cpp` | `eventName()`; file length in sweeps and "sweep N" annotations; the sweep preview (curves and max-hold spectrum) |
+| `src/app/app_siggen.cpp`, `src/app/app.h` | sweep rows in the CW section, Offset / Amplitude disabled while they are swept, `drawSweepPreview`, "Sweeps" length |
+| `src/app/main.cpp` | `--sweep`, `--sweep-shape`, `--sweep-step`, `--sweep-time`, `--level-sweep`, `--level-shape` |
 | `tools/siggen_check.cpp` | 23 sweep checks |
 | `README.md` | Sweeps row, a Sweeps paragraph, file length, CLI options and examples |
 

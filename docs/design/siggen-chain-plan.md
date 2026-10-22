@@ -140,7 +140,7 @@ int chainLoops = 0;                  // 0 = forever
   - paths relative to the chain file when they sit beside it or below it, so a folder of canned
     signals can be moved as a whole.
 - **Reading it back** needs a JSON reader. `iq_file`'s key lookup can't read arrays, so the plan
-  adds a minimal parser to `src/json.*`:
+  adds a minimal parser to `src/common/json.*`:
   - about 200 lines, for objects, arrays, strings, numbers and booleans;
   - it can later replace `jsonValue` too.
 - **CLI:**
@@ -175,7 +175,7 @@ int chainLoops = 0;                  // 0 = forever
    - `FileGenJob` "Passes" length and item annotations.
    - `TxEngine` stops when the generator finishes.
    - Loopback says the chain finished.
-5. **JSON reader and chain files:** `src/json.*`, save and load.
+5. **JSON reader and chain files:** `src/common/json.*`, save and load.
 6. **Window:**
    - the Chain section, the table and its row editor, the add shortcuts and loading progress;
    - the preview with the item boundaries.
@@ -232,12 +232,12 @@ The branch starts from `28-siggen-sweep` (PR #30): both change the generator's f
 
 | File | Change |
 |---|---|
-| `src/siggen.h/.cpp` | `ChainItem`, `GenMode::Chain`, the chain fields, checks, description, metadata; `chainItemParams`, `makeChainItem`, `saveChain` / `loadChain`; the generator's chain schedule, per-item offset and gain, `chainPasses` / `endSample` / `finished`; the cache as a budgeted map (`kPlayCacheBudget`, `playbackCacheSamples`, `setPlaybackCacheBudget`); chain progress on `BusSigGen` and the bus |
-| `src/siggen_out.h/.cpp` | `preload()` for file and transmit; file length in passes, item annotations, the file ending with a finite chain; `TxEngine::Stats::finished`; the chain preview |
-| `src/json.h/.cpp` (new) | JSON reader and `jsonQuote` |
-| `src/app_chain.cpp` (new), `src/app.h` | the Chain section: table, row editor, add shortcuts, loop, chain file, totals; the preview with shaded items |
-| `src/app_siggen.cpp` | Chain mode, readiness and loading progress, Passes / Mark each item, chain status for loopback and transmit, the transmitter stopping at the end |
-| `src/main.cpp` | `--chain`, `--chain-add`, `--chain-loops`; the CLI transmitter stops at the end; the loopback device takes the generator's rate and center when -r / -c aren't given |
+| `src/siggen/siggen.h/.cpp` | `ChainItem`, `GenMode::Chain`, the chain fields, checks, description, metadata; `chainItemParams`, `makeChainItem`, `saveChain` / `loadChain`; the generator's chain schedule, per-item offset and gain, `chainPasses` / `endSample` / `finished`; the cache as a budgeted map (`kPlayCacheBudget`, `playbackCacheSamples`, `setPlaybackCacheBudget`); chain progress on `BusSigGen` and the bus |
+| `src/siggen/siggen_out.h/.cpp` | `preload()` for file and transmit; file length in passes, item annotations, the file ending with a finite chain; `TxEngine::Stats::finished`; the chain preview |
+| `src/common/json.h/.cpp` (new) | JSON reader and `jsonQuote` |
+| `src/app/app_chain.cpp` (new), `src/app/app.h` | the Chain section: table, row editor, add shortcuts, loop, chain file, totals; the preview with shaded items |
+| `src/app/app_siggen.cpp` | Chain mode, readiness and loading progress, Passes / Mark each item, chain status for loopback and transmit, the transmitter stopping at the end |
+| `src/app/main.cpp` | `--chain`, `--chain-add`, `--chain-loops`; the CLI transmitter stops at the end; the loopback device takes the generator's rate and center when -r / -c aren't given |
 | `tools/siggen_check.cpp` | 24 chain, cache and JSON checks |
 | `README.md` | Chain row and section, outputs, CLI, file table |
 

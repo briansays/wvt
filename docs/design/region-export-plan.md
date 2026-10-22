@@ -22,16 +22,16 @@ Issue #18 asks for these items:
 
 | Piece | Where | Use for the export |
 |---|---|---|
-| Channel filter | `processRange`, `src/engine.cpp` | Mix down with the phase from the absolute sample index, Blackman windowed-sinc FIR, compute only the kept (decimated) outputs. Same method for the export, but streamed in chunks over a range of any length. |
-| Channel settings | `demod_.chanEnable`, `chanOffset`, `chanBw` (`src/app.cpp`) | "From channel". |
+| Channel filter | `processRange`, `src/dsp/engine.cpp` | Mix down with the phase from the absolute sample index, Blackman windowed-sinc FIR, compute only the kept (decimated) outputs. Same method for the export, but streamed in chunks over a range of any length. |
+| Channel settings | `demod_.chanEnable`, `chanOffset`, `chanBw` (`src/app/app.cpp`) | "From channel". |
 | Time and frequency markers | `tm1_`, `tm2_`, `fm1_`, `fm2_` | "From markers". |
 | Time segment (#16) | `tBegin()`, `tEnd()`, `segS0_`, `segS1_` | The export stays inside the loaded segment. |
-| SigMF writer | `Recorder` (`src/recorder.*`): the stream comes through a `SampleRing`; the name is `PREFIX_<date>_<time>_<fc>_<rate>`; `core:datetime`, captures and annotations | `FileGenJob` (`src/siggen_out.cpp`) already uses it to write a file from a background job, with progress and cancel. |
+| SigMF writer | `Recorder` (`src/io/recorder.*`): the stream comes through a `SampleRing`; the name is `PREFIX_<date>_<time>_<fc>_<rate>`; `core:datetime`, captures and annotations | `FileGenJob` (`src/siggen/siggen_out.cpp`) already uses it to write a file from a background job, with progress and cancel. |
 | Background job with progress | `FileGenJob`, `WavExportJob` | The same pattern: thread, progress, cancel, status. |
-| Headless export | `--audio-out` (`runAudioExport`, `src/main.cpp`) | The same pattern for a test without a display. |
-| Draggable rectangle | `ImPlot::DragRect` (overview strip, `src/app.cpp`) | The selection box on the waterfall. |
+| Headless export | `--audio-out` (`runAudioExport`, `src/app/main.cpp`) | The same pattern for a test without a display. |
+| Draggable rectangle | `ImPlot::DragRect` (overview strip, `src/app/app.cpp`) | The selection box on the waterfall. |
 | Right mouse on the waterfall | ImPlot defaults: **right-drag = box zoom** (in the README), right-click = ImPlot's own context menu | The new menu must not break the box zoom. |
-| SigMF reader | `guessMeta` (`src/iq_file.cpp`) | Reads only format, rate and frequency. No `core:datetime`, no annotations. |
+| SigMF reader | `guessMeta` (`src/io/iq_file.cpp`) | Reads only format, rate and frequency. No `core:datetime`, no annotations. |
 | Separate windows | Audio (`auOpen_`, Ctrl+D), signal generator (Ctrl+G) | The export window works the same way. |
 
 ## 3. Design decisions
@@ -50,9 +50,9 @@ Issue #18 asks for these items:
 | Source annotations | Not copied (the reader does not parse them). | Can come later with the SigMF reader work. |
 | Writer | Reuse `Recorder` through a `SampleRing`, as `FileGenJob` does. Add `RecordConfig::exactPath`: the user's file name instead of `PREFIX_<date>_…`. | One SigMF writer. `exactPath` keeps the user's name. |
 | Range limits | Time inside the loaded segment (#16). Band inside `fc ± fs / 2`. BW at least `fs / 100 000` (D at most 80 000). | Same limits as the rest of the view. |
-| Background job | `ExtractJob` (`src/extract.*`): its own thread, chunks of about 4 M input samples, progress, cancel. Cancel **deletes** the partial files. An existing file is not overwritten unless the user confirms. | A cancelled export is not a usable file. |
+| Background job | `ExtractJob` (`src/dsp/extract.*`): its own thread, chunks of about 4 M input samples, progress, cancel. Cancel **deletes** the partial files. An existing file is not overwritten unless the user confirms. | A cancelled export is not a usable file. |
 | Disk space | Before starting, check the free space (`statvfs`) against the size estimate. Too little: an error, nothing is written. | Large exports can fill a disk. |
-| GPU (#3, PR #20) | The export filter is CPU code in `src/extract.cpp`. When #20 is merged, it can use `ChanJob` / `gpuChannelize`. | #20 is not merged yet; #18 must not wait for it. |
+| GPU (#3, PR #20) | The export filter is CPU code in `src/dsp/extract.cpp`. When #20 is merged, it can use `ChanJob` / `gpuChannelize`. | #20 is not merged yet; #18 must not wait for it. |
 | Logging (#14) | INFO at start (source, range, band, D, taps, output) and at the end (file, size, time). WARN for clipping and for clamped values. ERROR for failures, once, by the code that shows them. | `docs/design/verbose-logging-plan.md`. |
 
 ### The export window
@@ -93,7 +93,7 @@ the same way as in the window. It is for tests and scripts.
 
 ## 4. Implementation steps
 
-1. **Extraction core** (`src/extract.h`, `src/extract.cpp`).
+1. **Extraction core** (`src/dsp/extract.h`, `src/dsp/extract.cpp`).
    - `ExtractConfig` (source, sample range, band, format, file type, path) and
      `ExtractPlan` (D, taps, cutoff, output rate, sample count, bytes, or the error).
    - `planExtract(cfg)`: all the checks of §3, and no I/O, so the window can call it every
@@ -102,14 +102,14 @@ the same way as in the window. It is for tests and scripts.
      the absolute index (each chunk reads its own input with the filter overlap, as
      `processRange` does).
    - Output through `Recorder` with `exactPath`. `wvt:extract` metadata.
-2. **Recorder** (`src/recorder.*`): `RecordConfig::exactPath` and the start datetime from the
+2. **Recorder** (`src/io/recorder.*`): `RecordConfig::exactPath` and the start datetime from the
    source.
 3. **Background job**: `ExtractJob` (progress, cancel deletes the files, status) and the
    disk-space check.
 4. **Command line**: `--extract-out`, `--extract`, `--extract-band`, `--extract-format`, and
    the usage text.
 5. **Self-test** `tools/extract_check.cpp` (§5).
-6. **Export window** (`src/app_export.cpp`): the window of §3, **Export** button, Ctrl+E, the
+6. **Export window** (`src/app/app_export.cpp`): the window of §3, **Export** button, Ctrl+E, the
    "Fill from" buttons, progress, the result.
 7. **Waterfall**: `NoMenus`, the right-click menu, crosshair mode, the `DragRect` and the time
    bands on the right-hand plots.
@@ -166,12 +166,12 @@ The user said to go with the recommendations:
 
 | File | Change |
 |---|---|
-| `src/extract.h`, `src/extract.cpp` | `ExtractConfig`, `ExtractPlan`, `planExtract`, `defaultExtractPath`, `ExtractJob`. |
-| `src/app_export.cpp` | The export window, the fill buttons, the waterfall menu, the crosshair selection, the region on the plots. |
-| `src/app.h`, `src/app.cpp` | Export state, the **Export** button, Ctrl+E, `NoMenus` and the axis lock on the waterfall, the region in the time plots, `fileStart_`, `busy()` includes the export. |
-| `src/recorder.h`, `src/recorder.cpp` | `RecordConfig::exactPath`, `RecordConfig::startTime` (negative: no `core:datetime`), `rawFileExt`. |
-| `src/iq_file.h`, `src/iq_file.cpp` | `FileMetaGuess::startTime` from `core:datetime`; `parseIsoTime`. |
-| `src/main.cpp` | `--extract-out`, `--extract`, `--extract-band`, `--extract-format`, `--extract-overwrite`, `--export-window`; usage text. |
+| `src/dsp/extract.h`, `src/dsp/extract.cpp` | `ExtractConfig`, `ExtractPlan`, `planExtract`, `defaultExtractPath`, `ExtractJob`. |
+| `src/app/app_export.cpp` | The export window, the fill buttons, the waterfall menu, the crosshair selection, the region on the plots. |
+| `src/app/app.h`, `src/app/app.cpp` | Export state, the **Export** button, Ctrl+E, `NoMenus` and the axis lock on the waterfall, the region in the time plots, `fileStart_`, `busy()` includes the export. |
+| `src/io/recorder.h`, `src/io/recorder.cpp` | `RecordConfig::exactPath`, `RecordConfig::startTime` (negative: no `core:datetime`), `rawFileExt`. |
+| `src/io/iq_file.h`, `src/io/iq_file.cpp` | `FileMetaGuess::startTime` from `core:datetime`; `parseIsoTime`. |
+| `src/app/main.cpp` | `--extract-out`, `--extract`, `--extract-band`, `--extract-format`, `--extract-overwrite`, `--export-window`; usage text. |
 | `tools/extract_check.cpp` | Self-test (§5). |
 | `README.md` | "Export a region to a new file", the options, the layout and key tables, the file table. |
 

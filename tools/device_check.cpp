@@ -5,7 +5,7 @@
 #include <cstdio>
 #include <string>
 
-#include "sdr_device.h"
+#include "device/sdr_device.h"
 
 namespace {
 int failures = 0;
