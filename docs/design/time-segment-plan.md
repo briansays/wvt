@@ -46,13 +46,13 @@ for the part of the file that the user wants.
 
 ### What exists
 
-- `App::openFile` (`src/app.cpp`) gets the metadata, opens the `IqFile`, and calls
+- `App::openFile` (`src/app/app.cpp`) gets the metadata, opens the `IqFile`, and calls
   `onSourceChanged(true)`. That function sets `nSamples_` and `dur_` and resets the view
   to `0 … dur_`. The first frame then sends the waterfall, demod and overview requests
   (`submitRequests`).
 - The workers already take absolute sample ranges (`s0`, `s1`). The overview always reads
   the whole file (`OverviewReq` has no range).
-- About 20 places in `src/app.cpp` and 2 in `src/app_audio.cpp` use `0` and `dur_` /
+- About 20 places in `src/app/app.cpp` and 2 in `src/app/app_audio.cpp` use `0` and `dur_` /
   `nSamples_` as the limits of the file:
   - `setView` clamping;
   - `|<`, `>|`, `All` and the span presets;
@@ -63,7 +63,7 @@ for the part of the file that the user wants.
   - the default time markers;
   - the audio "Whole file" range and the playhead slider.
 - The command line already has `--view T0:T1` (initial view). In headless audio export,
-  `--view` also sets the export range (`runAudioExport`, `src/main.cpp`).
+  `--view` also sets the export range (`runAudioExport`, `src/app/main.cpp`).
 - Row 2 of the toolbar already has a **Start** box. It moves the view, not the segment.
   The new boxes need different names.
 
@@ -89,22 +89,22 @@ for the part of the file that the user wants.
 
 ## 4. Implementation steps
 
-1. **Segment state and limits** (`src/app.h`, `src/app.cpp`).
+1. **Segment state and limits** (`src/app/app.h`, `src/app/app.cpp`).
    - Add `segT0_ = -1`, `segT1_ = -1`, `segS0_` and `segS1_`, and the `tBegin()` and
      `tEnd()` helpers.
    - Add `applySegment(std::string& err)`. It turns the values into samples with the
      rules in §3. `onSourceChanged` calls it.
    - Change each limit listed in §2 to use the helpers.
-   - `OverviewReq` gets `s0` / `s1`, and `computeOverview` (`src/engine.cpp`) works on
+   - `OverviewReq` gets `s0` / `s1`, and `computeOverview` (`src/dsp/engine.cpp`) works on
      that range.
 2. **Toolbar boxes.**
    - Add two `InputSI` boxes in row 1, with the tooltip from §3.
    - Enter calls `setSegment(t0, t1)`: check the values, apply them, reset the view, log
      the result.
    - Add the segment text to the info line.
-3. **Audio** (`src/app_audio.cpp`). Rename "Whole file" to "Whole segment", and keep
+3. **Audio** (`src/app/app_audio.cpp`). Rename "Whole file" to "Whole segment", and keep
    `playRange` and the playhead slider inside the segment.
-4. **Command line** (`src/main.cpp`).
+4. **Command line** (`src/app/main.cpp`).
    - Add `--segment T0:T1` and its usage text.
    - Add a public `App::setSegment`. `openFile` applies the segment before the first
      view.
@@ -139,10 +139,10 @@ The user said to go ahead with the plan, so the recommendations apply:
 
 | File | Change |
 |---|---|
-| `src/engine.h`, `src/engine.cpp` | `SegmentRange segmentRange(t0, t1, fs, n)`: the rules in §3. `OverviewReq` has `s0` / `s1`. |
-| `src/app.h`, `src/app.cpp` | Segment state, `setSegment`, `applySegment`, `resetTimeView`, `tBegin()` / `tEnd()`. The Segment boxes. All the limits in §2. |
-| `src/app_audio.cpp` | Play ranges and the playhead inside the segment. "Whole segment" in the Range list. |
-| `src/main.cpp` | `--segment T0:T1`. The headless audio export uses the segment. |
+| `src/dsp/engine.h`, `src/dsp/engine.cpp` | `SegmentRange segmentRange(t0, t1, fs, n)`: the rules in §3. `OverviewReq` has `s0` / `s1`. |
+| `src/app/app.h`, `src/app/app.cpp` | Segment state, `setSegment`, `applySegment`, `resetTimeView`, `tBegin()` / `tEnd()`. The Segment boxes. All the limits in §2. |
+| `src/app/app_audio.cpp` | Play ranges and the playhead inside the segment. "Whole segment" in the Range list. |
+| `src/app/main.cpp` | `--segment T0:T1`. The headless audio export uses the segment. |
 | `tools/segment_check.cpp` | Self-test: 13 rule checks and 6 overview checks. |
 | `README.md` | "Large files: load a segment", the option, the layout table, the audio ranges. |
 

@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "snapshot.h"
+#include "io/snapshot.h"
 
 namespace {
 int failures = 0;

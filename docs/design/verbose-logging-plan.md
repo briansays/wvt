@@ -31,7 +31,7 @@ temp folder), syslog / journald, and a TRACE level for per-block signal-processi
 
 | Area | What exists | Gap |
 |---|---|---|
-| Console output | ~95 `fprintf(stderr, "wvt: ...")` calls, **all in `src/main.cpp`** (arg errors, headless record / audio / siggen progress, device errors) | No levels, nothing goes to a file |
+| Console output | ~95 `fprintf(stderr, "wvt: ...")` calls, **all in `src/app/main.cpp`** (arg errors, headless record / audio / siggen progress, device errors) | No levels, nothing goes to a file |
 | Library code | `engine`, `live`, `recorder`, `sdr_*`, `siggen_out`, `audio_*` print nothing; they return errors via `std::string& err` or `stats().error` / `status()` fields that the GUI shows | Actions (device start, tune, record start/stop, gaps, TX, audio start) leave no trace |
 | Threads | `live`, `recorder`, `sdr_rtlsdr`, `sdr_uhd`, `sdr_sim`, `siggen_out`, `audio_engine`, `dsp` all run worker threads | Logger must be thread-safe |
 | Real-time path | miniaudio callback in `audio_out.cpp`, SDR RX callbacks | Must not block on a mutex or do file I/O there |
@@ -42,7 +42,7 @@ temp folder), syslog / journald, and a TRACE level for per-block signal-processi
 
 | Topic | Decision | Reason |
 |---|---|---|
-| Library | Small in-house `src/log.h` / `src/log.cpp` (~150 lines), no new dependency | Matches the vendored, no-network build; spdlog would be overkill |
+| Library | Small in-house `src/common/log.h` / `src/common/log.cpp` (~150 lines), no new dependency | Matches the vendored, no-network build; spdlog would be overkill |
 | Levels | `DEBUG < INFO < WARN < ERROR` (accept `WARNING` as an alias, case-insensitive) | The "standard message types" in the issue |
 | Console default | Without `-v`: WARN and ERROR still print (keeps today's error messages). `-v` alone = INFO. `-v LEVEL` = that level | No change in behavior for users who don't pass `-v` (decided, section 7) |
 | File level | The file always gets **DEBUG and up**, independent of `-v` | Issue: "always generate a log file of those verbose actions". The file is for after-the-fact debugging |
@@ -60,10 +60,10 @@ temp folder), syslog / journald, and a TRACE level for per-block signal-processi
 
 ## 4. Implementation steps
 
-1. **Logger core** — *done.* `src/log.h`, `src/log.cpp`; add to `wvt`, `siggen_check` and `audio_check`
+1. **Logger core** — *done.* `src/common/log.h`, `src/common/log.cpp`; add to `wvt`, `siggen_check` and `audio_check`
    in `CMakeLists.txt` (the tools link library sources that will now call the logger; the tools
    do not call `init`, so they get console WARN+ and no file).
-2. **CLI** in `src/main.cpp` — *done* (`logParseArgs()` strips the log options from `argv`; the
+2. **CLI** in `src/app/main.cpp` — *done* (`logParseArgs()` strips the log options from `argv`; the
    git revision for the header comes from `git describe` at configure time):
    - Parse `-v` / `--verbose[=LEVEL]`, `--log-dir`, `--no-log-file` as the first pass over
      `argv`, then call `log::init()` **before** the main parse loop, so arg errors are logged too.

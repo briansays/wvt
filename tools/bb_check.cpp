@@ -19,11 +19,11 @@
 #include <thread>
 #include <vector>
 
-#include "dsp.h"
-#include "iq_file.h"
-#include "json.h"
-#include "live.h"
-#include "sdr_device.h"
+#include "dsp/dsp.h"
+#include "io/iq_file.h"
+#include "common/json.h"
+#include "device/live.h"
+#include "device/sdr_device.h"
 
 namespace {
 int failures = 0;

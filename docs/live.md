@@ -309,7 +309,7 @@ background thread, because a network search takes approximately half a second. T
 
 For the design, refer to [the USRP models design record](design/usrp-models-plan.md).
 
-The BB60 backend (`src/sdr_bb60.cpp`) uses `bb_api` from the Signal Hound SDK in I/Q streaming
+The BB60 backend (`src/device/sdr_bb60.cpp`) uses `bb_api` from the Signal Hound SDK in I/Q streaming
 mode with 16-bit samples. Its thread reads blocks of approximately 20 ms. For tests without the
 SDK or a device, `-DWVT_BB_SIM=ON` builds the backend against a simulated BB60D
 (`tools/bb_sim/`). The simulator makes a tone at 100.2 MHz and noise, and it reports an overload

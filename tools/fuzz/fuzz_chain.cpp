@@ -3,7 +3,7 @@
 #include <string>
 
 #include "fuzz_util.h"
-#include "siggen.h"
+#include "siggen/siggen.h"
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     static const std::string path = fuzzFile(".json");

@@ -15,7 +15,7 @@ Issue #19: the UI has become cluttered.
 - Keep the plots readable when the window is small.
 - Group related controls so that they are easier to find.
 
-Both issues change the same code (`src/app.cpp`, `src/app_live.cpp` and the plot
+Both issues change the same code (`src/app/app.cpp`, `src/app/app_live.cpp` and the plot
 helpers), so this plan covers them together.
 
 ## 2. Starting point (`main`)
@@ -225,12 +225,12 @@ right-click, readouts on the header rows, and the sample field moved off the row
 
 | File | Change |
 |---|---|
-| `src/app_menu.cpp` (new) | Menu bar, the right-hand indicators and source selector, the keyboard and mouse window, About |
-| `src/app.cpp`, `src/app.h` | File and navigation rows, waterfall settings row and ⚙, channel row and ⚙, time-plot headers, options popups and right-click, `showAll`, `toggleExport`, `addBookmark`, Ctrl+Q, status-bar path shortening |
-| `src/app_live.cpp` | Device ⚙ (RTL-SDR / USRP options), Record + ⚙, spectrum settings row and ⚙, source selector in the menu bar |
-| `src/app_siggen.cpp`, `src/app_audio.cpp`, `src/app_export.cpp` | Toolbar buttons removed; shared helpers used; preview legend outside; selection hint moved to the status bar |
-| `src/ui_util.*` | `tooltipAlways`, `beginForm` / `row`, `redButton` (moved from four files), `settingsButton` (a drawn gear: the font has no gear glyph), `colorbar` / `colorbarWidth`, `elideMiddle`; plot padding 24×10 px |
-| `src/main.cpp` | The loop ends on File → Quit / Ctrl+Q |
+| `src/app/app_menu.cpp` (new) | Menu bar, the right-hand indicators and source selector, the keyboard and mouse window, About |
+| `src/app/app.cpp`, `src/app/app.h` | File and navigation rows, waterfall settings row and ⚙, channel row and ⚙, time-plot headers, options popups and right-click, `showAll`, `toggleExport`, `addBookmark`, Ctrl+Q, status-bar path shortening |
+| `src/app/app_live.cpp` | Device ⚙ (RTL-SDR / USRP options), Record + ⚙, spectrum settings row and ⚙, source selector in the menu bar |
+| `src/app/app_siggen.cpp`, `src/app/app_audio.cpp`, `src/app/app_export.cpp` | Toolbar buttons removed; shared helpers used; preview legend outside; selection hint moved to the status bar |
+| `src/common/ui_util.*` | `tooltipAlways`, `beginForm` / `row`, `redButton` (moved from four files), `settingsButton` (a drawn gear: the font has no gear glyph), `colorbar` / `colorbarWidth`, `elideMiddle`; plot padding 24×10 px |
+| `src/app/main.cpp` | The loop ends on File → Quit / Ctrl+Q |
 | `README.md` | Screen layout, mouse and keyboard, and the places that named the old buttons |
 
 ### Differences from the plan

@@ -85,14 +85,14 @@ the first time.
 
 | Topic | Decision | Reason |
 |---|---|---|
-| API | **Metal**, in Objective-C++ (`src/gpu_metal.mm`), behind the existing backend interface (`src/gpu_backend.h`): `gpuBackendProbe`, `gpuBackendSpectrogram`, `gpuBackendLive*`, `gpuBackendChannelize`. | The rest of wvt does not change. Metal is the only supported GPU compute API on macOS (OpenCL is deprecated). |
+| API | **Metal**, in Objective-C++ (`src/gpu/gpu_metal.mm`), behind the existing backend interface (`src/gpu/gpu_backend.h`): `gpuBackendProbe`, `gpuBackendSpectrogram`, `gpuBackendLive*`, `gpuBackendChannelize`. | The rest of wvt does not change. Metal is the only supported GPU compute API on macOS (OpenCL is deprecated). |
 | Kernels | Metal Shading Language source kept as a C++ string in `gpu_metal.mm`, compiled at run time when the backend first starts (about 0.2 s, on a background thread). | It builds without Xcode. A precompiled `.metallib` would need Xcode on every build machine. |
 | FFT | **MPSGraph** `fastFourierTransform` (macOS 14 and later), between our own kernels. Cached graphs per (N, batch), with a power-of-two batch, as the cuFFT plan cache does. | Fast (§2), maintained by Apple, no extra dependency. The alternatives are below. |
 | FFT alternatives | (a) Our own Stockham FFT kernel: no graph compile, full control, but more work and tuning. (b) VkFFT with its Metal backend: one more third-party library, but it is also a route to Vulkan, HIP and OpenCL (§8). | Can replace MPSGraph later behind the same code, if the graph compile time matters. |
 | File input | `newBufferWithBytesNoCopy` over the page-aligned mapping, one buffer per chunk (offset rounded down to a page, at most 1 GB), so files larger than `maxBufferLength` work. `IqFile` exposes the mapping. | No gather and no copy (§2). |
 | Mixer phase | A **64-bit fixed-point phase**: the host computes the increment `inc = round(frac · 2⁶⁴)` and the chunk's start phase `in0 · inc` (unsigned 64-bit, wrapping). The kernel adds `k · inc` (`ulong`) and takes the top 32 bits as the phase in cycles. | Metal has `ulong` but no `double`. The phase stays exact for any file length; the error is far below the float rounding of the samples. The CUDA and CPU mixers can use the same method later. |
 | cf64 files | Decoded on the CPU to cf32 for that chunk (or the GPU path reports `Unavailable` for cf64 at first). | No `double` in Metal. cf64 is rare. |
-| CPU FFT | On macOS, `FFT::forward` (`src/dsp.cpp`) uses **vDSP** (`vDSP_fft_zip`, with a split-complex buffer per thread). Other systems keep the radix-2 code. | 2–6× for every FFT on every Mac (§2), with or without the GPU. Separate commit, separate test. |
+| CPU FFT | On macOS, `FFT::forward` (`src/dsp/dsp.cpp`) uses **vDSP** (`vDSP_fft_zip`, with a split-complex buffer per thread). Other systems keep the radix-2 code. | 2–6× for every FFT on every Mac (§2), with or without the GPU. Separate commit, separate test. |
 | Build | `WVT_WITH_METAL` = `AUTO` / `ON` / `OFF`, default `AUTO`, on Apple only. CMake enables `OBJCXX` and links Metal, Foundation, MetalPerformanceShaders and MetalPerformanceShadersGraph. CUDA stays Linux-only, so a build has at most one GPU backend. | Same pattern as `WVT_WITH_CUDA`. No new dependency to install. |
 | Run time | `gpuInit` finds the default Metal device. It needs macOS 14 or later (MPSGraph complex FFT); on older macOS the reason is logged and the CPU is used. Intel Macs with AMD or Intel graphics also have Metal; they are not tested. | The same `--gpu` rules and log lines as CUDA. |
 | Names | Messages that say "CUDA" become neutral: "built without GPU support", `GpuInfo::backend` = "CUDA" or "Metal", `gpu_check` prints the backend. The status bar shows `GPU Apple M5`. | Two backends now. |
@@ -102,10 +102,10 @@ the first time.
 
 ## 4. Interface changes
 
-- `src/gpu_backend.h`: no new functions. `GpuInfo` gets `backend` ("CUDA" / "Metal").
-- `src/iq_file.h`: `mappedBase()` and `mappedSize()`. The mapping is already page-aligned
+- `src/gpu/gpu_backend.h`: no new functions. `GpuInfo` gets `backend` ("CUDA" / "Metal").
+- `src/io/iq_file.h`: `mappedBase()` and `mappedSize()`. The mapping is already page-aligned
   (`mmap`). `data()` (the raw bytes) stays.
-- `src/dsp.cpp`: `FFT` holds a vDSP setup on Apple. `forward()` keeps its interface (in-place,
+- `src/dsp/dsp.cpp`: `FFT` holds a vDSP setup on Apple. `forward()` keeps its interface (in-place,
   interleaved `cf`), and converts to split complex inside.
 
 ## 5. Implementation steps
@@ -114,13 +114,13 @@ Each step builds and passes the tests, then gets its own commit.
 
 0. **Benchmark first.** `gpu_check --bench` on this Mac, before any change. These are the CPU
    numbers to beat.
-1. **vDSP CPU FFT** (`src/dsp.cpp`, Apple only).
+1. **vDSP CPU FFT** (`src/dsp/dsp.cpp`, Apple only).
    - All self-tests must pass.
    - `gpu_check` compares the vDSP FFT with the radix-2 one (strong bins within 0.05 dB) and
      times it.
    - The waterfall checksums change (a different FFT); the 0.05 dB rule is the test now.
 2. **Build switch and Metal probe.**
-   - `WVT_WITH_METAL` in CMake, and `src/gpu_metal.mm` with `gpuBackendProbe` and
+   - `WVT_WITH_METAL` in CMake, and `src/gpu/gpu_metal.mm` with `gpuBackendProbe` and
      `gpuBackendList`.
    - Neutral names (§3), `GpuInfo::backend`.
    - `--list-devices` shows the Metal device.
@@ -222,11 +222,11 @@ user chose the hybrid (2026-10-20):
 
 | File | Change |
 |---|---|
-| `src/dsp.h`, `src/dsp.cpp` | `FFT` uses vDSP on macOS (a split-complex scratch per thread). |
-| `src/gpu_metal.mm` | The Metal backend: device probe and list, the kernels (MSL source compiled at run time, safe math mode), no-copy buffers over the file mapping (up to 1 GB per chunk), the waterfall (hybrid), the live spectrum, the channel filter (64-bit fixed-point phase, taps in threadgroup memory up to 8192). cf64 is decoded on the CPU. |
-| `src/gpu.h`, `src/gpu_backend.h`, `src/gpu_common.cpp` | `GpuInfo::backend`; `gpuBackendName`, `gpuBackendImplements` (the jobs a backend runs), `GpuLimits` / `gpuBackendLimits` (budgets and the job sizes below which the CPU is faster). |
-| `src/gpu_cuda.cu`, `src/gpu_stub.cpp` | The new backend functions; CUDA keeps its limits. Neutral "built without GPU support". |
-| `src/engine.cpp`, `src/live.cpp` | The budgets and minimums come from `gpuLimits()`. |
+| `src/dsp/dsp.h`, `src/dsp/dsp.cpp` | `FFT` uses vDSP on macOS (a split-complex scratch per thread). |
+| `src/gpu/gpu_metal.mm` | The Metal backend: device probe and list, the kernels (MSL source compiled at run time, safe math mode), no-copy buffers over the file mapping (up to 1 GB per chunk), the waterfall (hybrid), the live spectrum, the channel filter (64-bit fixed-point phase, taps in threadgroup memory up to 8192). cf64 is decoded on the CPU. |
+| `src/gpu/gpu.h`, `src/gpu/gpu_backend.h`, `src/gpu/gpu_common.cpp` | `GpuInfo::backend`; `gpuBackendName`, `gpuBackendImplements` (the jobs a backend runs), `GpuLimits` / `gpuBackendLimits` (budgets and the job sizes below which the CPU is faster). |
+| `src/gpu/gpu_cuda.cu`, `src/gpu/gpu_stub.cpp` | The new backend functions; CUDA keeps its limits. Neutral "built without GPU support". |
+| `src/dsp/engine.cpp`, `src/device/live.cpp` | The budgets and minimums come from `gpuLimits()`. |
 | `CMakeLists.txt` | `WVT_WITH_METAL`, `OBJCXX`, the frameworks; Accelerate for every target on macOS. |
 | `tools/gpu_check.cpp` | The FFT against a direct DFT; the backend name; why a comparison is skipped; the bench shows the GPU budget and minimum. |
 | `README.md` | The GPU section covers Metal; options and the file table. |

@@ -22,12 +22,12 @@
 #include <utility>
 #include <vector>
 
-#include "dsp.h"
-#include "iq_file.h"
-#include "json.h"
-#include "siggen.h"
-#include "siggen_out.h"
-#include "ui_util.h"
+#include "dsp/dsp.h"
+#include "io/iq_file.h"
+#include "common/json.h"
+#include "siggen/siggen.h"
+#include "siggen/siggen_out.h"
+#include "common/ui_util.h"
 
 namespace {
 int failures = 0;

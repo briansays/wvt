@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "engine.h"
+#include "dsp/engine.h"
 
 namespace {
 int failures = 0;

@@ -38,17 +38,17 @@ Hound devices, transmit.
 - [x] `find_path(bb_api.h)` with SDK sub-folder suffixes; `find_library(bb_api)`.
 - [x] Fallback glob for the versioned `libbb_api.so.5.0.x`, choosing x86-64 vs aarch64 from
       `CMAKE_SYSTEM_PROCESSOR`, skipping symlinks.
-- [x] Imported target `bb_api`, adds `src/sdr_bb60.cpp`, defines `WVT_HAVE_BB`.
+- [x] Imported target `bb_api`, adds `src/device/sdr_bb60.cpp`, defines `WVT_HAVE_BB`.
 - [x] `ON` fails hard when not found; `AUTO` prints a status line.
 
-### Phase 2 — Device abstraction (`src/sdr_device.h/.cpp`)
+### Phase 2 — Device abstraction (`src/device/sdr_device.h/.cpp`)
 - [x] `StreamConfig`: `atten`, `rfGain`, `extRef`; comments for `bb` use of `args`, `gain`, `bandwidth`.
 - [x] `GainRange`: `label`, `unit`.
 - [x] `sdrDrivers()`, `enumerateDevices()` (with a "none detected" placeholder), `openDevice()` dispatch.
 - [x] `checkSampleRate("bb")`: range check + warning above 10 MS/s (host-side filtering).
 - [x] New `supportedRates(driver)` and `snapSampleRate(driver, rate)`.
 
-### Phase 3 — Backend (`src/sdr_bb60.cpp`, new)
+### Phase 3 — Backend (`src/device/sdr_bb60.cpp`, new)
 - [x] Open by first device or by serial; read device type and serial for the description.
 - [x] Configure: ext ref (BB60D vs BB60C port constants), 16-bit I/Q, center, ref level,
       gain/atten, decimation + bandwidth (clamped to the per-decimation maximum).
@@ -59,12 +59,12 @@ Hound devices, transmit.
 - [x] Reads back the actual rate with `bbQueryIQParameters`.
 - [x] `enumerateBb()` via `bbGetSerialNumberList2`.
 
-### Phase 4 — CLI (`src/main.cpp`)
+### Phase 4 — CLI (`src/app/main.cpp`)
 - [x] `--device bb[:SERIAL]`, `--ref-level DBM`, `--atten auto|0|10|20|30`, `--bb-amp auto|0-3` (first `--amp`, which the generator amplitude option already used; renamed in #54), `--ext-ref`.
 - [x] Default rate 10 MS/s and ref level -20 dBm for `bb` when not given.
 - [x] Help text updates.
 
-### Phase 5 — GUI (`src/app_live.cpp`)
+### Phase 5 — GUI (`src/app/app_live.cpp`)
 - [x] Driver name "BB60", default gain range as ref level.
 - [x] Rate combo for drivers with discrete rates.
 - [x] Gain slider uses `GainRange::label/unit`; for BB60 the value applies on slider release
@@ -107,7 +107,7 @@ Ordered by expected impact.
    device. Confirm the BB60A accepts it, or disable *Ext ref* for the BB60A.
 7. **`setGain` compares `refLevel_` without `cfgM_`.** Harmless today (UI thread only), but
    take the lock for consistency with `reconfigure()`.
-8. **Style:** in `src/main.cpp` the `--ext-ref` branch shares a line with `--antenna`
+8. **Style:** in `src/app/main.cpp` the `--ext-ref` branch shares a line with `--antenna`
    (`... dev.extRef = true; else if (a == "--antenna") ...`). Split it to match the
    surrounding one-option-per-branch layout.
 9. **`--gain auto` with `--device bb`** sets `agc = true`, which the BB60 ignores. Either
@@ -157,10 +157,10 @@ Ordered by expected impact.
 | File | Change |
 |---|---|
 | `CMakeLists.txt` | `WVT_WITH_BB`, SDK discovery, imported target |
-| `src/sdr_bb60.cpp` | New backend (≈ 320 lines) |
-| `src/sdr_device.h/.cpp` | Config fields, `GainRange` label/unit, rate list + snap, dispatch |
-| `src/main.cpp` | CLI options and defaults |
-| `src/app_live.cpp` | Rate combo, ref-level slider, BB60 option row |
+| `src/device/sdr_bb60.cpp` | New backend (≈ 320 lines) |
+| `src/device/sdr_device.h/.cpp` | Config fields, `GainRange` label/unit, rate list + snap, dispatch |
+| `src/app/main.cpp` | CLI options and defaults |
+| `src/app/app_live.cpp` | Rate combo, ref-level slider, BB60 option row |
 | `README.md` | Build, setup, usage, device table |
 
 ## 7. Second pass (2026-10-20)

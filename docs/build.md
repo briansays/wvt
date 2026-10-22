@@ -71,7 +71,7 @@ build uses the legacy `libGL.so`, which has the GL and the GLX functions.
 
 ### WVT_WITH_RTLSDR
 
-Enables or disables the RTL-SDR device backend (`src/sdr_rtlsdr.cpp`).
+Enables or disables the RTL-SDR device backend (`src/device/sdr_rtlsdr.cpp`).
 
 - CMake finds librtlsdr with `pkg-config` (the `librtlsdr` module).
 - CMake also checks for `rtlsdr_set_bias_tee()`. This function is in librtlsdr builds from 2018
@@ -82,7 +82,7 @@ Output: `wvt: RTL-SDR support enabled (librtlsdr <version>)`.
 
 ### WVT_WITH_UHD
 
-Enables or disables the USRP backend (`src/sdr_uhd.cpp`). This backend receives and transmits, with
+Enables or disables the USRP backend (`src/device/sdr_uhd.cpp`). This backend receives and transmits, with
 all USRPs that UHD supports: the USB B200 family and the network N3xx, X3xx and X4xx.
 
 - CMake finds UHD with `pkg-config` (the `uhd` module). If `pkg-config` does not find it, CMake
@@ -94,7 +94,7 @@ Output: `wvt: UHD support enabled (UHD <version>)`.
 
 ### WVT_WITH_BB
 
-Enables or disables the Signal Hound BB60 backend (`src/sdr_bb60.cpp`). It needs `bb_api` from the
+Enables or disables the Signal Hound BB60 backend (`src/device/sdr_bb60.cpp`). It needs `bb_api` from the
 Signal Hound SDK. Refer to [Live devices](live.md#signal-hound-bb60).
 
 - CMake looks for `bb_api.h` and the library in `SIGNALHOUND_SDK_DIR`. It uses the library for the
@@ -133,7 +133,7 @@ Output: `wvt: audio playback enabled (miniaudio)`.
 
 ### WVT_WITH_CUDA
 
-Enables or disables the CUDA GPU backend (`src/gpu_cuda.cu`) for NVIDIA GPUs. Refer to
+Enables or disables the CUDA GPU backend (`src/gpu/gpu_cuda.cu`) for NVIDIA GPUs. Refer to
 [GPU processing](gpu.md).
 
 The backend needs all of these conditions:
@@ -175,7 +175,7 @@ A shorter list makes a smaller binary and a faster build. For example, for an RT
 
 ### WVT_WITH_METAL
 
-macOS only. Enables or disables the Metal GPU backend (`src/gpu_metal.mm`) for Apple GPUs. Refer
+macOS only. Enables or disables the Metal GPU backend (`src/gpu/gpu_metal.mm`) for Apple GPUs. Refer
 to [GPU processing](gpu.md).
 
 - The backend needs an Objective-C++ compiler and the Metal and MetalPerformanceShadersGraph

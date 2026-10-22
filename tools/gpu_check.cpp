@@ -20,11 +20,11 @@
 #include <thread>
 #include <vector>
 
-#include "dsp.h"
-#include "engine.h"
-#include "gpu.h"
-#include "iq_file.h"
-#include "ui_util.h"
+#include "dsp/dsp.h"
+#include "dsp/engine.h"
+#include "gpu/gpu.h"
+#include "io/iq_file.h"
+#include "common/ui_util.h"
 
 namespace {
 int failures = 0;

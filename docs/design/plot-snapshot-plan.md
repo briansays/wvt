@@ -30,9 +30,9 @@ From the issue:
 
 ## 3. Implementation notes
 
-- `src/snapshot.*`: names, numbering, crop and PNG writing, without ImGui. `tools/snapshot_check`
+- `src/io/snapshot.*`: names, numbering, crop and PNG writing, without ImGui. `tools/snapshot_check`
   tests them.
-- `src/app_snapshot.cpp`: the window, the plot rectangles (`snapNote*`), and the capture.
+- `src/app/app_snapshot.cpp`: the window, the plot rectangles (`snapNote*`), and the capture.
 - Inside `BeginPlot`, the current ImGui window is the plot's own window, so its clip rectangle is
   the plot. The clip for the scrolled time plots comes from the `##plots` child window instead
   (`snapClipToWindow`).

@@ -10,7 +10,7 @@ the N310, X310 and X410.
 
 ## 2. Starting point
 
-The USRP backend (`src/sdr_uhd.cpp`) used the UHD C API, so most calls already worked for any
+The USRP backend (`src/device/sdr_uhd.cpp`) used the UHD C API, so most calls already worked for any
 USRP. These parts were written for the B2xx:
 
 | Area | B2xx assumption |
@@ -45,10 +45,10 @@ USRP. These parts were written for the B2xx:
 
 ## 4. Implementation notes
 
-- `DeviceCaps` (`src/sdr_device.h`) carries what an open device supports. `SdrDevice::caps()`
+- `DeviceCaps` (`src/device/sdr_device.h`) carries what an open device supports. `SdrDevice::caps()`
   returns it; the USRP backend fills it after it opens. The window keeps the last value for its
   antenna and reference lists, the channel count, and the rate and bandwidth tooltips.
-- `uhdDeviceInfo()` and `parseDeviceArgs()` are in `src/sdr_device.cpp`, without UHD, so
+- `uhdDeviceInfo()` and `parseDeviceArgs()` are in `src/device/sdr_device.cpp`, without UHD, so
   `tools/device_check` tests them with search strings from each model family.
 - `Usrp::usb` comes from the motherboard name (`B2…`). It selects the B2xx rate rule and the USB or
   network advice for overflows and underflows.

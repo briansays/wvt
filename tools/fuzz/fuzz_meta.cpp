@@ -5,7 +5,7 @@
 #include <string>
 
 #include "fuzz_util.h"
-#include "iq_file.h"
+#include "io/iq_file.h"
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     if (size == 0) return 0;

@@ -13,7 +13,7 @@
 #include <thread>
 #include <vector>
 
-#include "log.h"
+#include "common/log.h"
 
 namespace {
 int failures = 0;
