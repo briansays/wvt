@@ -10,6 +10,12 @@
 //    has not consumed yet, and records the loss as a Gap.
 //
 // Positions are absolute sample counts since the stream started.
+//
+// The lossy read is a seqlock (issue #42). Before it copies a block, the
+// producer publishes where the block will end (writing_); after it, where
+// the written data ends (written_). A reader copies, then checks writing_:
+// if the producer's current block reaches the samples it copied, the copy
+// may be torn and the read fails.
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
@@ -66,8 +72,10 @@ public:
         const int64_t w = written();
         if (pos < 0 || n > cap_ || pos + n > w || w - pos > cap_) return false;
         copyOut(pos, n, out);
-        // The producer may have lapped us while copying (seqlock-style check).
-        return written() - pos <= cap_;
+        // If the copy saw any byte of a newer block, the fence makes that
+        // block's writing_ visible here.
+        std::atomic_thread_fence(std::memory_order_acquire);
+        return writing_.load(std::memory_order_relaxed) - pos <= cap_;
     }
 
     // --- gate reader (recorder) ----------------------------------------------
@@ -104,19 +112,40 @@ private:
             addGap(w, n, "recorder fell behind (storage too slow?)");
             return;
         }
+        // Readers must see the new end before any byte of the block.
+        writing_.store(w + n, std::memory_order_relaxed);
+        std::atomic_thread_fence(std::memory_order_release);
         const int64_t i = w & (cap_ - 1);
         const int64_t first = std::min(n, cap_ - i);
-        memcpy(&buf_[(size_t)i * bps_], data, (size_t)first * bps_);
-        if (first < n) memcpy(&buf_[0], data + first * bps_, (size_t)(n - first) * bps_);
+        storeShared(&buf_[(size_t)i * bps_], data, (size_t)first * bps_);
+        if (first < n) storeShared(&buf_[0], data + first * bps_, (size_t)(n - first) * bps_);
         written_.store(w + n, std::memory_order_release);
     }
 
     void copyOut(int64_t pos, int64_t n, uint8_t* out) const {
         const int64_t i = pos & (cap_ - 1);
         const int64_t first = std::min(n, cap_ - i);
-        memcpy(out, &buf_[(size_t)i * bps_], (size_t)first * bps_);
-        if (first < n) memcpy(out + first * bps_, &buf_[0], (size_t)(n - first) * bps_);
+        loadShared(out, &buf_[(size_t)i * bps_], (size_t)first * bps_);
+        if (first < n) loadShared(out + first * bps_, &buf_[0], (size_t)(n - first) * bps_);
     }
+
+    // The data copies of a seqlock race by design: a torn copy is detected
+    // and dropped. C++ has no racy memcpy yet (P1478 proposes one), so this
+    // is memcpy, as in other seqlocks. Under ThreadSanitizer the copies are
+    // relaxed atomics, so TSan checks the protocol around them instead of
+    // reporting the intended race.
+#if defined(__SANITIZE_THREAD__) || (defined(__has_feature) && __has_feature(thread_sanitizer))
+    static void storeShared(uint8_t* dst, const uint8_t* src, size_t n) {
+        for (size_t k = 0; k < n; ++k) std::atomic_ref<uint8_t>(dst[k]).store(src[k], std::memory_order_relaxed);
+    }
+    static void loadShared(uint8_t* dst, const uint8_t* src, size_t n) {
+        for (size_t k = 0; k < n; ++k)
+            dst[k] = std::atomic_ref<uint8_t>(const_cast<uint8_t&>(src[k])).load(std::memory_order_relaxed);
+    }
+#else
+    static void storeShared(uint8_t* dst, const uint8_t* src, size_t n) { memcpy(dst, src, n); }
+    static void loadShared(uint8_t* dst, const uint8_t* src, size_t n) { memcpy(dst, src, n); }
+#endif
 
     void addGap(int64_t at, int64_t lost, const std::string& why) {
         std::lock_guard<std::mutex> lk(gapM_);
@@ -134,6 +163,7 @@ private:
     int64_t cap_;
     std::vector<uint8_t> buf_;
     std::atomic<int64_t> written_{0};
+    std::atomic<int64_t> writing_{0};  // the end of the block being copied in; >= written_
     std::atomic<bool> gateOpen_{false};
     std::atomic<int64_t> gatePos_{0};
     std::atomic<int64_t> droppedDevice_{0}, deviceGapEvents_{0}, droppedGate_{0};

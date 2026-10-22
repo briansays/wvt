@@ -1,10 +1,18 @@
 // Device self-test (issue #11): UHD search results as device list entries
 // (USB by serial, network by address), device argument parsing, and the
-// sample rate rules for each driver. No hardware needed. Exit status is
-// nonzero on failure.
+// sample rate rules for each driver, and the sample ring's lossy reader
+// (issue #42). No hardware needed. Exit status is nonzero on failure.
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <string>
+#include <thread>
+#include <vector>
 
+#include "common/sample_ring.h"
 #include "device/sdr_device.h"
 
 namespace {
@@ -58,8 +66,52 @@ void testRates() {
 }
 }  // namespace
 
+// A producer writes each sample's position into it; a lossy reader reads at
+// the overwrite edge, where the producer's next block lands. A read that
+// returns true must hold exactly the positions it asked for (issue #42).
+void testRing() {
+    printf("sample ring\n");
+    SampleRing ring(1 << 12, 8);
+    std::atomic<bool> stop{false};
+    std::thread producer([&] {
+        std::vector<int64_t> block(512);
+        for (int64_t pos = 0; !stop.load(std::memory_order_relaxed); pos += (int64_t)block.size()) {
+            for (size_t k = 0; k < block.size(); ++k) block[k] = pos + (int64_t)k;
+            ring.push(reinterpret_cast<const uint8_t*>(block.data()), (int64_t)block.size());
+        }
+    });
+    std::vector<int64_t> got(256);
+    int64_t reads = 0, okReads = 0, torn = 0;
+    const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
+    while (std::chrono::steady_clock::now() < until) {
+        const int64_t w = ring.written();
+        const int64_t pos = std::max<int64_t>(0, w - ring.capacity());  // the oldest samples
+        ++reads;
+        if (!ring.read(pos, (int64_t)got.size(), reinterpret_cast<uint8_t*>(got.data()))) continue;
+        ++okReads;
+        for (size_t k = 0; k < got.size(); ++k)
+            if (got[k] != pos + (int64_t)k) {
+                ++torn;
+                break;
+            }
+    }
+    stop = true;
+    producer.join();
+    printf("    %lld reads, %lld returned data, %lld torn\n", (long long)reads, (long long)okReads, (long long)torn);
+    check(torn == 0, "a read that succeeds never returns overwritten samples");
+    // Away from the edge, reads work.
+    SampleRing r2(1 << 12, 8);
+    std::vector<int64_t> b(1000);
+    for (size_t k = 0; k < b.size(); ++k) b[k] = (int64_t)k;
+    r2.push(reinterpret_cast<const uint8_t*>(b.data()), (int64_t)b.size());
+    check(r2.read(100, 256, reinterpret_cast<uint8_t*>(got.data())) && got[0] == 100 && got[255] == 355,
+          "a read of written samples succeeds");
+    check(!r2.read(900, 256, reinterpret_cast<uint8_t*>(got.data())), "a read past the written end fails");
+}
+
 int main() {
     testArgs();
+    testRing();
     testFound();
     testRates();
     printf(failures ? "\n%d FAILED\n" : "\nall passed\n", failures);
