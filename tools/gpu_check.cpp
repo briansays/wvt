@@ -323,10 +323,12 @@ void testSpectrogram(const std::string& dir) {
         r.s0 = 1000;
         r.s1 = 24'000'000;
         r.nfft = 2048;
-        auto g = computeWaterfall(r, never);
+        Progress pg, pc;
+        auto g = computeWaterfall(r, never, &pg);
         gpuSetEnabled(false);
-        auto c = computeWaterfall(r, never);
+        auto c = computeWaterfall(r, never, &pc);
         gpuSetEnabled(true);
+        check(pg.fraction() == 1.f && pc.fraction() == 1.f, "progress reaches 100 % on the GPU and the CPU (issue #75)");
         bool same = g && c && g->db.size() == c->db.size() && g->fftsPerRow == c->fftsPerRow;
         double maxDb = 0;
         if (same)

@@ -76,7 +76,7 @@ again.
 | **Scrollbar** | Moves the view through the file. Drag the thumb, click the track to move one page, or turn the mouse wheel |
 | **Left** | The waterfall settings: FFT size, window, dB range or auto. The ⚙ button has the overlap, averaging, rows, columns, colormap and peak hold. Below the settings are the spectrum of the current view, the waterfall, and its color bar |
 | **Right** | The channel settings: on or off, offset, bandwidth, and *to peak*. The ⚙ button has the taps, decimation, squelch, maximum points and plot height. Below the settings are the I/Q, AM, FM and PM plots, which you can scroll. Each plot header has a show checkbox, a ⚙ button for the plot options, and the measurement readout. Thus no text covers the traces |
-| **Status bar** | The **Snapshot...** button (refer to [Plot snapshots](snapshots.md)). The values at the pointer: time, sample number, frequency, dB, AM, FM and PM. The marker ΔT, 1/ΔT and ΔF. `GPU <model>` or `CPU`, the renderer, and a busy indicator |
+| **Status bar** | The **Snapshot...** button (refer to [Plot snapshots](snapshots.md)). The values at the pointer: time, sample number, frequency, dB, AM, FM and PM. The marker ΔT, 1/ΔT and ΔF. `GPU <model>` or `CPU`, the renderer, and `computing... NN%` while wvt calculates the plots (the percentage done) |
 
 ## Menus
 

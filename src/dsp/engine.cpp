@@ -81,6 +81,7 @@ bool spectrogramCpu(const SpecJob& j, float* lin, const CancelFn& cancelled) {
                     pw[i] += std::norm(buf[k]);
                 }
             }
+            if (j.progress) j.progress->add(avg);
             float* out = &lin[(size_t)row * cols];
             const float s = j.norm / avg;
             for (int c = 0; c < cols; ++c) {
@@ -93,7 +94,7 @@ bool spectrogramCpu(const SpecJob& j, float* lin, const CancelFn& cancelled) {
     return !aborted;
 }
 
-std::shared_ptr<WaterfallRes> computeWaterfall(const WaterfallReq& r, const CancelFn& cancelled) {
+std::shared_ptr<WaterfallRes> computeWaterfall(const WaterfallReq& r, const CancelFn& cancelled, Progress* progress) {
     auto res = std::make_shared<WaterfallRes>();
     res->req = r;
     const Source& src = r.src;
@@ -152,12 +153,16 @@ std::shared_ptr<WaterfallRes> computeWaterfall(const WaterfallReq& r, const Canc
     const GpuLimits gl = gpuLimits();
     if (gpuSpectrogramUsable() && (double)rows * n * avgFor(gl.specBudget) >= gl.specMinInput) {
         job.avg = avgFor(gl.specBudget);
+        job.progress = progress;
+        if (progress) progress->reset((int64_t)rows * job.avg);
         const GpuStatus st = gpuSpectrogram(job, linSum.data(), cancelled);
         if (st == GpuStatus::Cancelled) return nullptr;
         done = res->gpu = st == GpuStatus::Ok;
     }
     if (!done) {
         job.avg = avgFor(kMaxInputSamples);
+        job.progress = progress;
+        if (progress) progress->reset((int64_t)rows * job.avg);  // also after a GPU failure
         if (!spectrogramCpu(job, linSum.data(), cancelled)) return nullptr;
     }
     if (cancelled()) return nullptr;
@@ -288,6 +293,7 @@ bool channelizeCpu(const ChanJob& job, cf* y, const CancelFn& cancelled, bool th
             }
             y[j] = cf(ar, ai);
         }
+        if (job.progress) job.progress->add(e - b);
     }, threaded ? 2048 : (1 << 30));
     return !ab;
 }
@@ -303,7 +309,7 @@ struct RawChannels {
 // input sample index j*D. Everything is indexed by absolute sample number so
 // results don't shift when the view pans.
 bool processRange(const DemodReq& r, const ChanDesign& cd, const std::vector<float>& h, int64_t jA, int64_t jB,
-                  RawChannels& out, const CancelFn& cancelled, bool threaded = true) {
+                  RawChannels& out, const CancelFn& cancelled, bool threaded = true, Progress* progress = nullptr) {
     const Source& src = r.src;
     const int D = cd.decim;
     const int64_t M = jB - jA + 1;  // +1 leading sample for the FM difference
@@ -324,6 +330,8 @@ bool processRange(const DemodReq& r, const ChanDesign& cd, const std::vector<flo
         job.frac = r.chanOffset / src.fs;
         job.h = h.data();
         job.taps = N;
+        job.progress = progress;
+        if (progress) progress->reset(M);
         // The GPU pays off only on large jobs (a few ms of CPU work).
         bool done = false;
         if (threaded && (double)M * N >= gpuLimits().chanMinMacs && gpuChannelUsable()) {
@@ -331,6 +339,7 @@ bool processRange(const DemodReq& r, const ChanDesign& cd, const std::vector<flo
             if (st == GpuStatus::Cancelled) return false;
             done = st == GpuStatus::Ok;
         }
+        if (progress && !done) progress->reset(M);  // after a GPU failure
         if (!done && !channelizeCpu(job, y.data(), cancelled, threaded)) return false;
     }
     if (cancelled()) return false;
@@ -485,7 +494,7 @@ struct StatAcc {
 
 }  // namespace
 
-std::shared_ptr<DemodRes> computeDemod(const DemodReq& r, const CancelFn& cancelled) {
+std::shared_ptr<DemodRes> computeDemod(const DemodReq& r, const CancelFn& cancelled, Progress* progress) {
     auto res = std::make_shared<DemodRes>();
     res->req = r;
     if (!r.src.file || r.s1 <= r.s0) return res;
@@ -521,7 +530,7 @@ std::shared_ptr<DemodRes> computeDemod(const DemodReq& r, const CancelFn& cancel
     const int64_t kMaxDenseInput = 32'000'000;
     if (nOut <= r.maxDense && nOut * D <= kMaxDenseInput) {
         RawChannels c;
-        if (!processRange(r, cd, h, jA, jB, c, cancelled)) return nullptr;
+        if (!processRange(r, cd, h, jA, jB, c, cancelled, true, progress)) return nullptr;
         add(c);
     } else {
         // Sparse: demodulate a short contiguous block at each display bucket,
@@ -534,6 +543,7 @@ std::shared_ptr<DemodRes> computeDemod(const DemodReq& r, const CancelFn& cancel
         };
         std::vector<Bucket> bk(P);
         std::atomic<bool> ab{false};
+        if (progress) progress->reset(P);
         parallelFor(P, [&](int b0, int b1) {
             for (int b = b0; b < b1; ++b) {
                 if (cancelled()) { ab = true; return; }
@@ -549,6 +559,7 @@ std::shared_ptr<DemodRes> computeDemod(const DemodReq& r, const CancelFn& cancel
                 reduceInto(c.t, c.pm, 1, o.pm);
                 reduceInto(c.t, c.pwr, 1, o.pwr);
                 o.aI.add(c.i); o.aAm.add(c.am); o.aFm.add(c.fm); o.aPm.add(c.pm); o.aPw.add(c.pwr); o.aEnv.add(c.amLin);
+                if (progress) progress->add(1);
             }
         }, 8);
         if (ab) return nullptr;
@@ -574,7 +585,7 @@ std::shared_ptr<DemodRes> computeDemod(const DemodReq& r, const CancelFn& cancel
 // ---------------------------------------------------------------------------
 // Overview
 // ---------------------------------------------------------------------------
-std::shared_ptr<OverviewRes> computeOverview(const OverviewReq& r, const CancelFn& cancelled) {
+std::shared_ptr<OverviewRes> computeOverview(const OverviewReq& r, const CancelFn& cancelled, Progress* progress) {
     auto res = std::make_shared<OverviewRes>();
     if (!r.src.file) return res;
     const int64_t total = r.src.file->numSamples(r.src.fp);
@@ -585,6 +596,7 @@ std::shared_ptr<OverviewRes> computeOverview(const OverviewReq& r, const CancelF
     res->t.resize(P);
     res->mean.resize(P);
     res->peak.resize(P);
+    if (progress) progress->reset(P);
     std::atomic<bool> ab{false};
     parallelFor(P, [&](int b0, int b1) {
         std::vector<cf> buf;
@@ -613,6 +625,7 @@ std::shared_ptr<OverviewRes> computeOverview(const OverviewReq& r, const CancelF
             res->mean[b] = 10.0 * std::log10(sum / std::max<int64_t>(1, cnt) + kEps);
             res->peak[b] = 10.0 * std::log10(pk + kEps);
         }
+        if (progress) progress->add(b1 - b0);
     }, 16);
     if (ab) return nullptr;
     return res;

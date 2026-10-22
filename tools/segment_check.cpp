@@ -4,11 +4,14 @@
 // while it is open (issue #41). Exit status is nonzero on failure.
 #include <unistd.h>
 
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <complex>
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "io/iq_file.h"
@@ -103,6 +106,35 @@ void testOverview(const std::string& dir) {
     past.s0 = n + 10;
     auto p = computeOverview(past, never);
     check(p && p->t.empty(), "range past the end of the file: no points");
+
+    // Progress for the status bar (issue #75): unknown before, 100 % at the end.
+    printf("progress\n");
+    Progress pr;
+    check(pr.fraction() < 0, "before a job: not known");
+    computeOverview(whole, never, &pr);
+    check(pr.fraction() == 1.f, "overview: 100 % when done");
+    WaterfallReq wr;
+    wr.src = whole.src;
+    wr.s1 = n;
+    computeWaterfall(wr, never, &pr);
+    check(pr.fraction() == 1.f, "waterfall: 100 % when done");
+    // A worker reports the job while it runs, and -1 when it is idle.
+    std::atomic<bool> release{false};
+    std::atomic<float> seen{-2};
+    Worker<int, int> wk(
+        [&](const int&, const CancelFn&, Progress* pg) {
+            pg->reset(4);
+            pg->add(1);
+            while (!release) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            return std::make_shared<int>(0);
+        },
+        {});
+    wk.submit(1);
+    for (int i = 0; i < 1000 && wk.progress() != 0.25f; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    seen = wk.progress();
+    release = true;
+    for (int i = 0; i < 1000 && wk.busy(); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    check(seen == 0.25f && wk.progress() < 0, "worker: 25 % while it runs, not known when idle");
     unlink(path.c_str());
 }
 }  // namespace

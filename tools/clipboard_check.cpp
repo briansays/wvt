@@ -4,7 +4,7 @@
 // (Latin-1), a large text that comes in parts (INCR), and copy from wvt to
 // the other program. Then key presses sent to wvt's window copy from one
 // text field and paste into another (Ctrl, and Command on macOS). It needs
-// an X server: in CI, Xvfb. Without $DISPLAY it exits with 77 (skipped).
+// an X server: in CI, Xvfb. Without one it exits with 77 (skipped).
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
@@ -281,6 +281,12 @@ struct Fields {
 int main() {
     if (!getenv("DISPLAY")) {
         printf("no DISPLAY: skipped (run it under Xvfb)\n");
+        return 77;
+    }
+    if (Display* probe = XOpenDisplay(nullptr)) {
+        XCloseDisplay(probe);
+    } else {  // DISPLAY is set, but no X server answers
+        printf("cannot open DISPLAY %s: skipped (run it under Xvfb)\n", getenv("DISPLAY"));
         return 77;
     }
     XInitThreads();

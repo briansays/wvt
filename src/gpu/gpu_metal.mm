@@ -628,6 +628,7 @@ GpuStatus gpuBackendSpectrogram(const SpecJob& j, float* lin, const std::functio
                 }
                 [e endEncoding];
                 if (!finish(cb, err, oom)) return GpuStatus::Failed;
+                if (j.progress) j.progress->add(m);
                 f0 += m;
             }
         }
@@ -685,6 +686,7 @@ GpuStatus gpuBackendChannelize(const ChanJob& j, float* y, const std::function<b
         for (int64_t j0 = 0; j0 < j.outLen; j0 += chunkOut) {
             if (cancelled()) return GpuStatus::Cancelled;
             const int64_t J = std::min(chunkOut, j.outLen - j0);
+            if (j.progress) j.progress->add(J);  // counted when submitted
             const int64_t in0 = j.inStart + j0 * D, len = (J - 1) * D + N;
             const int64_t lo = std::max<int64_t>(0, -in0), hi = std::max(lo, std::min<int64_t>(len, fileSamples - in0));
             DecodeParams dp{(int)j.fp.fmt, bps, j.fp.bigEndian, j.fp.swapIQ, 0, 0};

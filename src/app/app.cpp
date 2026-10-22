@@ -45,7 +45,8 @@ App::App(X11Window& win) : win_(win) {
     demod_.chanBw = 50e3;
     status_ = "No file loaded - type a path in the File box and press Enter (or run: wvt <file>)";
     snprintf(recPrefix_, sizeof recPrefix_, "%s", recCfg_.prefix.c_str());
-    sgPrevWorker_ = std::make_unique<Worker<SigPreviewReq, SigPreviewRes>>(computeSigPreview, wake, "siggen preview");
+    sgPrevWorker_ = std::make_unique<Worker<SigPreviewReq, SigPreviewRes>>(
+        [](const SigPreviewReq& r, const CancelFn& c, Progress*) { return computeSigPreview(r, c); }, wake, "siggen preview");
     sgFile_ = std::make_unique<FileGenJob>();
     snprintf(sgPrefix_, sizeof sgPrefix_, "~/wvt-recordings/siggen");
     snprintf(txArgs_, sizeof txArgs_, "%s", txCfg_.args.c_str());
@@ -68,6 +69,23 @@ App::~App() {
 }
 
 bool App::workersBusy() const { return wfWorker_->busy() || dmWorker_->busy() || ovWorker_->busy(); }
+
+// "computing...  " in the status bar, with how far the jobs are (issue #75):
+// the mean of the busy jobs that know their size.
+std::string App::computingText() const {
+    if (!workersBusy()) return "";
+    float sum = 0;
+    int n = 0;
+    for (float f : {wfWorker_->progress(), dmWorker_->progress(), ovWorker_->progress()})
+        if (f >= 0) {
+            sum += f;
+            ++n;
+        }
+    if (n == 0) return "computing...  ";
+    char buf[32];
+    snprintf(buf, sizeof buf, "computing... %d%%  ", std::min(99, (int)(100 * sum / (float)n)));
+    return buf;
+}
 
 // While a device streams, the main loop keeps running at frame rate.
 bool App::busy() const {
@@ -1251,7 +1269,7 @@ void App::drawStatusBar() {
     if (fMarkers_) s += "   | dF=" + fmtSI(std::fabs(fm2_ - fm1_), "Hz", 6);
     char rest[64];
     snprintf(rest, sizeof rest, "%s | %.0f fps", win_.usingGL() ? "GLX" : "software", ImGui::GetIO().Framerate);
-    const std::string lead = workersBusy() ? "computing...  " : "";
+    const std::string lead = computingText();
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(elideMiddle(s, statusLeftW(lead, rest, false)).c_str());
     drawStatusRight(lead, rest, false);

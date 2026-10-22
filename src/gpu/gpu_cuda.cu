@@ -473,6 +473,7 @@ GpuStatus gpuBackendSpectrogram(const SpecJob& j, float* lin, const std::functio
         CUDA_TRY(cudaMemsetAsync(c.dAcc, 0, (size_t)rowsHere * n * sizeof(float), c.stream));
         for (int64_t f0 = (int64_t)r0 * j.avg; f0 < gEnd; f0 += chunkFfts) {
             const int m = (int)std::min(chunkFfts, gEnd - f0);
+            if (j.progress) j.progress->add(m);  // counted when submitted
             // Wait until the copy that last used this staging slot is done.
             CUDA_TRY(cudaEventSynchronize(c.slotFree[slot]));
             if (cancelled()) {
@@ -673,6 +674,7 @@ GpuStatus gpuBackendChannelize(const ChanJob& j, float* y, const std::function<b
             return GpuStatus::Cancelled;
         }
         const int64_t J = std::min(chunkOut, j.outLen - j0);
+        if (j.progress) j.progress->add(J);  // counted when submitted
         const int64_t in0 = j.inStart + j0 * D, len = (J - 1) * D + N;
         const int64_t lo = std::max<int64_t>(0, -in0), hi = std::max(lo, std::min<int64_t>(len, fileSamples - in0));
         if (hi > lo)

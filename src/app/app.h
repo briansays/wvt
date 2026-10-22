@@ -122,6 +122,7 @@ private:
     double valueAt(const Series& s, double t) const;
     float wfValueAt(double t, double f) const;
     bool workersBusy() const;
+    std::string computingText() const;  // the status bar lead while workers run
 
     // live mode (app_live.cpp)
     void drawSourceSelector(float width);
