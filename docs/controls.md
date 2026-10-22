@@ -33,3 +33,27 @@
 | Audio window | `Ctrl+D` |
 | Export window | `Ctrl+E` |
 | Stop wvt | `Ctrl+Q` |
+
+## Copy and paste
+
+The text fields (for example, the file path, the frequencies and the times) use the system
+clipboard. Thus you can copy a value from wvt into a different program, and paste a value into
+wvt.
+
+| Action | Key |
+|---|---|
+| Copy or cut the selected text | `Ctrl+C` or `Ctrl+X` |
+| Paste | `Ctrl+V` |
+| Select all the text in the field | `Ctrl+A` |
+
+On macOS, the Command key (`⌘`) also does the `Ctrl` shortcuts, for example `⌘C` and `⌘V`. For
+this, XQuartz must send `⌘` keys to wvt, and must copy between the X11 clipboard and the macOS
+clipboard. In **XQuartz → Settings**:
+
+- **Input:** clear **Enable key equivalents under X11**. If it is set, XQuartz uses the `⌘` keys
+  itself. `Ctrl+C` and `Ctrl+V` work in each case.
+- **Pasteboard:** set **Enable syncing**, **Update Pasteboard when CLIPBOARD changes** and
+  **Update CLIPBOARD when Pasteboard changes** (the defaults).
+
+wvt reads text that other programs give as UTF-8, Latin-1 (`STRING`) or `TEXT`, and large texts
+that come in parts.

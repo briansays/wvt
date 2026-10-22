@@ -10,6 +10,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -75,6 +76,35 @@ ImGuiKey mapKey(KeySym k) {
         default: return ImGuiKey_None;
     }
 }
+// STRING is Latin-1 (ICCCM). wvt keeps UTF-8.
+std::string latin1ToUtf8(const unsigned char* s, size_t n) {
+    std::string o;
+    o.reserve(n);
+    for (size_t i = 0; i < n; ++i) {
+        if (s[i] < 0x80) {
+            o += (char)s[i];
+        } else {
+            o += (char)(0xc0 | (s[i] >> 6));
+            o += (char)(0x80 | (s[i] & 0x3f));
+        }
+    }
+    return o;
+}
+std::string utf8ToLatin1(const std::string& s) {  // characters outside Latin-1 become '?'
+    std::string o;
+    for (size_t i = 0; i < s.size();) {
+        const unsigned char c = (unsigned char)s[i];
+        unsigned cp = c;
+        int len = 1;
+        if (c >= 0xf0) { cp = c & 0x07; len = 4; }
+        else if (c >= 0xe0) { cp = c & 0x0f; len = 3; }
+        else if (c >= 0xc0) { cp = c & 0x1f; len = 2; }
+        for (int k = 1; k < len && i + k < s.size(); ++k) cp = (cp << 6) | ((unsigned char)s[i + k] & 0x3f);
+        o += cp < 0x100 ? (char)cp : '?';
+        i += len;
+    }
+    return o;
+}
 }  // namespace
 
 struct X11Window::Impl {
@@ -89,7 +119,9 @@ struct X11Window::Impl {
     std::vector<uint32_t> xbuf;
     SwRenderer sw;
     SwTexture fontTex;
-    Atom wmDelete = 0, clipboard = 0, utf8 = 0, targets = 0, wvtProp = 0;
+    Atom wmDelete = 0, clipboard = 0, utf8 = 0, targets = 0, wvtProp = 0, text = 0, incr = 0;
+    Time lastTime = CurrentTime;  // the last input event: selections use real times (ICCCM)
+    unsigned cmdMask = 0;         // macOS: the X modifier of the Command key, which acts as Ctrl
     int w = 0, h = 0;
     int wakeFd[2] = {-1, -1};
     std::chrono::steady_clock::time_point last = std::chrono::steady_clock::now();
@@ -117,17 +149,93 @@ struct X11Window::Impl {
         ev.target = req.target;
         ev.time = req.time;
         ev.property = None;
+        // An obsolete client gives no property: use the target (ICCCM).
+        const Atom prop = req.property != None ? req.property : req.target;
+        // Larger than one request: refuse instead of an X error that would
+        // stop wvt. Clipboard text from wvt is short.
+        const size_t maxBytes = (size_t)std::max(XExtendedMaxRequestSize(dpy), XMaxRequestSize(dpy)) * 4 - 1024;
         if (req.target == targets) {
-            Atom list[] = {targets, utf8, XA_STRING};
-            XChangeProperty(dpy, req.requestor, req.property, XA_ATOM, 32, PropModeReplace, (unsigned char*)list, 3);
-            ev.property = req.property;
-        } else if (req.target == utf8 || req.target == XA_STRING) {
-            XChangeProperty(dpy, req.requestor, req.property, req.target, 8, PropModeReplace,
-                            (const unsigned char*)clipOut.data(), (int)clipOut.size());
-            ev.property = req.property;
+            Atom list[] = {targets, utf8, XA_STRING, text};
+            XChangeProperty(dpy, req.requestor, prop, XA_ATOM, 32, PropModeReplace, (unsigned char*)list, 4);
+            ev.property = prop;
+        } else if ((req.target == utf8 || req.target == text) && clipOut.size() <= maxBytes) {
+            // TEXT: the owner picks the encoding, and says so in the type.
+            XChangeProperty(dpy, req.requestor, prop, utf8, 8, PropModeReplace, (const unsigned char*)clipOut.data(),
+                            (int)clipOut.size());
+            ev.property = prop;
+        } else if (req.target == XA_STRING && clipOut.size() <= maxBytes) {
+            const std::string l1 = utf8ToLatin1(clipOut);
+            XChangeProperty(dpy, req.requestor, prop, XA_STRING, 8, PropModeReplace, (const unsigned char*)l1.data(),
+                            (int)l1.size());
+            ev.property = prop;
         }
         XSendEvent(dpy, req.requestor, False, 0, (XEvent*)&ev);
         XFlush(dpy);
+    }
+
+    // Waits for an event of `type` on our window, up to `ms` milliseconds.
+    // Other events stay in the queue for pumpEvents().
+    bool waitEvent(int type, XEvent& ev, int ms) {
+        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+        while (!XCheckTypedWindowEvent(dpy, win, type, &ev)) {
+            if (std::chrono::steady_clock::now() > until) return false;
+            usleep(1000);
+        }
+        return true;
+    }
+
+    // Reads and deletes our property. False if it is not there.
+    bool takeProperty(Atom& type, std::string& out) {
+        out.clear();
+        long offset = 0;
+        for (;;) {
+            Atom t;
+            int fmt;
+            unsigned long n, rest;
+            unsigned char* data = nullptr;
+            if (XGetWindowProperty(dpy, win, wvtProp, offset, 1 << 20, False, AnyPropertyType, &t, &fmt, &n, &rest,
+                                   &data) != Success || t == None) {
+                if (data) XFree(data);
+                return false;
+            }
+            const size_t bytes = n * (size_t)(fmt == 32 ? sizeof(long) : fmt / 8);
+            out.append((const char*)data, bytes);
+            XFree(data);
+            type = t;
+            offset += (long)(bytes / 4);
+            if (rest == 0) break;
+        }
+        XDeleteProperty(dpy, win, wvtProp);
+        XFlush(dpy);
+        return true;
+    }
+
+    // Asks the CLIPBOARD owner for `target`. Large texts come in parts (INCR).
+    bool convert(Atom target, Atom& type, std::string& out) {
+        XDeleteProperty(dpy, win, wvtProp);
+        XConvertSelection(dpy, clipboard, target, wvtProp, win, lastTime);
+        XFlush(dpy);
+        XEvent ev;
+        if (!waitEvent(SelectionNotify, ev, 500) || ev.xselection.property == None) return false;
+        // Throw away PropertyNotify events from before the transfer.
+        while (XCheckTypedWindowEvent(dpy, win, PropertyNotify, &ev)) {}
+        if (!takeProperty(type, out)) return false;
+        if (type != incr) return true;
+        // INCR: each delete of the property asks for the next part; an empty
+        // part ends it.
+        std::string all, part;
+        for (;;) {
+            bool got = false;
+            while (!got) {
+                if (!waitEvent(PropertyNotify, ev, 2000)) return false;
+                got = ev.xproperty.atom == wvtProp && ev.xproperty.state == PropertyNewValue;
+            }
+            if (!takeProperty(type, part)) return false;
+            if (part.empty()) break;
+            all += part;
+        }
+        out.swap(all);
+        return true;
     }
 
     const char* getClipboard() {
@@ -135,36 +243,28 @@ struct X11Window::Impl {
         if (owner == win) return clipOut.c_str();
         clipIn.clear();
         if (owner == None) return clipIn.c_str();
-        XConvertSelection(dpy, clipboard, utf8, wvtProp, win, CurrentTime);
-        XFlush(dpy);
-        auto start = std::chrono::steady_clock::now();
-        XEvent ev;
-        for (;;) {
-            if (XCheckTypedWindowEvent(dpy, win, SelectionNotify, &ev)) {
-                if (ev.xselection.property != None) {
-                    Atom type;
-                    int fmt;
-                    unsigned long n, rest;
-                    unsigned char* data = nullptr;
-                    XGetWindowProperty(dpy, win, wvtProp, 0, 1 << 20, True, AnyPropertyType, &type, &fmt, &n, &rest,
-                                       &data);
-                    if (data) {
-                        clipIn.assign((const char*)data, n);
-                        XFree(data);
-                    }
-                }
-                break;
-            }
-            if (std::chrono::steady_clock::now() - start > std::chrono::milliseconds(500)) break;
-            usleep(2000);
+        // UTF-8 first; an older program may offer only STRING (Latin-1) or TEXT.
+        Atom type = None;
+        std::string data;
+        for (Atom target : {utf8, (Atom)XA_STRING, text}) {
+            if (!convert(target, type, data)) continue;
+            clipIn = type == XA_STRING ? latin1ToUtf8((const unsigned char*)data.data(), data.size()) : data;
+            break;
         }
         return clipIn.c_str();
+    }
+
+    void setClipboard(const char* s) {
+        clipOut = s ? s : "";
+        XSetSelectionOwner(dpy, clipboard, win, lastTime);
+        if (XGetSelectionOwner(dpy, clipboard) != win) LOG_WARN("x11", "could not take the clipboard");
+        XFlush(dpy);
     }
 
     void handle(XEvent& ev) {
         ImGuiIO& io = ImGui::GetIO();
         auto mods = [&](unsigned state) {
-            io.AddKeyEvent(ImGuiMod_Ctrl, (state & ControlMask) != 0);
+            io.AddKeyEvent(ImGuiMod_Ctrl, (state & (ControlMask | cmdMask)) != 0);
             io.AddKeyEvent(ImGuiMod_Shift, (state & ShiftMask) != 0);
             io.AddKeyEvent(ImGuiMod_Alt, (state & Mod1Mask) != 0);
             io.AddKeyEvent(ImGuiMod_Super, (state & Mod4Mask) != 0);
@@ -178,6 +278,7 @@ struct X11Window::Impl {
                 }
                 break;
             case MotionNotify:
+                lastTime = ev.xmotion.time;
                 mods(ev.xmotion.state);
                 io.AddMousePosEvent((float)ev.xmotion.x, (float)ev.xmotion.y);
                 break;
@@ -187,6 +288,7 @@ struct X11Window::Impl {
             case ButtonPress:
             case ButtonRelease: {
                 bool down = ev.type == ButtonPress;
+                lastTime = ev.xbutton.time;
                 mods(ev.xbutton.state);
                 io.AddMousePosEvent((float)ev.xbutton.x, (float)ev.xbutton.y);
                 switch (ev.xbutton.button) {
@@ -204,6 +306,7 @@ struct X11Window::Impl {
             case KeyPress:
             case KeyRelease: {
                 bool down = ev.type == KeyPress;
+                lastTime = ev.xkey.time;
                 // Suppress auto-repeat release/press pairs being treated as releases.
                 if (!down && XEventsQueued(dpy, QueuedAfterReading)) {
                     XEvent nev;
@@ -219,16 +322,24 @@ struct X11Window::Impl {
                 ImGuiKey k = mapKey(base);
                 if (k == ImGuiKey_None) k = mapKey(ks);
                 if (k != ImGuiKey_None) io.AddKeyEvent(k, down);
-                if (down && len > 0 && !(ev.xkey.state & ControlMask)) {
-                    buf[len] = 0;
-                    for (int i = 0; i < len; ++i)
-                        if ((unsigned char)buf[i] >= 32 && buf[i] != 127) io.AddInputCharacter((unsigned char)buf[i]);
+                if (down && !(ev.xkey.state & (ControlMask | cmdMask))) {
+                    if (ks >= 0x01000100 && ks <= 0x0110ffff) {
+                        // A Unicode keysym: XLookupString gives only Latin-1.
+                        io.AddInputCharacter((unsigned)(ks - 0x01000000));
+                    } else if (len > 0) {
+                        buf[len] = 0;
+                        for (int i = 0; i < len; ++i)
+                            if ((unsigned char)buf[i] >= 32 && buf[i] != 127) io.AddInputCharacter((unsigned char)buf[i]);
+                    }
                 }
                 break;
             }
             case FocusIn: io.AddFocusEvent(true); break;
             case FocusOut: io.AddFocusEvent(false); break;
             case SelectionRequest: handleSelectionRequest(ev.xselectionrequest); break;
+            case SelectionClear:
+                if (ev.xselectionclear.selection == clipboard) clipOut.clear();  // another program owns it now
+                break;
             default: break;
         }
     }
@@ -295,7 +406,7 @@ bool X11Window::create(const char* title, int w, int h, bool forceSoftware, std:
     swa.background_pixel = 0;
     swa.border_pixel = 0;
     swa.event_mask = ExposureMask | KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask |
-                     PointerMotionMask | StructureNotifyMask | FocusChangeMask | LeaveWindowMask;
+                     PointerMotionMask | StructureNotifyMask | FocusChangeMask | LeaveWindowMask | PropertyChangeMask;
     d->w = w;
     d->h = h;
     d->win = XCreateWindow(d->dpy, root, 0, 0, w, h, 0, d->depth, InputOutput, d->visual,
@@ -306,6 +417,23 @@ bool X11Window::create(const char* title, int w, int h, bool forceSoftware, std:
     d->utf8 = XInternAtom(d->dpy, "UTF8_STRING", False);
     d->targets = XInternAtom(d->dpy, "TARGETS", False);
     d->wvtProp = XInternAtom(d->dpy, "WVT_CLIP", False);
+    d->text = XInternAtom(d->dpy, "TEXT", False);
+    d->incr = XInternAtom(d->dpy, "INCR", False);
+#ifdef __APPLE__
+    // XQuartz: Command is Meta (or Super). Command-C, -V, -X and -A work as
+    // the Control shortcuts, as macOS users expect.
+    if (XModifierKeymap* mm = XGetModifierMapping(d->dpy)) {
+        const KeyCode cmd[] = {XKeysymToKeycode(d->dpy, XK_Meta_L), XKeysymToKeycode(d->dpy, XK_Meta_R),
+                               XKeysymToKeycode(d->dpy, XK_Super_L), XKeysymToKeycode(d->dpy, XK_Super_R)};
+        for (int m = Mod1MapIndex; m <= Mod5MapIndex; ++m)
+            for (int k = 0; k < mm->max_keypermod; ++k) {
+                const KeyCode kc = mm->modifiermap[m * mm->max_keypermod + k];
+                for (KeyCode c : cmd)
+                    if (kc && kc == c) d->cmdMask |= 1u << m;
+            }
+        XFreeModifiermap(mm);
+    }
+#endif
     XClassHint ch{(char*)"wvt", (char*)"Wvt"};
     XSetClassHint(d->dpy, d->win, &ch);
     setTitle(title);
@@ -348,9 +476,7 @@ bool X11Window::create(const char* title, int w, int h, bool forceSoftware, std:
         return ((Impl*)ImGui::GetPlatformIO().Platform_ClipboardUserData)->getClipboard();
     };
     pio.Platform_SetClipboardTextFn = [](ImGuiContext*, const char* text) {
-        Impl* im = (Impl*)ImGui::GetPlatformIO().Platform_ClipboardUserData;
-        im->clipOut = text ? text : "";
-        XSetSelectionOwner(im->dpy, im->clipboard, im->win, CurrentTime);
+        ((Impl*)ImGui::GetPlatformIO().Platform_ClipboardUserData)->setClipboard(text);
     };
     if (d->gl) {
         ImGui_ImplOpenGL2_Init();

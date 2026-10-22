@@ -24,14 +24,15 @@ jobs:
       - name: Install packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake libx11-dev libgl1-mesa-dev librtlsdr-dev libuhd-dev
+          sudo apt-get install -y build-essential cmake libx11-dev libgl1-mesa-dev librtlsdr-dev libuhd-dev xvfb
       - name: Configure
         # WVT_BB_SIM builds the BB60 backend against the simulated device (no SDK in CI).
         run: cmake -S . -B build -DWVT_WERROR=ON -DWVT_WITH_RTLSDR=ON -DWVT_WITH_UHD=ON -DWVT_WITH_CUDA=OFF -DWVT_BB_SIM=ON
       - name: Build
         run: cmake --build build -j "$(nproc)"
       - name: Self-tests
-        run: ctest --test-dir build --output-on-failure
+        # Xvfb: clipboard_check needs an X server (it skips without one).
+        run: xvfb-run -a ctest --test-dir build --output-on-failure
       - name: Command line
         run: |
           ./build/wvt --help > /dev/null
