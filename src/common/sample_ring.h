@@ -24,6 +24,19 @@
 #include <string>
 #include <vector>
 
+// GCC before 14 has no __has_feature, and it parses the whole #if line, so
+// the test is in steps.
+#if defined(__SANITIZE_THREAD__)
+#define WVT_RING_TSAN 1
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define WVT_RING_TSAN 1
+#endif
+#endif
+#ifndef WVT_RING_TSAN
+#define WVT_RING_TSAN 0
+#endif
+
 class SampleRing {
 public:
     struct Gap {
@@ -134,7 +147,7 @@ private:
     // is memcpy, as in other seqlocks. Under ThreadSanitizer the copies are
     // relaxed atomics, so TSan checks the protocol around them instead of
     // reporting the intended race.
-#if defined(__SANITIZE_THREAD__) || (defined(__has_feature) && __has_feature(thread_sanitizer))
+#if WVT_RING_TSAN
     static void storeShared(uint8_t* dst, const uint8_t* src, size_t n) {
         for (size_t k = 0; k < n; ++k) std::atomic_ref<uint8_t>(dst[k]).store(src[k], std::memory_order_relaxed);
     }
