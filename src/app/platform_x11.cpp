@@ -469,6 +469,11 @@ bool X11Window::create(const char* title, int w, int h, bool forceSoftware, std:
 
     ImGuiIO& io = ImGui::GetIO();
     io.BackendPlatformName = "wvt_x11";
+    // ImGui turns this on for every __APPLE__ build, and then swaps Ctrl and
+    // Super in each key event: the X Control key became "Command", so no Ctrl
+    // shortcut worked on macOS (copy, paste, Ctrl+G, Ctrl+click; issue #72).
+    // This backend sends the X modifiers as they are, and Command as Ctrl.
+    io.ConfigMacOSXBehaviors = false;
     io.BackendFlags |= ImGuiBackendFlags_HasMouseCursors;
     ImGuiPlatformIO& pio = ImGui::GetPlatformIO();
     pio.Platform_ClipboardUserData = d.get();

@@ -2,10 +2,13 @@
 // (in its own thread, as another program would be) exchange the CLIPBOARD
 // selection both ways: UTF-8 text, a program that offers only STRING
 // (Latin-1), a large text that comes in parts (INCR), and copy from wvt to
-// the other program. It needs an X server: in CI, Xvfb. Without $DISPLAY it
-// exits with 77 (skipped).
+// the other program. Then key presses sent to wvt's window copy from one
+// text field and paste into another (Ctrl, and Command on macOS). It needs
+// an X server: in CI, Xvfb. Without $DISPLAY it exits with 77 (skipped).
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
+#include <X11/Xutil.h>
+#include <X11/keysym.h>
 
 #include <atomic>
 #include <chrono>
@@ -186,6 +189,93 @@ bool peerPastes(X11Window& win, Atom target, std::string& out, Atom& type) {
     t.join();
     return ok;
 }
+// wvt's window: the top-level window with our title (Xvfb has no window manager).
+Window findWindow(Display* d, const char* title) {
+    Window root, parent, *kids = nullptr;
+    unsigned n = 0;
+    Window found = 0;
+    if (XQueryTree(d, DefaultRootWindow(d), &root, &parent, &kids, &n)) {
+        for (unsigned i = 0; i < n && !found; ++i) {
+            char* name = nullptr;
+            if (XFetchName(d, kids[i], &name) && name) {
+                if (strcmp(name, title) == 0) found = kids[i];
+                XFree(name);
+            }
+        }
+        if (kids) XFree(kids);
+    }
+    return found;
+}
+
+// A key press and release, as the X server sends them when a person types.
+void sendKey(Display* d, Window w, KeySym ks, unsigned state, Time& t) {
+    XKeyEvent e{};
+    e.display = d;
+    e.window = w;
+    e.root = DefaultRootWindow(d);
+    e.same_screen = True;
+    e.keycode = XKeysymToKeycode(d, ks);
+    e.state = state;
+    for (int type : {KeyPress, KeyRelease}) {
+        e.type = type;
+        e.time = ++t;
+        XSendEvent(d, w, False, type == KeyPress ? KeyPressMask : KeyReleaseMask, (XEvent*)&e);
+        XFlush(d);
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+}
+
+// The X modifier bit of Super or Meta (the Command key in XQuartz); 0 if none.
+unsigned commandMask(Display* d) {
+    unsigned mask = 0;
+    XModifierKeymap* mm = XGetModifierMapping(d);
+    const KeyCode cmd[] = {XKeysymToKeycode(d, XK_Super_L), XKeysymToKeycode(d, XK_Meta_L)};
+    for (int m = Mod1MapIndex; m <= Mod5MapIndex && !mask; ++m)
+        for (int k = 0; k < mm->max_keypermod; ++k)
+            for (KeyCode c : cmd)
+                if (c && mm->modifiermap[m * mm->max_keypermod + k] == c) mask = 1u << m;
+    XFreeModifiermap(mm);
+    return mask;
+}
+
+// Two text fields in a frame; `focus` 1 or 2 puts the keyboard in that field.
+struct Fields {
+    X11Window& win;
+    char a[64] = "915.5 MHz";
+    char b[64] = "";
+    void frame(int focus = 0) {
+        win.pumpEvents(0.0);
+        win.newFrame();
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos(ImVec2(0, 0));
+        ImGui::Begin("fields");
+        if (focus == 1) ImGui::SetKeyboardFocusHere();
+        ImGui::InputText("##a", a, sizeof a);
+        if (focus == 2) ImGui::SetKeyboardFocusHere();
+        ImGui::InputText("##b", b, sizeof b);
+        ImGui::End();
+        ImGui::Render();
+        win.render(ImGui::GetDrawData(), ImVec4(0, 0, 0, 1));
+    }
+    void frames(int n) {
+        for (int i = 0; i < n; ++i) frame();
+    }
+    // Copy all of field a, paste it into the empty field b, with `mod` held.
+    bool copyAcross(Display* d, Window w, unsigned mod, Time& t) {
+        b[0] = 0;
+        frame(1);
+        frames(3);
+        for (KeySym k : {XK_a, XK_c}) {
+            sendKey(d, w, k, mod, t);
+            frames(3);
+        }
+        frame(2);
+        frames(3);
+        sendKey(d, w, XK_v, mod, t);
+        frames(3);
+        return strcmp(a, b) == 0;
+    }
+};
 }  // namespace
 
 int main() {
@@ -202,6 +292,7 @@ int main() {
         return 1;
     }
     win.pumpEvents(0.05);
+    bool copyOk = false;
 
     printf("paste into wvt\n");
     const std::string utf = "f\xc3\xa9 915 MHz \xe2\x9c\x93";  // "fé 915 MHz ✓"
@@ -233,6 +324,20 @@ int main() {
     }
     check(listed && hasUtf8, "TARGETS lists UTF8_STRING");
     check(std::string(paste()) == utf, "wvt pastes its own copy");
+
+    printf("keys in wvt's window\n");
+    const Window w = findWindow(d, "wvt clipboard_check");
+    check(w != 0, "found the window");
+    Fields f{win};
+    Time t = 1;
+    copyOk = w && f.copyAcross(d, w, ControlMask, t);
+    check(copyOk, std::string("Ctrl+A, Ctrl+C in one field, Ctrl+V in another: '") + f.b + "'");
+#ifdef __APPLE__
+    const unsigned cmd = commandMask(d);
+    check(cmd != 0 && f.copyAcross(d, w, cmd, t), std::string("the same with Command: '") + f.b + "'");
+#else
+    (void)commandMask;
+#endif
     XCloseDisplay(d);
 
     ImGui::DestroyContext();
