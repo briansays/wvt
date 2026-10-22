@@ -37,6 +37,7 @@ code if a check fails.
 | `build/extract_check` | The region export: copies, the band filter, metadata, input checks and cancel |
 | `build/snapshot_check` | Plot snapshots: file names, numbering, the crop and the PNG files |
 | `build/device_check` | The device list entries from a UHD search, device arguments and the sample rate rules |
+| `build/clipboard_check` | The system clipboard, both ways, with a second X client: UTF-8, Latin-1, large texts in parts. It needs an X server (for example `xvfb-run -a build/clipboard_check`); without one it is skipped |
 | `build/bb_check` | The BB60 backend with the simulated device: open, rates, bandwidths, streaming, overload, unplug, and the capture segments of a recording across retunes. Only with `-DWVT_BB_SIM=ON` |
 | `build/gpu_check` | The GPU results against the CPU results. `--bench` measures the speed |
 

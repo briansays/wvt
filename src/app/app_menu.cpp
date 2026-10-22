@@ -38,6 +38,11 @@ const Key kGlobalKeys[] = {
     {"Ctrl+D", "Audio window"},
     {"Ctrl+Q", "Quit"},
 };
+const Key kTextKeys[] = {
+    {"Ctrl+C / Ctrl+X", "Copy / cut the selected text to the system clipboard"},
+    {"Ctrl+V", "Paste from the system clipboard"},
+    {"Ctrl+A", "Select all the text in the field"},
+};
 const Key kMouse[] = {
     {"Wheel", "Zoom the plot under the mouse (over an axis: that axis only)"},
     {"Drag", "Pan"},
@@ -178,6 +183,11 @@ void App::drawHelpWindows() {
             keyTable("##kfile", kFileKeys, std::size(kFileKeys));
             ImGui::SeparatorText("Everywhere");
             keyTable("##kglobal", kGlobalKeys, std::size(kGlobalKeys));
+            ImGui::SeparatorText("In a text field");
+            keyTable("##ktext", kTextKeys, std::size(kTextKeys));
+#ifdef __APPLE__
+            ImGui::TextDisabled("The Command key also works as Ctrl.");
+#endif
             ImGui::SeparatorText("Mouse");
             keyTable("##kmouse", kMouse, std::size(kMouse));
             ImGui::TextDisabled("Keys don't act while a text box has the focus.");

@@ -512,6 +512,13 @@ target_link_libraries(gpu_check PRIVATE wvt_gpu imgui_implot Threads::Threads)
 target_compile_options(gpu_check PRIVATE ${WVT_WARNINGS})
 
 # Plot snapshot self-test (file names, numbering, crop, PNG writer)
+# Clipboard self-test (issue #72): needs an X server (Xvfb in CI); skipped without $DISPLAY
+add_executable(clipboard_check tools/clipboard_check.cpp src/app/platform_x11.cpp src/app/sw_renderer.cpp
+  src/common/log.cpp)
+target_include_directories(clipboard_check PRIVATE src ${PLATFORM_INCLUDES})
+target_link_libraries(clipboard_check PRIVATE imgui_implot ${PLATFORM_LIBS} Threads::Threads)
+target_compile_options(clipboard_check PRIVATE ${WVT_WARNINGS})
+
 add_executable(snapshot_check tools/snapshot_check.cpp src/io/snapshot.cpp)
 target_include_directories(snapshot_check PRIVATE src third_party/stb)
 target_compile_options(snapshot_check PRIVATE ${WVT_WARNINGS})
@@ -539,13 +546,15 @@ endif()
 # self-check. The checks need no hardware.
 # ---------------------------------------------------------------------------
 enable_testing()
-set(WVT_CHECKS siggen_check audio_check log_check segment_check gpu_check extract_check snapshot_check device_check)
+set(WVT_CHECKS siggen_check audio_check log_check segment_check gpu_check extract_check snapshot_check device_check
+  clipboard_check)
 if(WVT_BB_SIM)
   list(APPEND WVT_CHECKS bb_check)
 endif()
 foreach(_t IN LISTS WVT_CHECKS)
   add_test(NAME ${_t} COMMAND ${_t})
 endforeach()
+set_tests_properties(clipboard_check PROPERTIES SKIP_RETURN_CODE 77)
 # The option table: --help fails if an option name is defined twice.
 add_test(NAME cli_help COMMAND wvt --no-log-file --help)
 # --tx-dry-run checks the transmit limits and opens no device (issue #49).
