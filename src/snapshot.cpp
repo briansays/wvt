@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
+#include <fcntl.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "log.h"
 
@@ -48,15 +50,44 @@ RgbImage cropImage(const RgbImage& src, SnapRect r) {
     return out;
 }
 
-bool writePng(const std::string& path, const RgbImage& img, std::string& err) {
+bool writePng(const std::string& path, const RgbImage& img, std::string& err, bool* exists) {
+    if (exists) *exists = false;
     if (img.w <= 0 || img.h <= 0) {
         err = "empty image";
         return false;
     }
+    // O_EXCL: two wvt windows that pick the same name do not overwrite each other.
+    const int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0644);
+    if (fd < 0) {
+        if (exists) *exists = errno == EEXIST;
+        err = "cannot create '" + path + "': " + errnoText(errno);
+        return false;
+    }
+    struct Out {
+        int fd;
+        int err = 0;
+    } out{fd};
+    auto put = [](void* ctx, void* data, int size) {
+        auto* o = static_cast<Out*>(ctx);
+        const char* p = static_cast<const char*>(data);
+        while (size > 0 && !o->err) {
+            const ssize_t n = ::write(o->fd, p, (size_t)size);
+            if (n < 0 && errno == EINTR) continue;
+            if (n <= 0) {
+                o->err = n < 0 ? errno : EIO;
+                break;
+            }
+            p += n;
+            size -= (int)n;
+        }
+    };
     // Level 9 is slower but makes the plots (large flat areas) much smaller.
     stbi_write_png_compression_level = 9;
-    if (!stbi_write_png(path.c_str(), img.w, img.h, 3, img.px.data(), img.w * 3)) {
-        err = "cannot write '" + path + "'" + (errno ? std::string(": ") + errnoText(errno) : "");
+    const bool encoded = stbi_write_png_to_func(put, &out, img.w, img.h, 3, img.px.data(), img.w * 3) != 0;
+    if (::close(fd) != 0 && !out.err) out.err = errno;
+    if (!encoded || out.err) {
+        err = "cannot write '" + path + "'" + (out.err ? ": " + errnoText(out.err) : "");
+        unlink(path.c_str());
         return false;
     }
     return true;

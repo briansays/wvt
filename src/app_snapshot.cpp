@@ -145,8 +145,8 @@ void App::saveSnapshots() {
     win_.readFrame(frame.w, frame.h, frame.px);
     const std::string dir = expandHome(snapDir_);
     const std::string base = snapshotBase(liveMode_ || !file_ ? "" : file_->path());
-    const int n = nextSnapshotIndex(dir, base);
-    int saved = 0;
+    int n = nextSnapshotIndex(dir, base);
+    int saved = 0, retries = 0;
     std::string err, names;
     for (int i = 0; i < kSnapPlots; ++i) {
         const SnapPlot p = (SnapPlot)i;
@@ -161,7 +161,15 @@ void App::saveSnapshots() {
         const RgbImage img = cropImage(frame, r);
         const std::string path = snapshotPath(dir, base, p, n);
         std::string e;
-        if (!writePng(path, img, e)) {
+        bool exists = false;
+        if (!writePng(path, img, e, &exists) && exists && saved == 0 && retries < 10) {
+            // Another wvt took this number after nextSnapshotIndex(): use the next free one.
+            ++retries;
+            n = nextSnapshotIndex(dir, base);
+            i = -1;
+            continue;
+        }
+        if (!e.empty()) {
             LOG_ERROR("app", "snapshot %s: %s", snapPlotName(p), e.c_str());
             if (err.empty()) err = e;
             continue;

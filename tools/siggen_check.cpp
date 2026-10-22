@@ -12,6 +12,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <iterator>
+#include <memory>
 #include <random>
 #include <sstream>
 #include <string>
@@ -1153,6 +1155,38 @@ int main(int argc, char** argv) {
         g = guess("{\"global\": {\"core:sample_rate\": 2e6");
         check(g.source != "SigMF metadata", "SigMF: invalid JSON falls back to the file name", g.source);
         remove(meta.c_str());
+    }
+
+    // --- the recorder never replaces an existing .sigmf-meta (issue #47) ---
+    {
+        const std::string base = dir + "/sgcheck_excl";
+        remove((base + ".sigmf-data").c_str());
+        std::ofstream(base + ".sigmf-meta") << "{\"old\": true}";
+        RecordConfig rc;
+        rc.exactPath = base;
+        RecordSource src;
+        src.rate = 1e6;
+        src.fc = 915e6;
+        Recorder rec;
+        std::string err;
+        const bool started = rec.start(std::make_shared<SampleRing>(1 << 16, 4), src, rc, err);
+        rec.stop();
+        std::ifstream in(base + ".sigmf-meta");
+        const std::string kept((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        struct stat st{};
+        check(!started && kept == "{\"old\": true}" && stat((base + ".sigmf-data").c_str(), &st) != 0 &&
+                  err.find(".sigmf-meta") != std::string::npos,
+              "recorder: an existing .sigmf-meta is kept, nothing is recorded", err);
+        remove((base + ".sigmf-meta").c_str());
+        remove(base.c_str());
+        // Without the old file it starts, and writes both.
+        const bool ok = rec.start(std::make_shared<SampleRing>(1 << 16, 4), src, rc, err);
+        rec.stop();
+        check(ok && stat((base + ".sigmf-meta").c_str(), &st) == 0 && st.st_size > 20 &&
+                  stat((base + ".sigmf-data").c_str(), &st) == 0,
+              "recorder: a new name records data and metadata", err);
+        remove((base + ".sigmf-meta").c_str());
+        remove((base + ".sigmf-data").c_str());
     }
 
     // --- JSON reader ---

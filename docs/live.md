@@ -234,7 +234,8 @@ Bandwidth
 
 **Record to** is a path prefix. wvt adds the date, the time, the frequency and the rate, for
 example `~/wvt-recordings/wvt_20261016_142233_915.000MHz_2.4MSps.sigmf-data`. wvt makes the
-folders that do not exist.
+folders that do not exist. wvt does not replace a file: if the data file or the `.sigmf-meta`
+file exists, the recording does not start.
 
 ### File types
 

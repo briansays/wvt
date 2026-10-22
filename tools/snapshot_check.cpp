@@ -136,7 +136,10 @@ void testPng(const std::string& dir) {
     check(idat && iend, "IDAT, then IEND at the end of the file");
     check(crcOk, "all chunk CRCs are correct");
     check(v.size() < img.px.size(), "compressed (" + std::to_string(v.size()) + " bytes)");
-    check(!writePng(dir + "/no/such/folder/t.png", img, err), "a missing folder fails: " + err);
+    bool exists = false;
+    check(!writePng(path, img, err, &exists) && exists && readAll(path) == v,
+          "an existing file is not replaced: " + err);
+    check(!writePng(dir + "/no/such/folder/t.png", img, err, &exists) && !exists, "a missing folder fails: " + err);
     RgbImage empty;
     check(!writePng(dir + "/e.png", empty, err), "an empty image fails");
 }

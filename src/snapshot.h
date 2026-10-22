@@ -30,7 +30,9 @@ struct SnapRect {
 // The part of src inside r (clipped to the image). Empty if nothing is inside.
 RgbImage cropImage(const RgbImage& src, SnapRect r);
 
-bool writePng(const std::string& path, const RgbImage& img, std::string& err);
+// Creates `path` and writes img as PNG. It never replaces a file: if `path`
+// exists, it fails and sets *exists (issue #47).
+bool writePng(const std::string& path, const RgbImage& img, std::string& err, bool* exists = nullptr);
 
 // The file name base: the recording's name without its folder and extension
 // ("cap.sigmf-meta" -> "cap"), or "live" without a file.
