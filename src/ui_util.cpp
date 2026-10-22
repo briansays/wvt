@@ -56,6 +56,7 @@ bool parseSI(const char* s, double& out) {
     if (end == s) return false;
     while (*end && std::isspace((unsigned char)*end)) ++end;
     double mult = 1;
+    const char* unit = end;  // after the SI prefix: only a unit may follow (issue #46)
     switch (*end) {
         case 'T': mult = 1e12; break;
         case 'G': case 'g': mult = 1e9; break;
@@ -67,7 +68,15 @@ bool parseSI(const char* s, double& out) {
         case 'p': mult = 1e-12; break;
         default: break;
     }
-    if ((unsigned char)end[0] == 0xC2 && (unsigned char)end[1] == 0xB5) mult = 1e-6;  // UTF-8 micro sign
+    if (mult != 1) ++unit;
+    if ((unsigned char)end[0] == 0xC2 && (unsigned char)end[1] == 0xB5) {  // UTF-8 micro sign
+        mult = 1e-6;
+        unit = end + 2;
+    }
+    // A unit such as "Hz", "MS/s" or "dBFS" is fine; "12abc3", "1.5.2" or "4:3" is not.
+    for (; *unit; ++unit)
+        if (!std::isalpha((unsigned char)*unit) && *unit != '/' && *unit != '%' && !std::isspace((unsigned char)*unit))
+            return false;
     out = v * mult;
     return std::isfinite(out);
 }

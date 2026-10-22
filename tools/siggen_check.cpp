@@ -25,6 +25,7 @@
 #include "json.h"
 #include "siggen.h"
 #include "siggen_out.h"
+#include "ui_util.h"
 
 namespace {
 int failures = 0;
@@ -1166,6 +1167,32 @@ int main(int argc, char** argv) {
               "JSON: arrays, numbers, escapes, unicode", err);
         check(!parseJson("{\"a\": [1, 2}", v, err) && err.find("line 1") != std::string::npos, "JSON: reports errors", err);
         check(jsonQuote("a\"b\\c\n") == "\"a\\\"b\\\\c\\n\"", "JSON: quoting");
+    }
+
+    // --- SI numbers (issue #46): a unit may follow, other text may not ---
+    {
+        struct Case {
+            const char* s;
+            bool ok;
+            double v;
+        };
+        const Case cases[] = {{"2.4M", true, 2.4e6},   {"2.4 MHz", true, 2.4e6}, {"10 MS/s", true, 10e6},
+                              {"-6 dBFS", true, -6},    {"5u", true, 5e-6},       {"5\xc2\xb5s", true, 5e-6},
+                              {" 1k ", true, 1e3},      {"20%", true, 20},        {"1e3", true, 1e3},
+                              {"", false, 0},           {"abc", false, 0},        {"12abc3", false, 0},
+                              {"1.5.2", false, 0},      {"4:3", false, 0},        {"2.4Mx3", false, 0},
+                              {"nan", false, 0},        {"inf", false, 0},        {"1e999", false, 0}};
+        bool all = true;
+        std::string bad;
+        for (const Case& c : cases) {
+            double v = 0;
+            const bool ok = parseSI(c.s, v);
+            if (ok != c.ok || (ok && std::fabs(v - c.v) > 1e-9 * std::fabs(c.v))) {
+                all = false;
+                bad += std::string(" '") + c.s + "'";
+            }
+        }
+        check(all, "parseSI: units accepted, trailing text refused", bad);
     }
 
     // --- transmit limits (issue #49) ---
