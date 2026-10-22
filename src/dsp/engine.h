@@ -14,6 +14,7 @@
 #include <thread>
 #include <vector>
 
+#include "common/progress.h"
 #include "dsp/dsp.h"
 #include "gpu/gpu.h"
 #include "io/iq_file.h"
@@ -24,7 +25,8 @@ using CancelFn = std::function<bool()>;
 template <class Req, class Res>
 class Worker {
 public:
-    using Fn = std::function<std::shared_ptr<Res>(const Req&, const CancelFn&)>;
+    // The job reports how far it is in the Progress (it may ignore it).
+    using Fn = std::function<std::shared_ptr<Res>(const Req&, const CancelFn&, Progress*)>;
 
     // `name` tags the log lines of slow jobs.
     Worker(Fn fn, std::function<void()> onDone, const char* name = "worker")
@@ -64,6 +66,8 @@ public:
         return result_;
     }
     bool busy() const { return busy_.load(); }
+    // How far the running job is: 0 to 1, or -1 (idle, or not known).
+    float progress() const { return busy_.load() ? progress_.fraction() : -1.f; }
 
 private:
     void loop() {
@@ -87,7 +91,8 @@ private:
                 if (quit_) return true;
                 return gen_.load() != myGen && std::chrono::steady_clock::now() - start > std::chrono::milliseconds(150);
             };
-            std::shared_ptr<Res> res = fn_(req, cancelled);
+            progress_.reset();
+            std::shared_ptr<Res> res = fn_(req, cancelled, &progress_);
             const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
             // Only slow jobs: logging every recompute while panning would flood the file.
             if (secs >= 0.25) LOG_DEBUG("engine", "%s job took %.0f ms%s", name_, secs * 1e3, res ? "" : " (cancelled)");
@@ -112,6 +117,7 @@ private:
     std::optional<Req> pending_, last_;
     std::atomic<uint64_t> gen_{0};
     std::atomic<bool> busy_{false};
+    Progress progress_;
     std::shared_ptr<Res> result_;
     bool fresh_ = false;
     std::atomic<bool> quit_{false};
@@ -157,7 +163,7 @@ struct WaterfallRes {
     bool gpu = false;     // computed on the GPU
 };
 
-std::shared_ptr<WaterfallRes> computeWaterfall(const WaterfallReq& r, const CancelFn& cancelled);
+std::shared_ptr<WaterfallRes> computeWaterfall(const WaterfallReq& r, const CancelFn& cancelled, Progress* progress = nullptr);
 // The waterfall's inner loop on the CPU threads. False when cancelled.
 bool spectrogramCpu(const SpecJob& job, float* lin, const CancelFn& cancelled);
 
@@ -214,7 +220,7 @@ struct DemodRes {
     int64_t nOut = 0;
 };
 
-std::shared_ptr<DemodRes> computeDemod(const DemodReq& r, const CancelFn& cancelled);
+std::shared_ptr<DemodRes> computeDemod(const DemodReq& r, const CancelFn& cancelled, Progress* progress = nullptr);
 
 // ---------------------------------------------------------------------------
 // Whole-file power overview (for the navigation strip)
@@ -228,7 +234,7 @@ struct OverviewReq {
 struct OverviewRes {
     std::vector<double> t, mean, peak;  // dBFS
 };
-std::shared_ptr<OverviewRes> computeOverview(const OverviewReq& r, const CancelFn& cancelled);
+std::shared_ptr<OverviewRes> computeOverview(const OverviewReq& r, const CancelFn& cancelled, Progress* progress = nullptr);
 
 // Effective channel parameters (shared by UI readouts and the engine)
 struct ChanDesign {

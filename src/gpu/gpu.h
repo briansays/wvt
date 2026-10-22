@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "common/progress.h"
 #include "io/iq_file.h"
 
 enum class GpuMode : int { Auto = 0, On, Off };
@@ -49,6 +50,7 @@ struct SpecJob {
     int rows = 0, avg = 1, n = 0, cols = 0;
     const float* win = nullptr;  // n window values
     float norm = 1;
+    Progress* progress = nullptr;  // gets the FFTs done (issue #75); may be null
 };
 inline int64_t specFftStart(const SpecJob& j, int row, int a) {
     const double center = j.s0 + row * j.hop + (a + 0.5) * j.hop / j.avg;
@@ -100,6 +102,7 @@ struct ChanJob {
     double frac = 0;  // chanOffset / fs
     const float* h = nullptr;
     int taps = 0;
+    Progress* progress = nullptr;  // gets the outputs done (issue #75); may be null
 };
 // y gets outLen complex values (interleaved re, im). Same status and
 // fallback rules as gpuSpectrogram, with its own "failed earlier" state.
