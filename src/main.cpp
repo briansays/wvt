@@ -405,7 +405,11 @@ int main(int argc, char** argv) {
     double audioVol = -6;
     float scale = 1.f;
     int winW = 1600, winH = 950;
-    if (const char* e = envVar("WVT_SCALE")) scale = (float)strtod(e, nullptr);
+    if (const char* e = envVar("WVT_SCALE"); e && *e) {
+        double x;
+        if (parseSI(e, x) && x >= 0.5 && x <= 4) scale = (float)x;
+        else LOG_WARN("main", "WVT_SCALE=%s is not a number from 0.5 to 4; using 1", e);
+    }
     GpuMode gpuMode = GpuMode::Auto;
     int gpuDevice = -1;
 
@@ -495,7 +499,7 @@ int main(int argc, char** argv) {
     cli.add(nullptr, "--software", nullptr, "force the software renderer (no GLX)", flag(software));
     cli.add(nullptr, "--scale", "S", "UI scale factor (default 1, or $WVT_SCALE)", [&](const char* v) {
         double x;
-        if (!parseSI(v, x)) return bad("bad --scale");
+        if (!parseSI(v, x) || x < 0.5 || x > 4) return bad("--scale wants a number from 0.5 to 4");
         scale = (float)x;
         return true;
     });
@@ -518,9 +522,9 @@ int main(int argc, char** argv) {
                 return true;
             });
     cli.add(nullptr, "--gpu-device", "N", "use GPU N (see --list-devices)", [&](const char* v) {
-        char* end = nullptr;
-        gpuDevice = (int)strtol(v, &end, 10);
-        if (end == v || *end || gpuDevice < 0) return bad("--gpu-device wants a device number");
+        long long n;
+        if (!whole("--gpu-device", v, 0, 63, n)) return false;
+        gpuDevice = (int)n;
         return true;
     });
     cli.note("-v", "--verbose", "[LEVEL]",
@@ -571,9 +575,8 @@ int main(int argc, char** argv) {
     cli.add(nullptr, "--antenna", "NAME", "USRP receive antenna (e.g. RX2, TX/RX; default: the device's)", text(dev.antenna));
     cli.add(nullptr, "--usrp-channel", "N", "USRP receive / transmit channel (X310, N310, X410 have several; default 0)",
             [&](const char* v) {
-                char* end = nullptr;
-                const long c = strtol(v, &end, 10);
-                if (end == v || *end || c < 0 || c > 63) return bad("bad channel '%s'", v);
+                long long c;
+                if (!whole("--usrp-channel", v, 0, 63, c)) return false;
                 dev.channel = txc.channel = (int)c;
                 return true;
             });
@@ -930,7 +933,15 @@ int main(int argc, char** argv) {
             const size_t x = path.find_last_of(':');
             if (x != std::string::npos && x + 1 < path.size() &&
                 path.find_first_not_of("0123456789", x + 1) == std::string::npos) {
-                reps = (int)std::min(strtol(path.c_str() + x + 1, nullptr, 10), (long)INT_MAX);
+                char* end = nullptr;
+                errno = 0;
+                const long n = strtol(path.c_str() + x + 1, &end, 10);
+                if (errno == ERANGE || n < 1 || n > INT_MAX) {
+                    LOG_ERROR("main", "--chain-add: the repeat count N in PATH:N must be a whole number from 1 to %d (got '%s')",
+                              INT_MAX, path.c_str() + x + 1);
+                    return 2;
+                }
+                reps = (int)n;
                 path.erase(x);
             }
             const size_t at = path.find_last_of('@');
@@ -955,7 +966,7 @@ int main(int argc, char** argv) {
             std::string note;
             ChainItem c = makeChainItem(path, gp, &note);
             if (haveOff) c.offset = off;
-            c.repeats = std::max(1, reps);
+            c.repeats = reps;
             LOG_INFO("main", "chain item %zu: %s (%s)", gp.chain.size() + 1, c.path.c_str(), note.c_str());
             gp.chain.push_back(c);
         }

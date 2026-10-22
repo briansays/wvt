@@ -5,7 +5,10 @@ wvt [options] [file]
 ```
 
 `wvt --help` shows the same list. Values in Hz and seconds accept SI suffixes, for example `2.4M`,
-`250k`, `20u` or `5m`. For more information about an option, refer to the page in the last column.
+`250k`, `20u` or `5m`. A unit can follow the value, for example `2.4 MHz` or `10 MS/s`. wvt
+does not accept other text after the value (`1.5.2` or `12abc`). Whole-number options (for
+example `--seed`, `--gpu-device` or the `N` in `--chain-add PATH:N`) must be whole numbers in
+their range. For more information about an option, refer to the page in the last column.
 
 ## File and display
 
