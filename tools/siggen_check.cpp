@@ -1149,7 +1149,20 @@ int main(int argc, char** argv) {
               "SigMF: global datatype and rate, frequency and time of the first capture",
               fmt("rate %g fc %g", g.rate, g.fc));
         g = guess(R"({"global": {"core:sample_rate": "fast"}, "captures": []})");
-        check(!g.haveRate && !g.haveFc && g.source == "SigMF metadata", "SigMF: a string rate and no captures give no values");
+        check(!g.haveRate && !g.haveFc && g.source.rfind("SigMF metadata", 0) == 0, "SigMF: a string rate and no captures give no values");
+        check(!g.haveFmt && g.badType.empty() && g.source.find("cf32 assumed") != std::string::npos,
+              "SigMF: no datatype says cf32 is assumed", g.source);
+
+        // Datatypes wvt cannot read are refused, not shown as cf32 (issue #44).
+        std::string e2;
+        bool refused = true;
+        for (const char* t : {"ri16_le", "rf32_le", "cu16_le", "ci64_le", "cf16_le"}) {
+            g = guess(std::string(R"({"global": {"core:datatype": ")") + t + R"(", "core:sample_rate": 1e6}})");
+            refused = refused && !g.haveFmt && g.badType == t && !metaReadable(g, e2) && e2.find(t) != std::string::npos;
+        }
+        check(refused, "SigMF: real and unknown datatypes are refused", e2);
+        g = guess(R"({"global": {"core:datatype": "cf32_be"}})");
+        check(g.haveFmt && g.fmt == SampleFormat::CF32 && g.bigEndian && metaReadable(g, e2), "SigMF: cf32_be is read");
         g = guess("{\"global\": {\"core:sample_rate\": 2e6");
         check(g.source != "SigMF metadata", "SigMF: invalid JSON falls back to the file name", g.source);
         remove(meta.c_str());

@@ -271,8 +271,12 @@ static FileMetaGuess guessMetaImpl(const std::string& path) {
                     return nullptr;
                 };
                 using T = JsonValue::Type;
-                if (const JsonValue* v = find("core:datatype", T::String); v && parseFormatName(v->str, g.fmt, g.bigEndian))
-                    g.haveFmt = true;
+                if (const JsonValue* v = find("core:datatype", T::String)) {
+                    // Only complex types: wvt has no real-sample formats (ri16_le, rf32_le, ...).
+                    const bool complex = !v->str.empty() && (v->str[0] == 'c' || v->str[0] == 'C');
+                    if (complex && parseFormatName(v->str, g.fmt, g.bigEndian)) g.haveFmt = true;
+                    else g.badType = v->str;
+                }
                 if (const JsonValue* v = find("core:sample_rate", T::Number)) {
                     g.rate = v->num;
                     g.haveRate = std::isfinite(g.rate) && g.rate > 0;
@@ -283,6 +287,10 @@ static FileMetaGuess guessMetaImpl(const std::string& path) {
                 }
                 if (const JsonValue* v = find("core:datetime", T::String)) g.startTime = parseIsoTime(v->str);
                 g.source = "SigMF metadata";
+                if (!g.haveFmt && g.badType.empty()) {
+                    LOG_WARN("file", "SigMF metadata %s has no core:datatype; reading it as cf32", metaPath.c_str());
+                    g.source += " (no datatype: cf32 assumed)";
+                }
                 return g;
             }
             LOG_WARN("file", "SigMF metadata %s is not valid JSON (%s); guessing from the name", metaPath.c_str(), err.c_str());
@@ -341,6 +349,13 @@ static FileMetaGuess guessMetaImpl(const std::string& path) {
     }
     if (g.haveRate || g.haveFc) g.source = g.haveFmt ? "file name and extension" : "file name";
     return g;
+}
+
+bool metaReadable(const FileMetaGuess& g, std::string& err) {
+    if (g.badType.empty()) return true;
+    err = g.dataPath + ": SigMF datatype '" + g.badType +
+          "' is not supported (wvt reads complex cf64, cf32, ci32, ci16, ci8 and cu8, _le or _be)";
+    return false;
 }
 
 FileMetaGuess guessMeta(const std::string& path) {

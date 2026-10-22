@@ -34,6 +34,13 @@ order:
 3. Values in the file name, for example `2.4MSps` or `915MHz`.
 4. The file extension, for example `.cu8`, `.cs8`, `.cs16`, `.cf32`, `.cfile` or `.raw`.
 
+wvt reads the SigMF `core:datatype` from `global`, and `core:sample_rate`, `core:frequency` and
+`core:datetime` from `global` or the first capture. The datatype must be a complex type in the
+table above (`_le` or `_be`). wvt does not open a SigMF file with a different datatype (for
+example `ri16_le`, real samples), because it would show noise. To read the file with a
+different format, give `-f`. If the metadata has no datatype, wvt reads the file as `cf32` and
+shows a warning.
+
 The command-line options override all the values that wvt finds:
 
 | Option | Value |

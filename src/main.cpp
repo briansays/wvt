@@ -203,6 +203,10 @@ static int runAudioExport(const std::string& path, const CliOverrides& ov, bool 
                           double seg0, double seg1, const AudioParams& ap, const std::string& out) {
     FileMetaGuess g = guessMeta(path);
     std::string err;
+    if (!ov.haveFmt && !metaReadable(g, err)) {
+        LOG_ERROR("audio", "%s; -f FMT reads it anyway", err.c_str());
+        return 1;
+    }
     auto f = IqFile::open(g.dataPath, err);
     if (!f) {
         LOG_ERROR("audio", "%s", err.c_str());
@@ -260,6 +264,10 @@ static int runExtract(const std::string& path, const CliOverrides& ov, double se
                       const std::string& out) {
     FileMetaGuess g = guessMeta(path);
     std::string err;
+    if (!ov.haveFmt && !metaReadable(g, err)) {
+        LOG_ERROR("extract", "%s; -f FMT reads it anyway", err.c_str());
+        return 1;
+    }
     auto f = IqFile::open(g.dataPath, err);
     if (!f) {
         LOG_ERROR("extract", "%s", err.c_str());
@@ -940,6 +948,10 @@ int main(int argc, char** argv) {
                 if (!ov.haveRate && g.haveRate) gp.rate = g.rate;
                 if (!ov.haveFc && g.haveFc) gp.fc = g.fc;
             }
+            if (std::string err; !metaReadable(guessMeta(expandHome(path)), err)) {
+                LOG_ERROR("main", "--chain-add: %s", err.c_str());
+                return 2;
+            }
             std::string note;
             ChainItem c = makeChainItem(path, gp, &note);
             if (haveOff) c.offset = off;
@@ -953,6 +965,10 @@ int main(int argc, char** argv) {
     if (!playFile.empty()) {
         // Plays as recorded unless -r / -c / --offset say otherwise.
         const FileMetaGuess g = guessMeta(expandHome(playFile));
+        if (std::string err; !ov.haveFmt && !metaReadable(g, err)) {
+            LOG_ERROR("main", "--play: %s; -f FMT reads it anyway", err.c_str());
+            return 2;
+        }
         gp.playPath = g.dataPath;
         if (g.haveFmt) { gp.playFp.fmt = g.fmt; gp.playFp.bigEndian = g.bigEndian; }
         if (ov.haveFmt) { gp.playFp.fmt = ov.fmt; gp.playFp.bigEndian = ov.bigEndian; }

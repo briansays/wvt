@@ -62,7 +62,11 @@ struct FileMetaGuess {
     double fc = 0;
     double startTime = 0;  // SigMF core:datetime of the first capture (s since 1970, UTC); 0 = unknown
     std::string source;  // human-readable note of where the guess came from
+    std::string badType;  // SigMF core:datatype that wvt cannot read (e.g. "ri16_le"); empty = none
 };
 FileMetaGuess guessMeta(const std::string& path);
+// False, with a message in `err`, if the file has a SigMF datatype that wvt
+// cannot read (issue #44). Reading it as cf32 would show noise.
+bool metaReadable(const FileMetaGuess& g, std::string& err);
 double parseIsoTime(const std::string& s);  // SigMF core:datetime -> s since 1970 (0 = bad)
 bool parseFormatName(const std::string& s, SampleFormat& fmt, bool& bigEndian);

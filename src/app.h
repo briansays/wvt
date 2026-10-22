@@ -367,6 +367,7 @@ private:
     bool sgReady_ = false;  // valid, and a playback recording is loaded
     char sgPlayPath_[1024] = {};
     std::string sgPlayNote_;
+    bool sgPlayNoteWarn_ = false;  // the file's datatype is not supported (issue #44)
     char sgStagger_[256] = {};
     int sgOutput_ = 0;  // 0 file, 1 loopback, 2 transmit
     FileGenConfig sgFileCfg_;

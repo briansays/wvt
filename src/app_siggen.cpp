@@ -493,6 +493,12 @@ void App::setPlaybackFile(const std::string& path, bool fromViewer) {
     }
     forgetPlayback();  // Load always rereads the file
     sgPlayNote_ = g.source.empty() ? "no metadata found: set the format and rate below" : "settings from " + g.source;
+    sgPlayNoteWarn_ = false;
+    if (std::string err; !fromViewer && !metaReadable(g, err)) {
+        sgPlayNote_ = err + ": set the format below";
+        sgPlayNoteWarn_ = true;
+        LOG_WARN("app", "playback: %s", err.c_str());
+    }
 }
 
 void App::drawSigGenPlayback() {
@@ -535,7 +541,8 @@ void App::drawSigGenPlayback() {
     if (!sgPlayNote_.empty()) {
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(1);
-        ImGui::TextDisabled("%s", sgPlayNote_.c_str());
+        if (sgPlayNoteWarn_) ImGui::TextColored(kColWarn, "%s", sgPlayNote_.c_str());
+        else ImGui::TextDisabled("%s", sgPlayNote_.c_str());
     }
 
     row("Format", "Sample format of the recording");

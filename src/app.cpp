@@ -80,7 +80,9 @@ bool App::busy() const {
 bool App::openFile(const std::string& path, const CliOverrides& o) {
     FileMetaGuess g = guessMeta(path);
     std::string err;
-    auto f = IqFile::open(g.dataPath, err);
+    std::shared_ptr<IqFile> f;
+    if (o.haveFmt || metaReadable(g, err)) f = IqFile::open(g.dataPath, err);
+    else err += "; -f FMT reads it anyway";
     if (!f) {
         LOG_ERROR("app", "%s", err.c_str());
         status_ = err;
