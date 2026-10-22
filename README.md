@@ -27,6 +27,14 @@ cmake --build build -j
 ./build/wvt out.sigmf-meta --chan 300k:150k
 ```
 
+Or use the build script. It builds in `build.<arch>` (for example `build.arm64`), and its options
+select the architecture and turn features off:
+
+```sh
+scripts/build.sh --help
+scripts/build.sh --no-cuda --test            # build, then run the self-checks
+```
+
 ## Documentation
 
 The documentation is in [`docs/`](docs/index.md). To make the HTML pages with Sphinx:

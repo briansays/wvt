@@ -113,6 +113,7 @@ folders.
 | Folder | Contents |
 |---|---|
 | `third_party/` | Dear ImGui 1.91.9, ImPlot 0.16, miniaudio 0.11.25 and stb_image_write 1.16 |
-| `cmake/` | `embed.cmake`, which puts the UI font in the binary |
+| `scripts/` | `build.sh`, the build script (see [The build script](build.md#the-build-script)) |
+| `cmake/` | `embed.cmake`, which puts the UI font in the binary, and `build_info.cmake` (the git commit and tag) |
 | `docs/` | These pages. `docs/design/` has the design records |
 | `.github/workflows/` | The CI jobs |

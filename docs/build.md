@@ -14,6 +14,55 @@ Give each option as `-DNAME=VALUE`. CMake keeps the values in `build/CMakeCache.
 you configure the same build folder again, you do not have to give the options again. To go back
 to the default of an option, delete `build/CMakeCache.txt`, or give the default value.
 
+## The build script
+
+`scripts/build.sh` does the two steps above for one CPU architecture. It builds in the folder
+`build.<arch>` at the top of the source tree, for example `build.arm64` or `build.x86_64`. A
+sanitizer build goes in `build.<arch>.<sanitizer>`, for example `build.arm64.thread`.
+
+```sh
+scripts/build.sh [options] [-- extra CMake arguments]
+```
+
+| Option | Function |
+|---|---|
+| `-a`, `--arch ARCH` | `x86_64` or `arm64` (`amd64` and `aarch64` are also accepted). The default is the architecture of the computer |
+| `-t`, `--type TYPE` | `Release` (default), `Debug`, `RelWithDebInfo` or `MinSizeRel` |
+| `-j`, `--jobs N` | The number of parallel compile jobs. The default is the number of CPUs |
+| `-B`, `--build-dir DIR` | Use `DIR`, not `build.<arch>` |
+| `--toolchain FILE` | A CMake toolchain file. On Linux, a build for a different architecture needs one |
+| `--clean` | Delete the build folder first |
+| `--test` | Run the self-checks (`ctest`) after the build |
+| `-n`, `--dry-run` | Show the commands, but do not run them |
+| `--no-rtlsdr`, `--no-uhd`, `--no-bb`, `--no-audio`, `--no-cuda`, `--no-metal` | Turn the feature off (`WVT_WITH_...=OFF`) |
+| `--with-rtlsdr`, `--with-uhd`, `--with-bb`, `--with-audio`, `--with-cuda`, `--with-metal` | The feature must be in the build. The configure step stops if its library is missing (`WVT_WITH_...=ON`) |
+| `--no-gpu` | The same as `--no-cuda --no-metal` |
+| `--minimal` | All the features off: the file viewer, the simulator and the signal generator only |
+| `--werror`, `--bb-sim`, `--fuzz` | `WVT_WERROR=ON`, `WVT_BB_SIM=ON`, `WVT_FUZZ=ON` |
+| `--sanitize KIND` | `address` or `thread` (`WVT_SANITIZE`) |
+
+Without a `--no-` or `--with-` option, a feature is in the build if its library is found, as in a
+`cmake` build without options.
+
+A different architecture:
+
+- **macOS** compiles for it directly (`CMAKE_OSX_ARCHITECTURES`). An `x86_64` build runs on Apple
+  silicon with Rosetta. But the Homebrew libraries are for one architecture only, so turn off the
+  features that use them (for example `--minimal`), or install the libraries for the other
+  architecture.
+- **Linux** needs a cross compiler and libraries for the other architecture: give them with
+  `--toolchain FILE`.
+
+Examples:
+
+```sh
+scripts/build.sh                                   # this computer, all the features that are found
+scripts/build.sh --no-cuda --no-uhd --test         # two features off, then the self-checks
+scripts/build.sh --arch x86_64 --minimal           # macOS: an Intel build on Apple silicon
+scripts/build.sh --sanitize thread --type RelWithDebInfo
+scripts/build.sh -- -DCMAKE_CUDA_ARCHITECTURES=89  # extra CMake arguments
+```
+
 ## Options
 
 ### Summary
