@@ -44,6 +44,7 @@ folders.
 | `src/io/iq_file.*` | The memory-mapped reader for all sample formats, and SigMF and file name detection |
 | `src/dsp/extract.*` | Region export: checks, filter design, the background job |
 | `src/app/app_export.cpp` | The export window, the waterfall right-click menu, region selection |
+| `src/dsp/measure.*`, `src/app/app_measure.cpp` | Point measurements: the nearest sample, the snap to a peak, the P1 and P2 markers and their differences |
 
 ## GPU
 

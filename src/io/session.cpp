@@ -107,6 +107,17 @@ std::string sessionToJson(const Session& s) {
          ",\n              \"squelch\": " + b(s.squelch) + ", \"squelch_db\": " + n(s.squelchDb) + "},\n";
     j += "  \"markers\": {\"time\": " + b(s.tMarkers) + ", \"t1_s\": " + n(s.tm1) + ", \"t2_s\": " + n(s.tm2) +
          ", \"freq\": " + b(s.fMarkers) + ", \"f1_hz\": " + n(s.fm1) + ", \"f2_hz\": " + n(s.fm2) + "},\n";
+    // Only the markers that are set, and only the values their plot has.
+    j += "  \"points\": {\"shown\": " + b(s.points);
+    for (int k = 0; k < 2; ++k) {
+        const PointMarker& p = s.pt[k];
+        if (!p.set()) continue;
+        j += std::string(", \"p") + char('1' + k) + "\": {\"plot\": " + jsonQuote(measPlotName(p.plot));
+        if (measHasTime(p.plot)) j += ", \"t_s\": " + n(p.t);
+        if (measHasFreq(p.plot)) j += ", \"f_hz\": " + n(p.f);
+        j += '}';
+    }
+    j += "},\n";
     j += "  \"bookmarks\": [";
     for (size_t i = 0; i < s.bookmarks.size(); ++i)
         j += std::string(i ? "," : "") + "\n    {\"name\": " + jsonQuote(s.bookmarks[i].name) + ", \"t0_s\": " +
@@ -223,6 +234,15 @@ bool sessionFromJson(const std::string& text, const std::string& sessionPath, Se
         o.fMarkers = m->boolean("freq");
         o.fm1 = m->number("f1_hz");
         o.fm2 = m->number("f2_hz");
+    }
+    if (const JsonValue* p = v.get("points")) {
+        o.points = p->boolean("shown");
+        for (int k = 0; k < 2; ++k)
+            if (const JsonValue* q = p->get(std::string("p") + char('1' + k)); q && q->type == JsonValue::Type::Object) {
+                o.pt[k].plot = measPlotFromName(q->string("plot"));  // an unknown plot: not set
+                o.pt[k].t = q->number("t_s");
+                o.pt[k].f = q->number("f_hz");
+            }
     }
     if (const JsonValue* bm = v.get("bookmarks"); bm && bm->type == JsonValue::Type::Array)
         for (const JsonValue& x : bm->arr) o.bookmarks.push_back({x.string("name"), x.number("t0_s"), x.number("t1_s")});

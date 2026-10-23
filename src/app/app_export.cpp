@@ -382,6 +382,7 @@ void App::drawWaterfallMenu() {
     ImGui::EndDisabled();
     ImGui::Separator();
     if (ImGui::MenuItem("Show everything", "A")) showAll();
+    if (ImGui::MenuItem("Clear point markers", "Shift+M", false, pts_[0].set() || pts_[1].set())) clearPoints();
     ImGui::EndPopup();
 }
 

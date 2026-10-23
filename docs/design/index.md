@@ -20,6 +20,7 @@ is correct.
 | [Other USRP models](usrp-models-plan.md) | #11 | Implemented. Needs network USRPs to verify |
 | [Signal Hound BB60](bb60-integration-plan.md) | #2 | Implemented with a simulated device. Needs a BB60 to verify |
 | [Epiq Sidekiq](sidekiq-integration-plan.md) | #4 | Plan only |
+| [Point measurements](point-measurement-plan.md) | #80 | Implemented |
 
 ```{toctree}
 :hidden:
@@ -37,4 +38,5 @@ plot-snapshot-plan
 usrp-models-plan
 bb60-integration-plan
 sidekiq-integration-plan
+point-measurement-plan
 ```

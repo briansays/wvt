@@ -122,6 +122,11 @@ struct X11Window::Impl {
     Atom wmDelete = 0, clipboard = 0, utf8 = 0, targets = 0, wvtProp = 0, text = 0, incr = 0;
     Time lastTime = CurrentTime;  // the last input event: selections use real times (ICCCM)
     unsigned cmdMask = 0;         // macOS: the X modifier of the Command key, which acts as Ctrl
+    unsigned altMask = 0;         // macOS: the X modifiers of the Alt keys
+    // When Command and Alt are on the same X modifier (Xvfb, and XQuartz with
+    // some key settings), the state cannot tell them apart: the key that is
+    // down does (issue #80: Alt+click must not be Ctrl+click).
+    bool cmdDown = false, altDown = false;
     int w = 0, h = 0;
     int wakeFd[2] = {-1, -1};
     std::chrono::steady_clock::time_point last = std::chrono::steady_clock::now();
@@ -264,9 +269,11 @@ struct X11Window::Impl {
     void handle(XEvent& ev) {
         ImGuiIO& io = ImGui::GetIO();
         auto mods = [&](unsigned state) {
-            io.AddKeyEvent(ImGuiMod_Ctrl, (state & (ControlMask | cmdMask)) != 0);
+            const bool shared = (state & cmdMask & altMask) != 0;
+            const bool cmd = shared ? cmdDown : (state & cmdMask) != 0;
+            io.AddKeyEvent(ImGuiMod_Ctrl, (state & ControlMask) != 0 || cmd);
             io.AddKeyEvent(ImGuiMod_Shift, (state & ShiftMask) != 0);
-            io.AddKeyEvent(ImGuiMod_Alt, (state & Mod1Mask) != 0);
+            io.AddKeyEvent(ImGuiMod_Alt, shared ? altDown : (state & Mod1Mask) != 0);
             io.AddKeyEvent(ImGuiMod_Super, (state & Mod4Mask) != 0);
         };
         switch (ev.type) {
@@ -318,6 +325,8 @@ struct X11Window::Impl {
                 KeySym ks = 0;
                 int len = XLookupString(&ev.xkey, buf, sizeof(buf) - 1, &ks, nullptr);
                 KeySym base = XLookupKeysym(&ev.xkey, 0);
+                if (base == XK_Alt_L || base == XK_Alt_R) altDown = down;
+                if (base == XK_Meta_L || base == XK_Meta_R || base == XK_Super_L || base == XK_Super_R) cmdDown = down;
                 mods(ev.xkey.state);
                 ImGuiKey k = mapKey(base);
                 if (k == ImGuiKey_None) k = mapKey(ks);
@@ -335,7 +344,10 @@ struct X11Window::Impl {
                 break;
             }
             case FocusIn: io.AddFocusEvent(true); break;
-            case FocusOut: io.AddFocusEvent(false); break;
+            case FocusOut:
+                cmdDown = altDown = false;  // a key let go in another window sends no release here
+                io.AddFocusEvent(false);
+                break;
             case SelectionRequest: handleSelectionRequest(ev.xselectionrequest); break;
             case SelectionClear:
                 if (ev.xselectionclear.selection == clipboard) clipOut.clear();  // another program owns it now
@@ -425,11 +437,14 @@ bool X11Window::create(const char* title, int w, int h, bool forceSoftware, std:
     if (XModifierKeymap* mm = XGetModifierMapping(d->dpy)) {
         const KeyCode cmd[] = {XKeysymToKeycode(d->dpy, XK_Meta_L), XKeysymToKeycode(d->dpy, XK_Meta_R),
                                XKeysymToKeycode(d->dpy, XK_Super_L), XKeysymToKeycode(d->dpy, XK_Super_R)};
+        const KeyCode alt[] = {XKeysymToKeycode(d->dpy, XK_Alt_L), XKeysymToKeycode(d->dpy, XK_Alt_R)};
         for (int m = Mod1MapIndex; m <= Mod5MapIndex; ++m)
             for (int k = 0; k < mm->max_keypermod; ++k) {
                 const KeyCode kc = mm->modifiermap[m * mm->max_keypermod + k];
                 for (KeyCode c : cmd)
                     if (kc && kc == c) d->cmdMask |= 1u << m;
+                for (KeyCode c : alt)
+                    if (kc && kc == c) d->altMask |= 1u << m;
             }
         XFreeModifiermap(mm);
     }

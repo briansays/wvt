@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "dsp/measure.h"
 #include "io/iq_file.h"
 
 struct Session {
@@ -50,6 +51,8 @@ struct Session {
     // Markers and bookmarks.
     bool tMarkers = false, fMarkers = false;
     double tm1 = 0, tm2 = 0, fm1 = 0, fm2 = 0;
+    bool points = false;   // the point markers (issue #80) are shown
+    PointMarker pt[2];     // P1, P2
     struct Bookmark {
         std::string name;
         double t0 = 0, t1 = 0;

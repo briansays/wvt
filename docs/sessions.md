@@ -12,7 +12,7 @@ A session file keeps these items:
 | The waterfall | The FFT size, the window, the overlap, the averages, the size limits, the dB range, Auto, the colormap and peak hold |
 | The layout | The panel sizes, the overview strip, and which time plots show and fit their Y axis |
 | The channel | On or off, the offset, the bandwidth, the taps, the decimation, and the AM, FM and PM settings and the squelch |
-| Markers and bookmarks | The time and frequency markers, and all the bookmarks |
+| Markers and bookmarks | The time and frequency markers, the point markers (P1 and P2), and all the bookmarks |
 
 A session does not keep the live mode, the signal generator, the audio window or the export
 window.
@@ -67,10 +67,13 @@ The session file is JSON. You can read and change it with a text editor. Part of
   "layout": {...},
   "channel": {"enabled": true, "offset_hz": 300000, "bandwidth_hz": 150000, ...},
   "markers": {...},
+  "points": {"shown": true, "p1": {"plot": "am", "t_s": 10.12}, "p2": {"plot": "waterfall", "t_s": 10.15, "f_hz": 100300000}},
   "bookmarks": [{"name": "burst", "t0_s": 10.1, "t1_s": 10.2}]
 }
 ```
 
 - `segment_s` -1 is the start or the end of the file.
+- `plot` of a point marker is `waterfall`, `spectrum`, `i`, `q`, `am`, `fm` or `pm`. A marker on the
+  waterfall has `t_s` and `f_hz`, on the spectrum `f_hz`, and on a time plot `t_s`.
 - A member that is not in the file gets its default value. Only `recording` is necessary.
 - A session file from a newer wvt (a larger `wvt_session` number) is refused.
