@@ -17,3 +17,7 @@
 *.swp
 compile_commands.json
 .cache/
+
+# Vendor SDKs unpacked for a local build: not open source, never committed
+/third_party/sidekiq_sdk/
+/third_party/signal_hound_sdk/

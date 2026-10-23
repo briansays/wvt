@@ -322,6 +322,123 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
+# Optional Epiq Solutions Sidekiq backend (issue #4) through libsidekiq from
+# the Sidekiq SDK, which is for Linux only. The SDK has no pkg-config file:
+# its bin/sidekiq-config gives the include folder and the static link flags,
+# which are kept in their order (the static libraries need it). The SDK is the
+# first of SIDEKIQ_SDK_DIR, $SIDEKIQ_SDK_DIR, ~/sidekiq_sdk_current and the
+# newest third_party/sidekiq_sdk/sidekiq_sdk_v* folder. An SDK without
+# sidekiq-config is linked from its lib/ folder. WVT_SKIQ_SIM builds the
+# backend against a simulated card instead (tools/skiq_sim), for CI and tests.
+# ---------------------------------------------------------------------------
+set(WVT_WITH_SKIQ AUTO CACHE STRING "Build the Epiq Sidekiq backend (AUTO, ON, OFF)")
+set_property(CACHE WVT_WITH_SKIQ PROPERTY STRINGS AUTO ON OFF)
+set(SIDEKIQ_SDK_DIR "" CACHE PATH "Sidekiq SDK folder (the one with bin/sidekiq-config and sidekiq_core/)")
+option(WVT_SKIQ_SIM "Build the Sidekiq backend against a simulated card (no SDK, no hardware)" OFF)
+set(WVT_SKIQ_MIN_VERSION 4.14.0)  # skiq_write_ref_clock_select
+set(WVT_SKIQ_OK FALSE)
+set(WVT_SKIQ_WHY "")
+if(WVT_SKIQ_SIM)
+  add_library(skiq_api_sim STATIC tools/skiq_sim/skiq_api_sim.cpp)
+  target_include_directories(skiq_api_sim PUBLIC tools/skiq_sim)
+  target_compile_options(skiq_api_sim PRIVATE ${WVT_WARNINGS})
+  set(WVT_SKIQ_TARGET skiq_api_sim)
+  set(WVT_SKIQ_OK TRUE)
+  set(WVT_SKIQ_WHAT "simulated card, tools/skiq_sim")
+elseif(WVT_WITH_SKIQ STREQUAL "OFF")
+  set(WVT_SKIQ_WHY "WVT_WITH_SKIQ=OFF")
+elseif(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set(WVT_SKIQ_WHY "the Sidekiq SDK is for Linux only")
+else()
+  set(_skiq_dirs "${SIDEKIQ_SDK_DIR}" "$ENV{SIDEKIQ_SDK_DIR}" "$ENV{HOME}/sidekiq_sdk_current")
+  file(GLOB _skiq_local "${CMAKE_SOURCE_DIR}/third_party/sidekiq_sdk/sidekiq_sdk_v*")
+  set(_skiq_newest "")
+  set(_skiq_newest_ver "0")
+  foreach(_d IN LISTS _skiq_local)
+    string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]+$" _v "${_d}")
+    if(IS_DIRECTORY "${_d}" AND _v AND _v VERSION_GREATER _skiq_newest_ver)
+      set(_skiq_newest "${_d}")
+      set(_skiq_newest_ver "${_v}")
+    endif()
+  endforeach()
+  list(APPEND _skiq_dirs "${_skiq_newest}")
+  set(_skiq_dir "")
+  foreach(_d IN LISTS _skiq_dirs)
+    if(_d AND EXISTS "${_d}/sidekiq_core/inc/sidekiq_api.h")
+      set(_skiq_dir "${_d}")
+      break()
+    endif()
+  endforeach()
+  # The SDK's name for this CPU's build (one SDK holds several).
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+    set(_skiq_cfg aarch64)
+  else()
+    set(_skiq_cfg x86_64.gcc)
+  endif()
+  set(_skiq_inc "")
+  set(_skiq_libs "")
+  set(_skiq_ver "")
+  if(NOT _skiq_dir)
+    set(WVT_SKIQ_WHY "Sidekiq SDK not found; get it from Epiq Solutions and set -DSIDEKIQ_SDK_DIR=...")
+  elseif(EXISTS "${_skiq_dir}/bin/sidekiq-config")
+    set(_skiq_config ${CMAKE_COMMAND} -E env SIDEKIQ_CONFIG_BUILD_CONFIG=${_skiq_cfg} "${_skiq_dir}/bin/sidekiq-config")
+    foreach(_q version cflags libs-static)
+      execute_process(COMMAND ${_skiq_config} --${_q} OUTPUT_VARIABLE _out ERROR_VARIABLE _err RESULT_VARIABLE _r
+        OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_STRIP_TRAILING_WHITESPACE)
+      if(_r)
+        set(WVT_SKIQ_WHY "${_skiq_dir}/bin/sidekiq-config --${_q} failed: ${_err}")
+        break()
+      endif()
+      set(_skiq_${_q} "${_out}")
+    endforeach()
+    if(NOT WVT_SKIQ_WHY)
+      set(_skiq_ver "${_skiq_version}")
+      separate_arguments(_skiq_cflags UNIX_COMMAND "${_skiq_cflags}")
+      foreach(_f IN LISTS _skiq_cflags)
+        if(_f MATCHES "^-I(.+)")
+          list(APPEND _skiq_inc "${CMAKE_MATCH_1}")
+        endif()
+      endforeach()
+      separate_arguments(_skiq_libs UNIX_COMMAND "${_skiq_libs-static}")
+    endif()
+  else()
+    # The link flags of SDK 4.26.0's share/sidekiq/sidekiq-config/<build>.conf.
+    set(_skiq_inc "${_skiq_dir}/sidekiq_core/inc")
+    set(_skiq_support "${_skiq_dir}/lib/support/${_skiq_cfg}/usr/lib/epiq")
+    set(_skiq_a "${_skiq_dir}/lib/libsidekiq__${_skiq_cfg}.a")
+    file(STRINGS "${_skiq_inc}/sidekiq_api.h" _vl REGEX "#define LIBSIDEKIQ_VERSION_(MAJOR|MINOR|PATCH) ")
+    string(REGEX REPLACE ".*MAJOR ([0-9]+).*MINOR ([0-9]+).*PATCH ([0-9]+).*" "\\1.\\2.\\3" _skiq_ver "${_vl}")
+    if(EXISTS "${_skiq_a}")
+      set(_skiq_libs -L${_skiq_support} -Wl,-rpath,${_skiq_support} -Wl,-rpath,/usr/lib/epiq "${_skiq_a}"
+        -lusb-1.0 -lglib-2.0 -ltirpc -lpthread -lrt -lm -lstdc++ -ldl)
+    else()
+      set(WVT_SKIQ_WHY "${_skiq_a} not found (no Sidekiq library for ${CMAKE_SYSTEM_PROCESSOR} in ${_skiq_dir})")
+    endif()
+  endif()
+  if(_skiq_libs AND _skiq_ver VERSION_LESS WVT_SKIQ_MIN_VERSION)
+    set(WVT_SKIQ_WHY "Sidekiq SDK ${_skiq_ver} in ${_skiq_dir} is older than ${WVT_SKIQ_MIN_VERSION}")
+  elseif(_skiq_libs AND NOT WVT_SKIQ_WHY)
+    add_library(sidekiq INTERFACE IMPORTED)
+    # Link items that start with "-" go to the linker unchanged and in order.
+    set_target_properties(sidekiq PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${_skiq_inc}"
+      INTERFACE_LINK_LIBRARIES "${_skiq_libs}")
+    set(WVT_SKIQ_TARGET sidekiq)
+    set(WVT_SKIQ_OK TRUE)
+    set(WVT_SKIQ_WHAT "SDK ${_skiq_ver}, ${_skiq_dir}")
+  endif()
+endif()
+if(WVT_SKIQ_OK)
+  target_sources(wvt PRIVATE src/device/sdr_skiq.cpp)
+  target_link_libraries(wvt PRIVATE ${WVT_SKIQ_TARGET})
+  target_compile_definitions(wvt PRIVATE WVT_HAVE_SKIQ)
+  message(STATUS "wvt: Sidekiq support enabled (${WVT_SKIQ_WHAT})")
+elseif(WVT_WITH_SKIQ STREQUAL "ON")
+  message(FATAL_ERROR "WVT_WITH_SKIQ=ON but the Sidekiq backend cannot be built: ${WVT_SKIQ_WHY}")
+else()
+  message(STATUS "wvt: Sidekiq support disabled (${WVT_SKIQ_WHY})")
+endif()
+
+# ---------------------------------------------------------------------------
 # Optional NVIDIA GPU acceleration (issue #3). AUTO builds the CUDA backend
 # when the CUDA toolkit (12.0 or later, with cuFFT) is found, ON requires it.
 # A CUDA build still runs on computers without a GPU: wvt checks at start.
@@ -557,13 +674,27 @@ if(WVT_BB_SIM)
   target_compile_options(bb_check PRIVATE ${WVT_WARNINGS})
 endif()
 
+# Sidekiq self-test (issue #4): the logic without the SDK in every build, and
+# the backend against the simulated card with WVT_SKIQ_SIM
+add_executable(skiq_check tools/skiq_check.cpp src/device/sdr_device.cpp src/device/sdr_sim.cpp
+  src/device/sdr_siggen.cpp src/siggen/siggen.cpp src/siggen/siggen_out.cpp src/common/json.cpp src/io/recorder.cpp
+  src/io/iq_file.cpp src/dsp/dsp.cpp src/common/ui_util.cpp src/common/log.cpp)
+target_include_directories(skiq_check PRIVATE src)
+target_link_libraries(skiq_check PRIVATE imgui_implot Threads::Threads)
+target_compile_options(skiq_check PRIVATE ${WVT_WARNINGS})
+if(WVT_SKIQ_SIM)
+  target_sources(skiq_check PRIVATE src/device/sdr_skiq.cpp)
+  target_compile_definitions(skiq_check PRIVATE WVT_HAVE_SKIQ)
+  target_link_libraries(skiq_check PRIVATE skiq_api_sim)
+endif()
+
 # ---------------------------------------------------------------------------
 # CTest (issue #53): "ctest --test-dir build --output-on-failure" runs every
 # self-check. The checks need no hardware.
 # ---------------------------------------------------------------------------
 enable_testing()
 set(WVT_CHECKS siggen_check audio_check log_check segment_check gpu_check extract_check snapshot_check device_check
-  clipboard_check session_check measure_check)
+  clipboard_check session_check measure_check skiq_check)
 if(WVT_BB_SIM)
   list(APPEND WVT_CHECKS bb_check)
 endif()

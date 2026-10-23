@@ -35,8 +35,8 @@ jobs:
           sudo apt-get $APT_OPTS update
           sudo apt-get $APT_OPTS install -y build-essential cmake libx11-dev libgl1-mesa-dev librtlsdr-dev libuhd-dev xvfb
       - name: Configure
-        # WVT_BB_SIM builds the BB60 backend against the simulated device (no SDK in CI).
-        run: cmake -S . -B build -DWVT_WERROR=ON -DWVT_WITH_RTLSDR=ON -DWVT_WITH_UHD=ON -DWVT_WITH_CUDA=OFF -DWVT_BB_SIM=ON
+        # WVT_BB_SIM and WVT_SKIQ_SIM build the BB60 and Sidekiq backends against simulated devices (no SDK in CI).
+        run: cmake -S . -B build -DWVT_WERROR=ON -DWVT_WITH_RTLSDR=ON -DWVT_WITH_UHD=ON -DWVT_WITH_CUDA=OFF -DWVT_BB_SIM=ON -DWVT_SKIQ_SIM=ON
       - name: Build
         run: cmake --build build -j "$(nproc)"
       - name: Self-tests
@@ -63,7 +63,7 @@ jobs:
           brew install pkgconf librtlsdr uhd
       - name: Configure
         run: >
-          cmake -S . -B build -DWVT_WERROR=ON -DWVT_WITH_METAL=ON -DWVT_WITH_RTLSDR=ON -DWVT_WITH_UHD=ON -DWVT_BB_SIM=ON
+          cmake -S . -B build -DWVT_WERROR=ON -DWVT_WITH_METAL=ON -DWVT_WITH_RTLSDR=ON -DWVT_WITH_UHD=ON -DWVT_BB_SIM=ON -DWVT_SKIQ_SIM=ON
       - name: Build
         run: cmake --build build -j "$(sysctl -n hw.ncpu)"
       - name: Self-tests
@@ -99,7 +99,7 @@ jobs:
       - name: Configure
         run: >
           cmake -S . -B build -DWVT_SANITIZE=${{ matrix.sanitize }} -DCMAKE_BUILD_TYPE=RelWithDebInfo
-          -DWVT_WITH_RTLSDR=OFF -DWVT_WITH_UHD=OFF -DWVT_WITH_CUDA=OFF -DWVT_BB_SIM=ON
+          -DWVT_WITH_RTLSDR=OFF -DWVT_WITH_UHD=OFF -DWVT_WITH_CUDA=OFF -DWVT_BB_SIM=ON -DWVT_SKIQ_SIM=ON
       - name: Build
         run: cmake --build build -j "$(nproc)"
       - name: Self-tests
@@ -161,7 +161,7 @@ jobs:
       - name: Configure
         run: >
           cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DWVT_WITH_RTLSDR=ON -DWVT_WITH_UHD=ON
-          -DWVT_WITH_CUDA=OFF -DWVT_BB_SIM=ON
+          -DWVT_WITH_CUDA=OFF -DWVT_BB_SIM=ON -DWVT_SKIQ_SIM=ON
       - name: clang-tidy (.clang-tidy; any finding fails)
         run: tools/run-clang-tidy.sh build
 

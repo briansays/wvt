@@ -19,7 +19,7 @@ is correct.
 | [Plot snapshots](plot-snapshot-plan.md) | #13 | Implemented |
 | [Other USRP models](usrp-models-plan.md) | #11 | Implemented. Needs network USRPs to verify |
 | [Signal Hound BB60](bb60-integration-plan.md) | #2 | Implemented with a simulated device. Needs a BB60 to verify |
-| [Epiq Sidekiq](sidekiq-integration-plan.md) | #4 | Plan only |
+| [Epiq Sidekiq](sidekiq-integration-plan.md) | #4 | Receive implemented, tested with a simulated card and built against SDK 4.26.0. Needs a card to verify |
 | [Point measurements](point-measurement-plan.md) | #80 | Implemented |
 
 ```{toctree}

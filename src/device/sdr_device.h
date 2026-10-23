@@ -1,7 +1,7 @@
 #pragma once
 // SDR receiver abstraction. One open device delivers a continuous stream of
 // samples in its native packed format (RTL-SDR: cu8, USRP: ci16, BB60: ci16,
-// simulator: ci16) to a callback on the device's own thread.
+// Sidekiq: ci16, simulator: ci16) to a callback on the device's own thread.
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -11,14 +11,15 @@
 #include "io/iq_file.h"
 
 struct StreamConfig {
-    std::string driver = "sim";  // "sim" | "siggen" | "rtlsdr" | "uhd" | "bb"
-    std::string args;            // rtlsdr: index or serial; uhd: device args ("serial=...", "addr=192.168.10.2"); bb: serial
+    std::string driver = "sim";  // "sim" | "siggen" | "rtlsdr" | "uhd" | "bb" | "skiq"
+    std::string args;            // rtlsdr: index or serial; uhd: device args ("serial=...", "addr=192.168.10.2"); bb: serial;
+                                 // skiq: serial, or "#N" for card number N
     double fc = 100e6;
     double rate = 2.4e6;
     bool agc = false;
-    double gain = 30;        // dB; bb: the reference level in dBm
-    std::string antenna;     // uhd: "RX2", "TX/RX", "RX1"...; empty = device default
-    double bandwidth = 0;    // uhd analog bandwidth, bb I/Q filter bandwidth; 0 = auto
+    double gain = 30;        // dB; bb: the reference level in dBm; skiq: dB above the lowest gain index
+    std::string antenna;     // uhd: "RX2", "TX/RX", "RX1"...; skiq: RF port ("J1"...); empty = device default
+    double bandwidth = 0;    // uhd analog bandwidth, bb I/Q filter bandwidth, skiq RF bandwidth; 0 = auto
     int channel = 0;         // uhd: receive channel (X310 / N310 / X410 have several)
     std::string ref;         // uhd: clock and time source ("internal", "external", "gpsdo"); empty = default
     bool biasTee = false;    // rtlsdr
@@ -26,7 +27,7 @@ struct StreamConfig {
     int ppm = 0;             // rtlsdr frequency correction
     int bbAtten = -1;        // bb attenuator: -1 auto, 0-3 = 0, 10, 20, 30 dB
     int bbAmp = -1;          // bb amplifier: -1 auto, 0-3 (0 = lowest gain)
-    bool extRef = false;     // bb: lock to a 10 MHz reference on port 1
+    bool extRef = false;     // bb: lock to a 10 MHz reference on port 1; skiq: the external reference clock
 };
 
 struct DeviceInfo {
@@ -113,6 +114,20 @@ double snapSampleRate(const std::string& driver, double rate);
 // The widest BB60 I/Q filter at this decimation (the API's table).
 double bbMaxBandwidth(int decimation);
 
+// Sidekiq helpers without SDK types (sdr_skiq.cpp uses them, skiq_check tests
+// them). The gain in dB counts from the lowest gain index of the card.
+int skiqGainIndex(double db, int indexMin, int indexMax, double dbPerStep);
+double skiqGainDb(int index, int indexMin, double dbPerStep);
+// Samples lost between two receive blocks: the RF timestamp counts samples, so
+// a block that starts at `got` instead of `expected` lost the difference.
+// Negative if the timestamp went back (after a retune on some cards). The
+// counter wraps at 2^64.
+int64_t skiqLostSamples(uint64_t expected, uint64_t got);
+// Interleaved 16-bit I/Q from the card to ci16: `swap` exchanges each pair
+// (Q,I -> I,Q), and the shift moves an N-bit sample (sign-extended in the low
+// bits) to the top, so full scale is 0 dBFS for every resolution.
+void skiqConvert(const int16_t* in, int16_t* out, size_t values, int resolution, bool swap);
+
 // One line of a UHD device search ("type=x300,addr=192.168.40.2,name=,serial=
 // 31A2B3C,product=X310") as a device list entry: network devices are selected
 // by address, USB devices by serial.
@@ -134,4 +149,8 @@ void enumerateUhd(std::vector<DeviceInfo>& out);
 #ifdef WVT_HAVE_BB
 std::unique_ptr<SdrDevice> openBbDevice(const StreamConfig& cfg, std::string& err);
 void enumerateBb(std::vector<DeviceInfo>& out);
+#endif
+#ifdef WVT_HAVE_SKIQ
+std::unique_ptr<SdrDevice> openSkiqDevice(const StreamConfig& cfg, std::string& err);
+void enumerateSkiq(std::vector<DeviceInfo>& out);
 #endif

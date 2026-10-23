@@ -34,8 +34,8 @@ scripts/build.sh [options] [-- extra CMake arguments]
 | `--clean` | Delete the build folder first |
 | `--test` | Run the self-checks (`ctest`) after the build |
 | `-n`, `--dry-run` | Show the commands, but do not run them |
-| `--no-rtlsdr`, `--no-uhd`, `--no-bb`, `--no-audio`, `--no-cuda`, `--no-metal` | Turn the feature off (`WVT_WITH_...=OFF`) |
-| `--with-rtlsdr`, `--with-uhd`, `--with-bb`, `--with-audio`, `--with-cuda`, `--with-metal` | The feature must be in the build. The configure step stops if its library is missing (`WVT_WITH_...=ON`) |
+| `--no-rtlsdr`, `--no-uhd`, `--no-bb`, `--no-skiq`, `--no-audio`, `--no-cuda`, `--no-metal` | Turn the feature off (`WVT_WITH_...=OFF`) |
+| `--with-rtlsdr`, `--with-uhd`, `--with-bb`, `--with-skiq`, `--with-audio`, `--with-cuda`, `--with-metal` | The feature must be in the build. The configure step stops if its library is missing (`WVT_WITH_...=ON`) |
 | `--no-gpu` | The same as `--no-cuda --no-metal` |
 | `--minimal` | All the features off: the file viewer, the simulator and the signal generator only |
 | `--werror`, `--bb-sim`, `--fuzz` | `WVT_WERROR=ON`, `WVT_BB_SIM=ON`, `WVT_FUZZ=ON` |
@@ -167,6 +167,32 @@ folder, such as `/usr/local/lib`, CMake finds it without this option.
 `ON` builds the BB60 backend against a simulated BB60D (`tools/bb_sim/`) instead of the SDK. Use
 it for CI and tests. The build then also makes `bb_check`, which tests the backend. Do not use it
 for normal use: the device list then shows the simulated BB60.
+
+### WVT_WITH_SKIQ
+
+Enables or disables the Epiq Sidekiq backend (`src/device/sdr_skiq.cpp`). It needs `libsidekiq`
+from the Sidekiq SDK, version 4.14.0 or later. Refer to [Live devices](live.md#epiq-sidekiq).
+
+- CMake uses the first SDK folder in this list: `SIDEKIQ_SDK_DIR`, the environment variable
+  `SIDEKIQ_SDK_DIR`, `~/sidekiq_sdk_current`, the newest `third_party/sidekiq_sdk/sidekiq_sdk_v*`.
+- CMake runs `bin/sidekiq-config` of the SDK for the version, the include folder and the static
+  link flags. It keeps the link flags in their order. An SDK without `sidekiq-config` is linked
+  from `lib/libsidekiq__<cpu>.a` and the support libraries in `lib/support/`.
+- The SDK is for Linux only. On macOS, the backend is not built.
+- Without this backend, the device list does not show Sidekiq cards.
+
+Output: `wvt: Sidekiq support enabled (SDK 4.26.0, <folder>)`.
+
+### SIDEKIQ_SDK_DIR
+
+The folder of the extracted Sidekiq SDK: the folder with `bin/sidekiq-config` and
+`sidekiq_core/inc/sidekiq_api.h`, for example `$HOME/sidekiq_sdk_v4.26.0`.
+
+### WVT_SKIQ_SIM
+
+`ON` builds the Sidekiq backend against a simulated card (`tools/skiq_sim/`) instead of the SDK,
+also on macOS. Use it for CI and tests. `skiq_check` then also tests the backend. Do not use it
+for normal use: the device list then shows the simulated card.
 
 ### WVT_WITH_AUDIO
 
@@ -325,6 +351,7 @@ cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
 | `snapshot_check` | Self-check for the plot snapshots |
 | `device_check` | Self-check for the device list and the sample rate rules |
 | `bb_check` | Self-check for the BB60 backend, with the simulated device. Only with `WVT_BB_SIM=ON` |
+| `skiq_check` | Self-check for the Sidekiq logic. With `WVT_SKIQ_SIM=ON`, also for the backend with the simulated card |
 | `gpu_check` | Compares the GPU results with the CPU results, and measures the speed |
 | `fuzz_json`, `fuzz_chain`, `fuzz_meta`, `fuzz_parse_si` | The fuzz targets. Only with `WVT_FUZZ=ON` |
 

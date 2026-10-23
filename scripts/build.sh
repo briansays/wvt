@@ -31,6 +31,7 @@ features (default: each one is on if its library is found):
       --no-rtlsdr        no RTL-SDR backend         (--with-rtlsdr: stop if it is missing)
       --no-uhd           no USRP backend (UHD)      (--with-uhd)
       --no-bb            no Signal Hound BB60       (--with-bb)
+      --no-skiq          no Epiq Sidekiq            (--with-skiq)
       --no-audio         no audio playback          (--with-audio)
       --no-cuda          no CUDA GPU backend        (--with-cuda)
       --no-metal         no Metal GPU backend       (--with-metal)
@@ -41,6 +42,7 @@ checks:
       --werror           compiler warnings are errors
       --sanitize KIND    address (ASan + UBSan) or thread (TSan); the folder gets a .KIND suffix
       --bb-sim           BB60 backend against the simulated device (no SDK needed)
+      --skiq-sim         Sidekiq backend against the simulated card (no SDK needed)
       --fuzz             build the libFuzzer targets (clang only)
 
 examples:
@@ -103,19 +105,22 @@ while [ $# -gt 0 ]; do
         --no-rtlsdr) feature RTLSDR OFF ;;
         --no-uhd) feature UHD OFF ;;
         --no-bb) feature BB OFF ;;
+        --no-skiq) feature SKIQ OFF ;;
         --no-audio) feature AUDIO OFF ;;
         --no-cuda) feature CUDA OFF ;;
         --no-metal) feature METAL OFF ;;
         --no-gpu) feature CUDA OFF; feature METAL OFF ;;
-        --minimal) for f in RTLSDR UHD BB AUDIO CUDA METAL; do feature $f OFF; done ;;
+        --minimal) for f in RTLSDR UHD BB SKIQ AUDIO CUDA METAL; do feature $f OFF; done ;;
         --with-rtlsdr) feature RTLSDR ON ;;
         --with-uhd) feature UHD ON ;;
         --with-bb) feature BB ON ;;
+        --with-skiq) feature SKIQ ON ;;
         --with-audio) feature AUDIO ON ;;
         --with-cuda) feature CUDA ON ;;
         --with-metal) feature METAL ON ;;
         --werror) cmakeArgs+=(-DWVT_WERROR=ON) ;;
         --bb-sim) cmakeArgs+=(-DWVT_BB_SIM=ON) ;;
+        --skiq-sim) cmakeArgs+=(-DWVT_SKIQ_SIM=ON) ;;
         --fuzz) cmakeArgs+=(-DWVT_FUZZ=ON) ;;
         --sanitize)
             [ $# -ge 2 ] || die "$1 needs a value"

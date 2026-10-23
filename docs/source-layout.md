@@ -68,6 +68,7 @@ folders.
 | `src/device/sdr_rtlsdr.cpp` | The RTL-SDR backend (librtlsdr) |
 | `src/device/sdr_uhd.cpp` | The USRP backend (UHD C API): all USRP models, one channel at a time |
 | `src/device/sdr_bb60.cpp` | The Signal Hound BB60 backend (`bb_api`) |
+| `src/device/sdr_skiq.cpp` | The Epiq Sidekiq backend (`libsidekiq`) |
 | `src/device/sdr_sim.cpp` | The simulated device |
 | `src/device/sdr_siggen.cpp` | The loopback device that streams the generator into the live view |
 | `src/device/sdr_tx.h` | The transmitter interface. `sdr_uhd.cpp` implements it for UHD |
@@ -105,6 +106,8 @@ folders.
 | `tools/device_check.cpp` | The self-check for the device list and the sample rate rules |
 | `tools/bb_check.cpp` | The self-check for the BB60 backend |
 | `tools/bb_sim/` | A simulated BB60D behind the `bb_api` calls that wvt uses |
+| `tools/skiq_check.cpp` | The self-check for the Sidekiq logic and backend |
+| `tools/skiq_sim/` | A simulated Sidekiq card behind the `libsidekiq` calls that wvt uses |
 | `tools/gpu_check.cpp` | The GPU self-check and benchmark |
 | `tools/run-clang-tidy.sh` | Runs clang-tidy on the wvt sources, as CI does (`.clang-tidy`, `tools/.clang-tidy`) |
 | `tools/fuzz/` | The libFuzzer targets for the parsers, and their seed inputs in `corpus/` |
