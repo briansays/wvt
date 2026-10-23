@@ -33,6 +33,7 @@ GainRange defaultGain(const std::string& driver) {
     if (driver == "rtlsdr") return {0, 49.6, 0.1, {}, true};
     if (driver == "uhd") return {0, 76, 1, {}, true};
     if (driver == "bb") return {-130, 20, 1, {}, false, "Ref level", "dBm"};
+    if (driver == "skiq") return {0, 76, 1, {}, true};  // the M.2; the open card gives its own
     return {0, 60, 1, {}, true};
 }
 
@@ -40,6 +41,7 @@ const char* driverName(const std::string& d) {
     if (d == "rtlsdr") return "RTL-SDR";
     if (d == "uhd") return "USRP";
     if (d == "bb") return "BB60";
+    if (d == "skiq") return "Sidekiq";
     if (d == "siggen") return "Signal generator";
     return "Simulator";
 }
@@ -64,7 +66,7 @@ void App::drawSourceSelector(float width) {
         else if (mode == 0 && liveMode_) leaveLive();
     }
     ImGui::EndDisabled();
-    tooltipAlways("File: analyze a recording.\nDevice: stream live from an RTL-SDR, a USRP or a Signal Hound BB60.");
+    tooltipAlways("File: analyze a recording.\nDevice: stream live from an RTL-SDR, a USRP, a Signal Hound BB60 or a Sidekiq.");
 }
 
 void App::enterLive() {
@@ -129,7 +131,7 @@ void App::selectDevice(const DeviceInfo& d) {
         std::string err, warn;
         devCfg_.rate = snapSampleRate(d.driver, devCfg_.rate);
         if (!checkSampleRate(d.driver, devCfg_.rate, err, warn))
-            devCfg_.rate = d.driver == "uhd" || d.driver == "bb" ? 10e6 : 2.4e6;
+            devCfg_.rate = d.driver == "uhd" || d.driver == "bb" || d.driver == "skiq" ? 10e6 : 2.4e6;
         if (gainMeaningChanged) devCfg_.gain = d.driver == "bb" ? -20 : 30;
         GainRange g = defaultGain(d.driver);
         devCfg_.gain = std::clamp(devCfg_.gain, g.min, g.max);
@@ -288,6 +290,12 @@ void App::drawDeviceToolbar() {
         rateTip = "USRP " + devCaps_.product + ": " + fmtSI(devCaps_.rate.min, "S/s", 4) + " to " +
                   fmtSI(devCaps_.rate.max, "S/s", 4) + (devCaps_.usb ? " (USB 3 above about 8 MS/s)" : "") +
                   ". The USRP uses the nearest rate it can make.";
+    else if (devCfg_.driver == "skiq" && devCaps_.rate.valid())
+        rateTip = "Sidekiq " + devCaps_.product + ": " + fmtSI(devCaps_.rate.min, "S/s", 4) + " to " +
+                  fmtSI(devCaps_.rate.max, "S/s", 4) + (devCaps_.usb ? ".\nOn USB the card streams much less than on PCIe." : ".");
+    else if (devCfg_.driver == "skiq")
+        rateTip = "Sidekiq: the range depends on the card (M.2 and mPCIe up to 61.44 MS/s, X2 and X4 245.76 MS/s).\n"
+                  "On USB the card streams much less than on PCIe.";
     else if (devCfg_.driver == "uhd")
         rateTip = "USRP: the limit depends on the model (B2xx 61.44 MS/s on USB 3, N310 153.6 MS/s,\n"
                   "X310 200 MS/s, X410 500 MS/s). Network USRPs divide a fixed master clock.";
@@ -336,10 +344,11 @@ void App::drawDeviceToolbar() {
 
     // --- driver-specific, in the options popup (these restart the stream) ---
     bool restart = false;
-    if (devCfg_.driver == "rtlsdr" || devCfg_.driver == "uhd" || devCfg_.driver == "bb") {
+    if (devCfg_.driver == "rtlsdr" || devCfg_.driver == "uhd" || devCfg_.driver == "bb" || devCfg_.driver == "skiq") {
         ImGui::SameLine(0, st.ItemInnerSpacing.x);
         settingsButton("##devopts", devCfg_.driver == "rtlsdr" ? "Bias-T, direct sampling and frequency correction"
                                     : devCfg_.driver == "bb"   ? "Attenuator, amplifier, I/Q bandwidth and external reference"
+                                    : devCfg_.driver == "skiq" ? "RF port, bandwidth and external reference"
                                                                : "Antenna, channel, reference and analog bandwidth");
     }
     if (ImGui::BeginPopup("##devopts")) {
@@ -433,6 +442,26 @@ void App::drawDeviceToolbar() {
                 if (InputSI("##bw", &devCfg_.bandwidth, "Hz", ImGui::GetContentRegionAvail().x)) restart = true;
                 row("Ext ref", "Lock to a 10 MHz reference on port 1.");
                 restart |= ImGui::Checkbox("##bbref", &devCfg_.extRef);
+            } else if (devCfg_.driver == "skiq") {
+                // The port list comes from the card once it has been opened.
+                row("RF port", "The receive port of handle A1. Default: the card's default.");
+                if (ImGui::BeginCombo("##skport", antenna_[0] ? antenna_ : "Default")) {
+                    if (ImGui::Selectable("Default", !antenna_[0])) {
+                        antenna_[0] = 0;
+                        restart = true;
+                    }
+                    for (const auto& a : devCaps_.antennas)
+                        if (ImGui::Selectable(a.c_str(), a == antenna_)) {
+                            snprintf(antenna_, sizeof antenna_, "%s", a.c_str());
+                            restart = true;
+                        }
+                    ImGui::EndCombo();
+                }
+                row("Bandwidth", "RF bandwidth. 0 = 80 % of the sample rate.");
+                if (InputSI("##bw", &devCfg_.bandwidth, "Hz", ImGui::GetContentRegionAvail().x)) restart = true;
+                row("Ext ref", "Use the external reference clock input. The M.2 and mPCIe can't switch at run\n"
+                               "time: set their reference with the SDK's ref_clock app.");
+                restart |= ImGui::Checkbox("##skref", &devCfg_.extRef);
             }
             ImGui::EndTable();
         }

@@ -1,6 +1,7 @@
 #include "device/sdr_device.h"
 #include "device/sdr_tx.h"
 
+#include <algorithm>
 #include <cmath>
 
 #include "common/log.h"
@@ -26,11 +27,15 @@ std::vector<std::string> sdrDrivers() {
 #ifdef WVT_HAVE_BB
     d.push_back("bb");
 #endif
+#ifdef WVT_HAVE_SKIQ
+    d.push_back("skiq");
+#endif
     return d;
 }
 
 namespace {
 constexpr double kUsrpMaxRate = 500e6;
+constexpr double kSkiqMaxRate = 250e6;  // X2 / X4: 245.76 MS/s
 }  // namespace
 
 std::vector<std::pair<std::string, std::string>> parseDeviceArgs(const std::string& args) {
@@ -87,6 +92,11 @@ std::vector<DeviceInfo> enumerateDevices() {
     enumerateBb(out);
     if (out.size() == beforeBb) out.push_back({"bb", "", "Signal Hound BB60 (none detected)"});
 #endif
+#ifdef WVT_HAVE_SKIQ
+    size_t beforeSkiq = out.size();
+    enumerateSkiq(out);
+    if (out.size() == beforeSkiq) out.push_back({"skiq", "", "Sidekiq (none detected)"});
+#endif
     out.push_back({"sim", "", "Simulator (synthetic test signals)"});
     out.push_back({"siggen", "", "Signal generator loopback"});
     return out;
@@ -104,10 +114,13 @@ static std::unique_ptr<SdrDevice> openBackend(const StreamConfig& cfg, std::stri
 #ifdef WVT_HAVE_BB
     if (cfg.driver == "bb") return openBbDevice(cfg, err);
 #endif
-    if (cfg.driver == "rtlsdr" || cfg.driver == "uhd" || cfg.driver == "bb")
+#ifdef WVT_HAVE_SKIQ
+    if (cfg.driver == "skiq") return openSkiqDevice(cfg, err);
+#endif
+    if (cfg.driver == "rtlsdr" || cfg.driver == "uhd" || cfg.driver == "bb" || cfg.driver == "skiq")
         err = "this wvt was built without " + cfg.driver + " support (see docs/live.md)";
     else
-        err = "unknown device driver '" + cfg.driver + "' (use sim, siggen, rtlsdr, uhd or bb)";
+        err = "unknown device driver '" + cfg.driver + "' (use sim, siggen, rtlsdr, uhd, bb or skiq)";
     return nullptr;
 }
 
@@ -122,6 +135,8 @@ std::unique_ptr<SdrDevice> openDevice(const StreamConfig& cfg, std::string& err)
     if (cfg.driver == "bb")
         LOG_DEBUG("device", "bb options: reference level %.1f dBm, attenuator %d, amplifier %d, external reference %s",
                   cfg.gain, cfg.bbAtten, cfg.bbAmp, cfg.extRef ? "on" : "off");
+    if (cfg.driver == "skiq")
+        LOG_DEBUG("device", "skiq options: external reference %s", cfg.extRef ? "on" : "off");
     if (cfg.driver == "rtlsdr")
         LOG_DEBUG("device", "rtlsdr options: bias-tee %s, direct sampling %d, ppm %d", cfg.biasTee ? "on" : "off",
                   cfg.directSampling, cfg.ppm);
@@ -176,6 +191,13 @@ bool checkSampleRate(const std::string& driver, double rate, std::string& err, s
             return false;
         }
         if (rate > 10e6) warn = "BB60 rates above 10 MS/s need a fast CPU (the API filters on the host)";
+    } else if (driver == "skiq") {
+        // The card's own range is checked when it opens.
+        if (rate > kSkiqMaxRate) {
+            err = "Sidekiq sample rate is limited to " + fmtSI(kSkiqMaxRate, "S/s", 4);
+            return false;
+        }
+        if (rate > 61.44e6) warn = "recording above 61.44 MS/s needs a fast NVMe disk (4 bytes per sample)";
     } else if (driver == "sim" || driver == "siggen") {
         if (rate > 20e6) {
             err = std::string(driver == "sim" ? "simulator" : "loopback") + " sample rate is limited to 20 MS/s";
@@ -209,6 +231,31 @@ double bbMaxBandwidth(int decimation) {
     int i = 0;
     while ((1 << (i + 1)) <= decimation && i < 13) ++i;
     return table[i];
+}
+
+int skiqGainIndex(double db, int indexMin, int indexMax, double dbPerStep) {
+    if (!(dbPerStep > 0) || !std::isfinite(db)) return indexMin;
+    const long i = indexMin + std::lround(db / dbPerStep);
+    return (int)std::clamp<long>(i, indexMin, std::max(indexMin, indexMax));
+}
+
+double skiqGainDb(int index, int indexMin, double dbPerStep) { return (index - indexMin) * dbPerStep; }
+
+int64_t skiqLostSamples(uint64_t expected, uint64_t got) { return (int64_t)(got - expected); }
+
+void skiqConvert(const int16_t* in, int16_t* out, size_t values, int resolution, bool swap) {
+    const int shift = std::clamp(16 - resolution, 0, 15);
+    // The shift as a multiply: a left shift of a negative value is undefined before C++20.
+    const int scale = 1 << shift;
+    if (swap) {
+        for (size_t i = 0; i + 1 < values; i += 2) {
+            const int16_t q = in[i], ii = in[i + 1];
+            out[i] = (int16_t)(ii * scale);
+            out[i + 1] = (int16_t)(q * scale);
+        }
+    } else {
+        for (size_t i = 0; i < values; ++i) out[i] = (int16_t)(in[i] * scale);
+    }
 }
 
 std::unique_ptr<SdrTx> openTx(const TxConfig& cfg, std::string& err) {

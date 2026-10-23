@@ -1,7 +1,10 @@
 # Plan: Epiq Solutions Sidekiq as a wvt live device
 
-Branch: none yet. Suggested: `wvt-skiq-dev`, from `wvt-gpu-dev`.
-Status: **plan only**. There is no code yet.
+Issue: #4. Branch: `4-sidekiq` (from `main`).
+Status: **receive implemented on `4-sidekiq` (2026-10-23)** against SDK 4.26.0, tested with a
+simulated card, and built and linked against the real SDK on Linux x86-64 and ARM64 (§9).
+**Not yet run against a card.** Transmit (Phase 7) is not done. Sections 1 to 8 are the plan;
+§9 records the implementation and its differences from the plan.
 Roadmap: version 1.3, "Support for EPIQ SDRs".
 
 ## 1. Goal
@@ -75,7 +78,7 @@ wvt always clamps the index to the range from `skiq_read_rx_gain_index_range`.
 ### To check against the SDK manual
 
 The SDK manual is in the SDK download. These items are not in SoapySidekiq, or they can be
-different between SDK versions:
+different between SDK versions. §9.1 gives the answers from SDK 4.26.0:
 
 - Does `skiq_set_rx_transfer_timeout` work on the USB transport? If not, the receive thread
   must poll and sleep for a short time.
@@ -135,83 +138,83 @@ must tell the user to record to a fast NVMe disk, or to use a lower rate.
 ## 5. Work breakdown
 
 ### Phase 0 — SDK and hardware access
-- [ ] Get the Sidekiq SDK (4.26.0 or later if possible) from the Epiq support portal.
+- [x] Get the Sidekiq SDK (4.26.0 or later if possible) from the Epiq support portal.
       Record the SDK version and the card types that are available for tests.
 - [ ] Install the kernel modules and udev rules from the SDK. Check with the SDK test
       application `rx_samples` that a card streams.
-- [ ] Answer the items in §2, "To check against the SDK manual". Update this plan.
+- [x] Answer the items in §2, "To check against the SDK manual". Update this plan (§9.1).
 
 ### Phase 1 — Build system (`CMakeLists.txt`)
-- [ ] `WVT_WITH_SKIQ` (`AUTO` / `ON` / `OFF`) and `SIDEKIQ_SDK_DIR` cache variables.
-- [ ] Find `bin/sidekiq-config` in the order from §3. Run it for `--cflags`,
+- [x] `WVT_WITH_SKIQ` (`AUTO` / `ON` / `OFF`) and `SIDEKIQ_SDK_DIR` cache variables.
+- [x] Find `bin/sidekiq-config` in the order from §3. Run it for `--cflags`,
       `--libs-static` and `--version`. Make an `INTERFACE IMPORTED` target `sidekiq` that
       keeps the link flags in their order.
-- [ ] If found: add `src/device/sdr_skiq.cpp`, define `WVT_HAVE_SKIQ`, and print
+- [x] If found: add `src/device/sdr_skiq.cpp`, define `WVT_HAVE_SKIQ`, and print
       `wvt: Sidekiq support enabled (SDK x.y.z)`. If not found: `ON` is a fatal error.
       `AUTO` prints a status line.
-- [ ] Skip on macOS with a status line. The SDK is for Linux only.
-- [ ] If an older SDK has no `sidekiq-config`, add a second lookup: `sidekiq_api.h` and
+- [x] Skip on macOS with a status line. The SDK is for Linux only.
+- [x] If an older SDK has no `sidekiq-config`, add a second lookup: `sidekiq_api.h` and
       `libsidekiq__<arch>.a` with the support libraries that the SDK manual lists.
 
 ### Phase 2 — Device abstraction (`src/device/sdr_device.h`, `src/device/sdr_device.cpp`)
-- [ ] Comments for the `skiq` use of `args`, `gain`, `bandwidth`, `antenna` and `extRef`.
-- [ ] `sdrDrivers()`, `enumerateDevices()` with a "Sidekiq (none detected)" entry, and
+- [x] Comments for the `skiq` use of `args`, `gain`, `bandwidth`, `antenna` and `extRef`.
+- [x] `sdrDrivers()`, `enumerateDevices()` with a "Sidekiq (none detected)" entry, and
       `openDevice()` dispatch.
-- [ ] `checkSampleRate("skiq")`: positive and ≤ 250 MS/s. A warning above 61.44 MS/s
+- [x] `checkSampleRate("skiq")`: positive and ≤ 250 MS/s. A warning above 61.44 MS/s
       about disk speed for recording.
-- [ ] `GainRange`: add `std::vector<std::string> ports` if the RF port combo needs a list
+- [x] `GainRange`: add `std::vector<std::string> ports` if the RF port combo needs a list
       from the device. Else use a new `SdrDevice::rfPorts()` method. Choose the smaller change.
 
 ### Phase 3 — Backend (`src/device/sdr_skiq.cpp`, new)
-- [ ] `enumerateSkiq()`: `skiq_get_cards`, then for each card the serial number and part
+- [x] `enumerateSkiq()`: `skiq_get_cards`, then for each card the serial number and part
       type. The label is, for example, `Sidekiq X4 serial 8N3H (PCIe)`.
-- [ ] Open: find the card by serial number or `#N`. Check `skiq_is_card_avail`. Call
+- [x] Open: find the card by serial number or `#N`. Check `skiq_is_card_avail`. Call
       `skiq_init`. Read the part type, resolution, rate range and gain index range.
-- [ ] Configure: I/Q order, reference clock, RF port, rate and bandwidth, LO frequency,
+- [x] Configure: I/Q order, reference clock, RF port, rate and bandwidth, LO frequency,
       gain mode and gain index. Read back the actual rate with
       `skiq_read_rx_sample_rate_and_bandwidth`.
-- [ ] Receive thread:
+- [x] Receive thread:
   - Get the block size from `skiq_read_rx_block_size`.
   - Call `skiq_receive` with a timeout. Check the handle and the block length.
   - Shift each sample by `16 - resolution` bits.
   - Check the timestamps for gaps.
-- [ ] Errors: count the receive errors other than `no_data` and `overrun`. After 10 in
+- [x] Errors: count the receive errors other than `no_data` and `overrun`. After 10 in
       sequence, set `fatalError()` and stop the thread. This occurs, for example, when the
       user removes the card.
-- [ ] `setCenterFreq`, `setGain` (dB → index, clamp), `gainRange()` per part type.
-- [ ] Overload poll and `notes()`.
-- [ ] `stop()`: `skiq_stop_rx_streaming`, join the thread, `skiq_exit`.
-- [ ] Put the pure logic in functions without SDK types. These are the dB-to-index
+- [x] `setCenterFreq`, `setGain` (dB → index, clamp), `gainRange()` per part type.
+- [x] Overload poll and `notes()`.
+- [x] `stop()`: `skiq_stop_rx_streaming`, join the thread, `skiq_exit`.
+- [x] Put the pure logic in functions without SDK types. These are the dB-to-index
       mapping, the timestamp gap check and the sample shift. Phase 6 tests them without
       hardware.
 
 ### Phase 4 — CLI (`src/app/main.cpp`)
-- [ ] `--device skiq[:SERIAL|#N]`. Reuse `--gain`, `--bandwidth`, `--antenna` (RF port)
+- [x] `--device skiq[:SERIAL|#N]`. Reuse `--gain`, `--bandwidth`, `--antenna` (RF port)
       and `--ext-ref`.
-- [ ] Default rate 10 MS/s for `skiq` when `-r` is not given.
-- [ ] Help text: `--device` line, and "BB60 / Sidekiq" for `--ext-ref`.
+- [x] Default rate 10 MS/s for `skiq` when `-r` is not given.
+- [x] Help text: `--device` line, and "BB60 / Sidekiq" for `--ext-ref`.
 
 ### Phase 5 — GUI (`src/app/app_live.cpp`)
-- [ ] Driver name "Sidekiq". Default gain range until a card is open.
-- [ ] Rate tooltip: the card's range after open, and the USB note.
-- [ ] Gain slider in dB, Auto box only if the card supports AGC.
-- [ ] RF port combo from the card's port list (as the USRP antenna combo).
-- [ ] Ext ref checkbox (as BB60). Apply on change, with a stream restart if Phase 0 shows
+- [x] Driver name "Sidekiq". Default gain range until a card is open.
+- [x] Rate tooltip: the card's range after open, and the USB note.
+- [x] Gain slider in dB, Auto box only if the card supports AGC.
+- [x] RF port combo from the card's port list (as the USRP antenna combo).
+- [x] Ext ref checkbox (as BB60). Apply on change, with a stream restart if Phase 0 shows
       that it is necessary.
 
 ### Phase 6 — Tests and docs
-- [ ] `tools/skiq_check.cpp` tests the pure logic from Phase 3 without the SDK. Every
+- [x] `tools/skiq_check.cpp` tests the pure logic from Phase 3 without the SDK. Every
       build makes it. It tests:
   - dB-to-index for each part type, with clamping.
   - Timestamp gaps: no gap, one lost block, and wrap-around of the 64-bit counter.
   - The shift for 12-bit and 16-bit cards.
-- [ ] Write a manual hardware test list. It covers:
+- [x] Write a manual hardware test list. It covers:
   - Each available card type, on PCIe and on USB.
   - Rates from the minimum to the maximum of each card.
   - Retune while streaming, gain steps, and the overload note.
   - A 60 s recording at the highest rate that the disk supports.
   - Removal of the card while streaming.
-- [ ] `README.md`, in Simplified Technical English as the rest of the README:
+- [x] `README.md`, in Simplified Technical English as the rest of the README:
   - A build section for the SDK.
   - Device setup: kernel modules, udev rules, and one process per card.
   - A device table column, the CLI options, the source file table and roadmap row 1.3.
@@ -259,3 +262,93 @@ must tell the user to record to a fast NVMe disk, or to use a lower rate.
 - Is transmit (Phase 7) part of version 1.3, or later?
 - Is a calibrated dBm readout wanted? `skiq_read_rx_cal_offset` gives the offset from dBFS
   to dBm for the current gain. This needs a new "dBm" mode in the spectrum axis.
+
+## 9. Implementation record (2026-10-23)
+
+The receive path (Phases 1 to 6) is on `4-sidekiq`. It was written against the SDK 4.26.0 headers
+and manual (`sidekiq_api.h`, the HTML SDK manual, the `sidekiq_probe` example). No card was
+available.
+
+### 9.1 Answers from the SDK manual (4.26.0)
+
+| Question | Answer | What wvt does |
+|---|---|---|
+| Does `skiq_set_rx_transfer_timeout` work on USB? | No. *Developing apps*: "not all transports support blocking receive"; `skiq_get_rx_transfer_timeout` gives `RX_TRANSFER_WAIT_NOT_SUPPORTED` on USB and custom transports | A 25 ms timeout (the manual's advice). If it fails or is not supported, the thread polls: it sleeps 0.5 ms after `no_data` |
+| Retune and gain change while streaming? | Yes. `skiq_init` makes three mutexes per card, so the calls are thread-safe. On AD9361 cards (mPCIe, M.2, M.2-2280, Z2, Z3u) a retune or rate change stops the sample clock, and the RF timestamp slips (*Timestamp Slips within AD9361 Products*) | Write the LO while the card streams. No gap check for 0.5 s after a retune, so the slip is not counted as a loss |
+| `skiq_write_ref_clock_select` at once or after `skiq_init`? | At once, but it starts a full RF initialization, so the RF settings must come after it. M.2 and mPCIe: not supported at run time (only the stored setting, with the `ref_clock` test app) | Write it first in `configure()`. On the M.2 and mPCIe, the error tells the user about `ref_clock` |
+| `skiq_rx_gain_auto` on each card? | The API does not say which cards have it | Try `skiq_write_rx_gain_mode(auto)` after open. `GainRange::agc` = the result |
+| `bin/sidekiq-config` in older SDKs? | 4.26.0 has it (`doc/sidekiq-config.md`). Older SDKs are unknown | Use it if present. Else link `lib/libsidekiq__<cpu>.a` with the flags of the 4.26.0 `share/sidekiq/sidekiq-config/<cpu>.conf`, and read the version from `LIBSIDEKIQ_VERSION_*` |
+| 12-bit samples: low or high bits? | Low bits, sign-extended to 16 bits (`skiq_iq_order_t` in `sidekiq_types.h`) | Shift left by `16 - resolution` (×16 on 12-bit cards), as planned |
+
+### 9.2 Differences from the plan
+
+| Topic | Plan | Implementation | Reason |
+|---|---|---|---|
+| Gain mapping | dB = 0 at a fixed index per part type (195 on X2/X4, 187 on NV100), from SoapySidekiq | dB above the lowest index from `skiq_read_rx_gain_index_range`, with the step per part type (1 dB AD9361, 0.5 dB other cards) | The API documents the step but not an absolute 0 dB index. This needs no offset table that can be wrong |
+| Overload | Poll `skiq_read_rx_overload_state` 2 times per second | Also the `overload` bit in each block header | The header bit is per block. The manual: USB blocks have the header word set to 0, so the poll stays for USB |
+| RF ports | `GainRange::ports` or `SdrDevice::rfPorts()` | `DeviceCaps::antennas` (already there for the USRP) from `skiq_rx_param_t::fixed_rf_ports` | No new interface. TRX ports need `skiq_write_rf_port_config` and an Rx/Tx operation: out of scope |
+| Device list | `skiq_get_cards`, serial and part type | `skiq_get_cards`, `skiq_is_card_avail`, then `skiq_init(basic)` for the free cards to read part, serial and transport, then `skiq_exit` (as `sidekiq_probe`) | `skiq_read_parameters` needs an initialized card. A card in use is listed as `#N` with the PID of the owner. While wvt has a card open, the list shows that card only |
+| SDK messages | To stderr with a `wvt: skiq:` prefix | To the wvt log, component `skiq` (errors at ERROR, warnings at WARN, the rest at DEBUG) | The log already goes to the console and the log file |
+| Overrun | `gap_(-1, "overrun")` | The next block's timestamp gives the exact count: `gap_(N, "Sidekiq overrun ...")` | Exact counts in the SigMF annotations |
+| `syslog.h` | — | `sidekiq_types.h` includes `<syslog.h>`, whose `LOG_DEBUG` and `LOG_INFO` clash with the wvt log macros. `sdr_skiq.cpp` keeps the SDK levels and `#undef`s the two names before the wvt headers | Found when the backend was compiled against the real header |
+| CMake search | `SIDEKIQ_SDK_DIR`, env, `~/sidekiq_sdk_current` | Also the newest `third_party/sidekiq_sdk/sidekiq_sdk_v*` (git-ignored) | The SDK for this work was extracted there |
+| Minimum SDK | 4.26.0 if possible | 4.14.0 (`skiq_write_ref_clock_select`). Only 4.26.0 is tested | Older SDKs can work; CMake prints the version |
+| README | Build section, device setup, table, roadmap | In `docs/live.md`, `docs/build.md`, `docs/cli.md`, `docs/self-checks.md`, `docs/source-layout.md`. The README lists the device | The README now points to the docs pages; it has no roadmap table |
+
+### 9.3 Tests that ran
+
+- `skiq_check` in every build: the gain mapping and its clamps, the lost-sample count (with the
+  64-bit wrap and a timestamp that goes back), the 12-bit shift, the Q/I swap (also in place) and
+  the rate rule.
+- `skiq_check` with `-DWVT_SKIQ_SIM=ON` (macOS arm64): the device list, open by first card,
+  serial and `#N`; the errors (unknown serial, card number, rate and LO range, port name, external
+  reference on an M.2, card in use with its PID, no card); a second open refused; real-time
+  streaming; the tone offset after a retune; the tone level at −30 dBFS on a 12-bit M.2 and a
+  16-bit X4; no false gap from the simulated AD9361 timestamp slip (the test fails without the
+  0.5 s pause); overload note on and off; AGC; restart after stop; USB with polled receive and
+  polled overload; an overrun counted as exactly 5090 samples; a card removal as a fatal error.
+- A 3 s headless SigMF recording from the simulated card at 5 MS/s: 60 MB, no gaps, `ci16_le`,
+  the card in `core:hw`. A GUI screenshot under Xvfb shows the tone at −30 dBFS.
+- High rates with the simulated X4 (`WVT_SKIQ_SIM_PART=x4`, macOS arm64, Apple M5, internal SSD),
+  headless SigMF: 5 s each at 122.88, 200 and 245.76 MS/s, and 20 s at 245.76 MS/s (19.66 GB,
+  20.3 s wall time, 0 gaps, the tone at +200 kHz and −30 dBFS at the start, middle and end of
+  the file; about 60 % of one CPU core with the simulator). The simulator copies its signal from
+  a table, and it reports an overrun when the host falls more than 64 MiB behind (an assumed DMA
+  buffer size). `skiq_check` stalls the host for 0.5 s at 100 MS/s and checks that wvt counts the
+  loss. This tests wvt's path from `skiq_receive` to the disk, not the PCIe and DMA of a real X4.
+- A build with the real SDK 4.26.0 in Ubuntu 24.04 containers, x86-64 and ARM64, with
+  `-DWVT_WITH_SKIQ=ON -DWVT_WERROR=ON`: CMake found the SDK in `third_party/`, `sidekiq-config`
+  gave the static link flags, and `wvt` links and runs. With no card, `--list-devices` shows
+  *Sidekiq (none detected)*, and `--device skiq` gives *no Sidekiq card found*.
+- A macOS build without the SDK: `Sidekiq support disabled (the Sidekiq SDK is for Linux only)`,
+  no change in behavior.
+
+### 9.4 Hardware test list (still to do)
+
+For each card type that is available (M.2 and X4 first), on PCIe, and on USB for the M.2:
+
+1. `sidekiq_probe` sees the card. `wvt --list-devices` shows it with its part, serial number
+   and transport.
+2. `wvt --device skiq -c 915M -r 10M`: a signal generator tone at a known level reads within 3 dB
+   of the expected dBFS (acceptance criterion 3). Do this on a 12-bit and a 16-bit card: this
+   checks the shift.
+3. Rates from the minimum to the maximum of the card. The error for a rate out of range names the
+   card's range. On USB, find the highest rate without gaps and add it to `docs/live.md`.
+4. Retune while streaming, many times: no gap is reported, the tone moves, and the change takes
+   less than 200 ms (the log at DEBUG shows the tune time). On an X4, check if the timestamp
+   slips; if not, the 0.5 s pause can be limited to AD9361 cards.
+5. Gain steps across the range. The dB per step matches the slider. AGC on the cards that have it.
+6. An input above 0 dBm (with care): the *RF overload* note shows, also on USB.
+7. RF port and external reference (X4: with a 10 MHz source; M.2: the error message).
+8. A 60 s SigMF recording at 10 MS/s: no sample loss; wvt opens it with the same rate, frequency
+   and format (acceptance criterion 5). Then the highest rate that the disk supports.
+9. A second program (`rx_samples`) holds the card: wvt names its PID.
+10. Remove the card or the USB cable while streaming: the status bar shows the error, wvt keeps
+    running (acceptance criterion 6).
+
+### 9.5 Remaining work
+
+- The hardware tests in §9.4.
+- Phase 7 (transmit), if version 1.3 needs it (§8).
+- TRX RF ports (`skiq_write_rf_port_config`), if a user needs them.
+- A calibrated dBm readout from `skiq_read_rx_cal_offset` (§8).

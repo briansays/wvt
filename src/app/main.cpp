@@ -540,8 +540,8 @@ int main(int argc, char** argv) {
 
     cli.section("live devices (-c and -r set the tuning):");
     cli.add(nullptr, "--device", "DEV",
-            "rtlsdr[:INDEX|SERIAL] | uhd[:ARGS] | bb[:SERIAL] | sim\n"
-            "e.g. --device uhd  --device uhd:addr=192.168.10.2  --device rtlsdr:0  --device bb",
+            "rtlsdr[:INDEX|SERIAL] | uhd[:ARGS] | bb[:SERIAL] | skiq[:SERIAL|#N] | sim\n"
+            "e.g. --device uhd  --device uhd:addr=192.168.10.2  --device rtlsdr:0  --device bb  --device skiq:#0",
             [&](const char* v) {
                 const std::string s = v;
                 const size_t c = s.find(':');
@@ -572,8 +572,10 @@ int main(int argc, char** argv) {
         else return bad("--bb-amp wants auto or 0-3");
         return true;
     });
-    cli.add(nullptr, "--ext-ref", nullptr, "BB60: lock to a 10 MHz reference on port 1", flag(dev.extRef));
-    cli.add(nullptr, "--antenna", "NAME", "USRP receive antenna (e.g. RX2, TX/RX; default: the device's)", text(dev.antenna));
+    cli.add(nullptr, "--ext-ref", nullptr, "BB60: lock to a 10 MHz reference on port 1; Sidekiq: use the external reference clock",
+            flag(dev.extRef));
+    cli.add(nullptr, "--antenna", "NAME", "USRP receive antenna (e.g. RX2, TX/RX) or Sidekiq RF port (e.g. J1; default: the device's)",
+            text(dev.antenna));
     cli.add(nullptr, "--usrp-channel", "N", "USRP receive / transmit channel (X310, N310, X410 have several; default 0)",
             [&](const char* v) {
                 long long c;
@@ -585,7 +587,7 @@ int main(int argc, char** argv) {
         dev.ref = txc.ref = v;
         return true;
     });
-    cli.add(nullptr, "--bandwidth", "HZ", "USRP analog / BB60 I/Q bandwidth (default: automatic)", [&](const char* v) {
+    cli.add(nullptr, "--bandwidth", "HZ", "USRP analog / BB60 I/Q / Sidekiq RF bandwidth (default: automatic)", [&](const char* v) {
         if (!parseSI(v, dev.bandwidth)) return bad("bad bandwidth");
         return true;
     });
@@ -1020,7 +1022,7 @@ int main(int argc, char** argv) {
         if (ov.haveFc) dev.fc = ov.fc;
         else if (dev.driver == "siggen" && haveGen) dev.fc = gp.fc;  // the loopback listens where the generator plays
         if (ov.haveRate) dev.rate = ov.rate;
-        else if (dev.driver == "uhd" || dev.driver == "bb") dev.rate = 10e6;
+        else if (dev.driver == "uhd" || dev.driver == "bb" || dev.driver == "skiq") dev.rate = 10e6;
         if (dev.driver == "bb") {
             // The BB60 has a reference level, not a gain, and no AGC.
             if (dev.agc) {

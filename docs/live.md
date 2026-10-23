@@ -1,7 +1,7 @@
 # Live devices
 
-wvt streams from an RTL-SDR v3, a USRP or a Signal Hound BB60. The USRP can be the USB B200
-family, or a network USRP such as the N310, X310 or X410. It shows the spectrum and a scrolling
+wvt streams from an RTL-SDR v3, a USRP, a Signal Hound BB60 or an Epiq Solutions Sidekiq. The USRP
+can be the USB B200 family, or a network USRP such as the N310, X310 or X410. It shows the spectrum and a scrolling
 waterfall in real time, and it records the stream to SigMF or raw IQ files. wvt opens these files
 directly.
 
@@ -18,6 +18,7 @@ you configure the build. CMake finds them automatically.
 | macOS | `brew install librtlsdr` | `brew install uhd` |
 
 The Signal Hound BB60 needs the Signal Hound SDK. Refer to [Signal Hound BB60](#signal-hound-bb60).
+The Epiq Sidekiq needs the Sidekiq SDK, on Linux only. Refer to [Epiq Sidekiq](#epiq-sidekiq).
 
 Without these libraries, wvt still builds. It then has the file viewer, recording from the
 simulator, and the signal generator. For the CMake options, refer to
@@ -111,6 +112,43 @@ PATH=/opt/homebrew/bin:$PATH cmake --build build -j
 If CMake shows `this build is x86_64`, the CMake in the `PATH` is the Intel one.
 :::
 
+### Epiq Sidekiq
+
+This applies to the Sidekiq cards in a Linux computer: M.2, M.2-2280 (Stretch), mPCIe, X2, X4 and
+NV100. wvt receives on one channel (handle A1). The embedded products (Z2, Z3u, Z4, Matchstiq) run
+their own Linux, and wvt does not run on them.
+
+1. Get the Sidekiq SDK (version 4.14.0 or later; wvt is tested with 4.26.0) from the Epiq
+   Solutions support portal. Extract it. The SDK is not open source: do not add it to the
+   repository.
+2. Install the kernel modules and the udev rules of the SDK, as the SDK manual tells you
+   (*Installation procedure*). Make sure that the SDK program `sidekiq_probe` finds the card.
+3. Configure the build with the SDK folder:
+
+   ```sh
+   cmake -S . -B build -DSIDEKIQ_SDK_DIR=$HOME/sidekiq_sdk_v4.26.0
+   ```
+
+   CMake shows `wvt: Sidekiq support enabled (SDK 4.26.0, ...)`. Without `SIDEKIQ_SDK_DIR`, CMake
+   looks in `$SIDEKIQ_SDK_DIR`, then in `~/sidekiq_sdk_current`, then in
+   `third_party/sidekiq_sdk/sidekiq_sdk_v*` (the newest). CMake gets the link flags from the
+   `bin/sidekiq-config` program of the SDK, and links `libsidekiq` statically. wvt loads the
+   support libraries of the SDK (libusb, glib, tirpc) from the SDK folder at run time, so keep
+   the SDK in its folder after the build.
+4. Close the other programs that use the card. One program at a time can use a card. If a card is
+   in use, the device list and the error message give the process ID of the program that has it.
+
+The SDK has libraries for Linux x86-64 (`lib/libsidekiq__x86_64.gcc.a`) and Linux ARM64
+(`lib/libsidekiq__aarch64.a`). CMake selects the library for the CPU of the build. On macOS, CMake
+shows `Sidekiq support disabled (the Sidekiq SDK is for Linux only)`.
+
+:::{note}
+At high rates, a recording writes 4 bytes per sample: 1 GB/s at 245.76 MS/s on an X2 or X4.
+Record to a fast NVMe disk, or use a lower rate. The spectrum analyzes all the samples up to
+20 MS/s, or up to approximately 100 MS/s with the GPU. The *FFT sees* readout shows the part that
+it analyzes.
+:::
+
 ## Start a stream
 
 1. In the **Source** drop-down on the right of the menu bar, select **Device**.
@@ -130,6 +168,8 @@ wvt --device uhd -c 915M -r 20M --gain 40                # the first USRP found 
 wvt --device uhd:addr=192.168.40.2 -c 2.4G -r 50M --usrp-channel 1 --antenna RX2   # X310, second daughterboard
 wvt --device uhd:addr=192.168.10.2 -c 3.5G -r 122.88M --ref external                # X410 on a 10 MHz / PPS reference
 wvt --device bb -c 2.45G -r 20M --ref-level -30          # Signal Hound BB60 (the first one)
+wvt --device skiq -c 915M -r 10M --gain 40               # Epiq Sidekiq (the first free card)
+wvt --device skiq:8N3H0 -c 2.4G -r 50M --antenna J1      # Sidekiq with serial number 8N3H0, RF port J1
 wvt --device sim -c 100M -r 2.4M                         # built-in simulator, no hardware
 ```
 
@@ -137,13 +177,13 @@ To see the devices that wvt finds, type `wvt --list-devices`.
 
 ## Device limits
 
-| | RTL-SDR v3 | USRP | Signal Hound BB60 |
-|---|---|---|---|
-| Tuning | 24 MHz to 1.766 GHz. HF below 24 MHz with direct sampling (Q) | The range of the device and its daughterboard | 9 kHz to 6.4 GHz |
-| Sample rate | 225 kS/s to 300 kS/s, or 0.9 MS/s to 3.2 MS/s. 2.4 MS/s or less is reliable | The range of the device, up to 500 MS/s | 40 MS/s divided by a power of 2: 40, 20, 10 ... 4.883 kS/s |
-| Gain | 0 dB to 49.6 dB in tuner steps, or AGC | The range of the device. AGC on the devices that have it | A reference level, −130 dBm to +20 dBm |
-| Options (⚙) | Bias-tee, direct sampling, PPM correction | Antenna, channel, reference, analog bandwidth | Attenuator, amplifier, I/Q bandwidth, external reference |
-| Samples | `cu8` | `ci16` (sc16) | `ci16` (sc16) |
+| | RTL-SDR v3 | USRP | Signal Hound BB60 | Epiq Sidekiq |
+|---|---|---|---|---|
+| Tuning | 24 MHz to 1.766 GHz. HF below 24 MHz with direct sampling (Q) | The range of the device and its daughterboard | 9 kHz to 6.4 GHz | The range of the card, for example 70 MHz to 6 GHz on the M.2 |
+| Sample rate | 225 kS/s to 300 kS/s, or 0.9 MS/s to 3.2 MS/s. 2.4 MS/s or less is reliable | The range of the device, up to 500 MS/s | 40 MS/s divided by a power of 2: 40, 20, 10 ... 4.883 kS/s | The range of the card: up to 61.44 MS/s (M.2, mPCIe, NV100) or 245.76 MS/s (X2, X4) on PCIe. Much less on USB |
+| Gain | 0 dB to 49.6 dB in tuner steps, or AGC | The range of the device. AGC on the devices that have it | A reference level, −130 dBm to +20 dBm | dB above the lowest gain index: 0 dB to 76 dB in 1 dB steps (M.2, mPCIe), 0.5 dB steps on the other cards. AGC on the cards that have it |
+| Options (⚙) | Bias-tee, direct sampling, PPM correction | Antenna, channel, reference, analog bandwidth | Attenuator, amplifier, I/Q bandwidth, external reference | RF port, RF bandwidth, external reference |
+| Samples | `cu8` | `ci16` (sc16) | `ci16` (sc16) | `ci16` (sc16) |
 
 ### BB60 settings
 
@@ -173,6 +213,32 @@ Ext ref
 A retune or a new reference level restarts the stream of the BB60. The log (DEBUG) shows how long
 each restart takes. wvt marks the retune between the last old sample and the first new one. Thus a SigMF recording
 starts its new capture segment at the correct sample.
+
+### Sidekiq settings
+
+Gain
+: The gain in dB above the lowest gain index of the card. The M.2 and mPCIe (AD9361) have 1 dB
+  steps. The X2, X4 and NV100 have 0.5 dB steps. The *AGC* box shows only if the card has automatic
+  gain. If the RF input is more than 0 dBm, the status bar shows *RF overload*.
+
+Sample rate
+: Type a rate in the range of the card. The tooltip shows the range after the card opens. A USB
+  card (mPCIe or M.2 on USB) streams much less than on PCIe. The device list shows the transport,
+  for example *Sidekiq M.2 serial 8N3H0 (USB)*.
+
+RF port
+: The receive port. The list shows the fixed receive ports of the card after it opens. *Default*
+  keeps the card's default port.
+
+Bandwidth
+: The RF bandwidth. 0 sets 80 % of the sample rate.
+
+Ext ref
+: Use the external reference clock input. The M.2 and mPCIe cannot change the reference while
+  wvt runs. Set their reference with the `ref_clock` program of the SDK.
+
+A retune and a gain change apply while the card streams. 12-bit cards (M.2, mPCIe) have the same
+dBFS scale as 16-bit cards: a full-scale signal shows 0 dBFS.
 
 wvt reads the USRP limits from the device when it opens, so it does not need a table of models.
 These are typical values:
@@ -315,3 +381,16 @@ SDK or a device, `-DWVT_BB_SIM=ON` builds the backend against a simulated BB60D
 (`tools/bb_sim/`). The simulator makes a tone at 100.2 MHz and noise, and it reports an overload
 when the tone is above the reference level. The self-check `build/bb_check` uses it. For the
 design, refer to [the BB60 design record](design/bb60-integration-plan.md).
+
+The Sidekiq backend (`src/device/sdr_skiq.cpp`) uses `libsidekiq` from the Sidekiq SDK. It
+receives on handle A1 with 16-bit samples in I/Q order. It shifts the samples of a 12-bit card by
+4 bits, so that full scale is 0 dBFS. Its thread collects the blocks from `skiq_receive` into
+deliveries of approximately 20 ms. The RF timestamp of each block counts samples, so a jump is a
+loss of that many samples. An overrun shows as a gap with the exact count. The RF timestamp of an
+AD9361 card jumps when it retunes, so the gap check pauses for 0.5 s after a retune. The SDK
+messages go to the wvt log (component `skiq`). `skiq_exit` stops the library for the whole
+process, so wvt opens one Sidekiq at a time. For tests without the SDK or a card,
+`-DWVT_SKIQ_SIM=ON` builds the backend against a simulated card (`tools/skiq_sim/`): an M.2, or an
+X4 with `WVT_SKIQ_SIM_PART=x4`. It keeps up with 245.76 MS/s, and it reports an overrun when the
+host falls more than 64 MiB behind. The self-check `build/skiq_check` uses it. For the design, refer
+to [the Sidekiq design record](design/sidekiq-integration-plan.md).
