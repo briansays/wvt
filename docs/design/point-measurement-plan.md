@@ -2,7 +2,7 @@
 
 Branch: `80-point-measurements`, from `main` at `3779b49`.
 Status: **implemented** (2026-10-22). Tested with a virtual X server (Xvfb) and synthetic input.
-Not yet tested on XQuartz.
+The user tested it on XQuartz (2026-10-22).
 
 ## 1. Goal
 
