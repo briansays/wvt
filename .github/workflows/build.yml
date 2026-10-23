@@ -25,11 +25,12 @@ jobs:
   linux-cpu:
     name: Linux (CPU, RTL-SDR, UHD)
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v5
       - name: Install packages
-        timeout-minutes: 10
+        # libuhd-dev pulls in a few hundred MB: room for a slow mirror (a stall is apt's 30 s timeout)
+        timeout-minutes: 20
         run: |
           sudo apt-get $APT_OPTS update
           sudo apt-get $APT_OPTS install -y build-essential cmake libx11-dev libgl1-mesa-dev librtlsdr-dev libuhd-dev xvfb
@@ -143,14 +144,15 @@ jobs:
   clang-tidy:
     name: clang-tidy (bugprone, cert, concurrency, performance)
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Install packages
-        timeout-minutes: 10
+        # libuhd-dev pulls in a few hundred MB: room for a slow mirror (a stall is apt's 30 s timeout)
+        timeout-minutes: 20
         # The version is pinned: a newer clang-tidy can add findings by itself.
         run: |
           sudo apt-get $APT_OPTS update
