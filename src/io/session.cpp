@@ -115,7 +115,7 @@ std::string sessionToJson(const Session& s) {
         j += std::string(", \"p") + char('1' + k) + "\": {\"plot\": " + jsonQuote(measPlotName(p.plot));
         if (measHasTime(p.plot)) j += ", \"t_s\": " + n(p.t);
         if (measHasFreq(p.plot)) j += ", \"f_hz\": " + n(p.f);
-        j += "}";
+        j += '}';
     }
     j += "},\n";
     j += "  \"bookmarks\": [";
