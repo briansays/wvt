@@ -79,6 +79,8 @@ Session App::sessionFromState() const {
     s.tm2 = tm2_;
     s.fm1 = fm1_;
     s.fm2 = fm2_;
+    s.points = pointsShown_;
+    std::copy(std::begin(pts_), std::end(pts_), s.pt);
     for (const Bookmark& b : bookmarks_) s.bookmarks.push_back({b.name, b.t0, b.t1});
     return s;
 }
@@ -159,6 +161,9 @@ bool App::openSession(const std::string& path) {
     tm2_ = s.tm2;
     fm1_ = s.fm1;
     fm2_ = s.fm2;
+    pointsShown_ = s.points;
+    std::copy(std::begin(s.pt), std::end(s.pt), pts_);
+    nextPt_ = pts_[0].set() && !pts_[1].set() ? 1 : 0;
     bookmarks_.clear();
     for (const Session::Bookmark& b : s.bookmarks) bookmarks_.push_back({b.name, b.t0, b.t1});
     bookmarkSel_ = -1;

@@ -12,6 +12,7 @@
 | Fit to the data | Double-click |
 | Tune the channel | Ctrl+click the spectrum or the waterfall. Or drag the cyan lines: the center line moves the channel, and the edge lines change the bandwidth |
 | Play audio from a point | Shift+click a time plot or the waterfall |
+| Put a point marker (P1, P2) | Alt+click a plot, or press `M`. Drag a marker to move it. Refer to [Point measurements](viewer.md#point-measurements) |
 | Export a region | Right-click the waterfall |
 | Save plot snapshots | Click **Snapshot...** in the status bar |
 | Plot options | Right-click a time plot (I/Q, AM, FM, PM), or click its ⚙ button |
@@ -26,6 +27,8 @@
 | Show everything | `A` |
 | Show or hide the time markers | `T` |
 | Show or hide the frequency markers | `F` |
+| Put a point marker at the pointer | `M` |
+| Clear the point markers | `Shift+M` |
 | Zoom to the time markers | `Z` |
 | Enable or disable the channel filter | `C` |
 | Add a bookmark | `B` |
@@ -51,7 +54,8 @@ this, XQuartz must send `⌘` keys to wvt, and must copy between the X11 clipboa
 clipboard. In **XQuartz → Settings**:
 
 - **Input:** clear **Enable key equivalents under X11**. If it is set, XQuartz uses the `⌘` keys
-  itself. `Ctrl+C` and `Ctrl+V` work in each case.
+  itself. `Ctrl+C` and `Ctrl+V` work in each case. For Alt+click (point markers) with the Option
+  key, set **Option keys send Alt_L and Alt_R**. If it is not set, press `M` instead.
 - **Pasteboard:** set **Enable syncing**, **Update Pasteboard when CLIPBOARD changes** and
   **Update CLIPBOARD when Pasteboard changes** (the defaults).
 

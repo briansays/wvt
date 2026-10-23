@@ -7,6 +7,7 @@
 #include "audio/audio_engine.h"
 #include "dsp/engine.h"
 #include "dsp/extract.h"
+#include "dsp/measure.h"
 #include "imgui.h"
 #include "implot.h"
 #include "device/live.h"
@@ -190,6 +191,18 @@ private:
     void startExport(bool overwrite);
     void pollExport();
 
+    // point measurements (app_measure.cpp, issue #80)
+    void pointInput(MeasPlot frame);  // M or Alt+click on the hovered plot puts a marker there
+    void drawPoints(MeasPlot frame);  // the markers on this plot (I = the I/Q plot), lines for the others
+    void placePoint(MeasPlot frame, double x, double y);
+    void clearPoints();
+    bool pointSeries(MeasPlot p, const std::vector<double>*& xs, const std::vector<double>*& ys) const;
+    double pointValue(int k) const;  // NaN when not known
+    std::string pointValueText(MeasPlot p, double v) const;
+    std::string pointText(int k) const;
+    std::string pointDeltas(bool full) const;  // P2 minus P1
+    std::string pointReadout() const;          // for the status bar
+
     // plot snapshots (app_snapshot.cpp, issue #13)
     void drawSnapshotWindow();
     void snapNote(SnapPlot p, ImVec2 a, ImVec2 b);  // where plot p is drawn on this frame
@@ -310,6 +323,18 @@ private:
     bool tMarkers_ = false, fMarkers_ = false;
     double tm1_ = 0, tm2_ = 0, fm1_ = 0, fm2_ = 0;
     double hoverT_ = NAN, hoverF_ = NAN, nextHoverT_ = NAN, nextHoverF_ = NAN;
+
+    // point markers (issue #80)
+    bool pointsShown_ = false;
+    PointMarker pts_[2];
+    int nextPt_ = 0;         // the marker the next placement replaces
+    double ptSecPerPx_ = 0;  // of the time plots: how near a sample must be to read its value
+    struct PtCache {         // a trace value, kept while the marker is out of the view
+        double v = NAN;
+        DemodReq req;
+        PointMarker at;
+    };
+    mutable PtCache ptCache_[2];
 
     // overview scrubbing
     bool ovScrub_ = false;

@@ -76,6 +76,9 @@ Session sample(const std::string& file) {
     s.tm2 = 2.3;
     s.fm1 = 914.9e6;
     s.fm2 = 915.2e6;
+    s.points = true;
+    s.pt[0] = {MeasPlot::Waterfall, 2.15, 915.01e6};
+    s.pt[1] = {MeasPlot::FM, 2.25, 0};
     s.bookmarks = {{"burst \"A\"", 2.0, 2.1}, {"tail", 8.0, 9.0}};
     return s;
 }
@@ -92,7 +95,8 @@ bool same(const Session& a, const Session& b) {
               a.amMode == b.amMode && a.amSmooth == b.amSmooth && a.fmSmooth == b.fmSmooth && a.fmRelative == b.fmRelative &&
               a.pmMode == b.pmMode && a.pmSmooth == b.pmSmooth && a.pmDegrees == b.pmDegrees && a.squelch == b.squelch &&
               a.squelchDb == b.squelchDb && a.tMarkers == b.tMarkers && a.fMarkers == b.fMarkers && a.tm1 == b.tm1 &&
-              a.tm2 == b.tm2 && a.fm1 == b.fm1 && a.fm2 == b.fm2 && a.bookmarks.size() == b.bookmarks.size();
+              a.tm2 == b.tm2 && a.fm1 == b.fm1 && a.fm2 == b.fm2 && a.points == b.points && a.pt[0] == b.pt[0] &&
+              a.pt[1] == b.pt[1] && a.bookmarks.size() == b.bookmarks.size();
     for (int k = 0; k < 4; ++k) ok = ok && a.autoY[k] == b.autoY[k];
     for (size_t k = 0; ok && k < a.bookmarks.size(); ++k)
         ok = a.bookmarks[k].name == b.bookmarks[k].name && a.bookmarks[k].t0 == b.bookmarks[k].t0 &&
@@ -161,6 +165,10 @@ int main() {
     check(bad("{\"wvt_session\": 1, " + recJson + ", \"waterfall\": {\"nfft\": 1e30}}"), "nfft 1e30: refused: " + err);
     check(!bad("{\"wvt_session\": 1, " + recJson + "}") && r.nfft == 1024 && r.window == "Blackman-Harris",
           "only the recording: the other values are the defaults");
+    check(!r.points && !r.pt[0].set() && !r.pt[1].set(), "... and no point markers (a session from before issue #80)");
+    check(!bad("{\"wvt_session\": 1, " + recJson + R"(, "points": {"shown": true, "p1": {"plot": "xyz", "t_s": 1}}})") &&
+              r.points && !r.pt[0].set(),
+          "a point marker on an unknown plot is not set");
 
     (void)!system(("rm -rf " + dir).c_str());
     printf(failures ? "\n%d FAILED\n" : "\nall passed\n", failures);

@@ -28,6 +28,8 @@ const Key kFileKeys[] = {
     {"T", "Time markers"},
     {"Z", "Zoom to the time markers"},
     {"F", "Frequency markers"},
+    {"M", "Put a point marker (P1, P2) at the pointer on a plot"},
+    {"Shift+M", "Clear the point markers"},
     {"C", "Channel filter on / off"},
     {"B", "Bookmark the view"},
     {"Esc", "Cancel a region selection"},
@@ -50,6 +52,7 @@ const Key kMouse[] = {
     {"Double-click", "Fit the plot"},
     {"Ctrl+click", "Tune the channel (spectrum and waterfall)"},
     {"Shift+click", "Play audio from there (waterfall and time plots)"},
+    {"Alt+click", "Put a point marker there (as M)"},
     {"Right-click", "Waterfall: export menu. Time plot: its options."},
     {"Overview strip", "Click to jump, drag the box to move, drag its edges to resize"},
     {"Snapshot...", "Status bar: save the plots as PNG files"},
@@ -96,6 +99,12 @@ void App::drawMenuBar() {
         }
         ImGui::MenuItem("Frequency markers", "F", &fMarkers_);
         ImGui::SetItemTooltip("Two draggable frequency cursors on the spectrum and waterfall");
+        if (!liveMode_) {
+            ImGui::MenuItem("Point markers", nullptr, &pointsShown_);
+            ImGui::SetItemTooltip("P1 and P2: press M or Alt+click on a plot to put one at the pointer.\n"
+                                  "The status bar shows P2 minus P1 in time, frequency and value.");
+            if (ImGui::MenuItem("Clear point markers", "Shift+M", false, pts_[0].set() || pts_[1].set())) clearPoints();
+        }
         ImGui::MenuItem("Relative frequency", nullptr, &relFreq_);
         ImGui::SetItemTooltip("Label frequency axes relative to the center frequency");
         ImGui::MenuItem("Peak hold", nullptr, &showPeak_);

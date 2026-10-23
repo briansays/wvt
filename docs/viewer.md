@@ -79,14 +79,14 @@ again.
 | **Scrollbar** | Moves the view through the file. Drag the thumb, click the track to move one page, or turn the mouse wheel |
 | **Left** | The waterfall settings: FFT size, window, dB range or auto. The ⚙ button has the overlap, averaging, rows, columns, colormap and peak hold. Below the settings are the spectrum of the current view, the waterfall, and its color bar |
 | **Right** | The channel settings: on or off, offset, bandwidth, and *to peak*. The ⚙ button has the taps, decimation, squelch, maximum points and plot height. Below the settings are the I/Q, AM, FM and PM plots, which you can scroll. Each plot header has a show checkbox, a ⚙ button for the plot options, and the measurement readout. Thus no text covers the traces |
-| **Status bar** | The **Snapshot...** button (refer to [Plot snapshots](snapshots.md)). The values at the pointer: time, sample number, frequency, dB, AM, FM and PM. The marker ΔT, 1/ΔT and ΔF. `GPU <model>` or `CPU`, the renderer, and `computing... NN%` while wvt calculates the plots (the percentage done) |
+| **Status bar** | The **Snapshot...** button (refer to [Plot snapshots](snapshots.md)). The values at the pointer: time, sample number, frequency, dB, AM, FM and PM. The marker ΔT, 1/ΔT and ΔF, and the point markers (P2 minus P1). `GPU <model>` or `CPU`, the renderer, and `computing... NN%` while wvt calculates the plots (the percentage done) |
 
 ## Menus
 
 | Menu | Items |
 |---|---|
 | **File** | Open file, export region, save plot snapshots, save file session (refer to [File sessions](sessions.md)), quit |
-| **View** | Time markers, frequency markers, relative frequency, peak hold, the overview strip, the time plots to show, show everything |
+| **View** | Time markers, frequency markers, point markers, relative frequency, peak hold, the overview strip, the time plots to show, show everything |
 | **Tools** | Signal generator, audio, use the GPU |
 | **Help** | Keyboard and mouse, about wvt |
 
@@ -127,3 +127,42 @@ calculations, refer to [Signal processing](signal-processing.md).
 - Press `T` to show or hide the time markers. Press `F` to show or hide the frequency markers.
 - The status bar shows the time between the markers (ΔT), its inverse (1/ΔT) and the frequency
   difference (ΔF).
+
+## Point measurements
+
+Two point markers, P1 and P2, measure between two points of the signal. For example, the time
+between two pulse edges, the time between two pulses, or the change in frequency in a pulse.
+
+- To put a marker at the pointer, press `M` or Alt+click a plot: the waterfall, the spectrum, I/Q,
+  AM, FM or PM. The first marker is P1 and the second is P2. After that, each new marker replaces the
+  older of the two.
+- On a time plot (I/Q, AM, FM, PM), the marker goes on the trace. If a peak or a valley is less than
+  8 pixels to the side and nearer to the pointer, the marker goes there. Thus, put the pointer a
+  little above the top of a pulse to put the marker on the top. On the I/Q plot, the marker goes on
+  the trace (I or Q) that is nearer to the pointer.
+- On the waterfall, the marker keeps the time and the frequency of the pointer. On the spectrum, it
+  keeps the frequency.
+- To move a marker, drag it. On a time plot, it moves along the trace.
+- To remove the markers, press `Shift+M`, or use **View → Clear point markers**. **View → Point
+  markers** shows or hides them.
+
+The status bar shows P2 minus P1 for each value that the two markers have in common. The label at
+P2 shows the same values:
+
+| P1 and P2 on | Differences |
+|---|---|
+| The same time plot | dT (with 1/dT and the number of samples) and the value (for example dAM, dFM in Hz, dPM in rad or deg) |
+| I and Q | dT and the amplitude (dA) |
+| Two different time plots, or a time plot and the waterfall | dT |
+| The waterfall | dT, dF and the power (dP, dB) |
+| The spectrum | dF and the power (dP, dB) |
+| The spectrum and the waterfall | dF |
+
+The time axis and the frequency axis are shared by the plots, so dT and dF are correct between two
+plots. The other plots show each marker as a faint line at its time or frequency.
+
+A value comes from the plotted data. When a marker on a time plot goes out of the view, wvt keeps
+its last value until a plot setting changes. A value that wvt does not know shows as `?`: zoom or
+pan to the marker. In a sparse view (refer to the channel options), zoom in for exact values.
+
+Point markers are not available in live mode.

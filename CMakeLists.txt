@@ -122,6 +122,8 @@ add_executable(wvt
   src/app/app_session.cpp
   src/io/session.cpp
   src/io/snapshot.cpp
+  src/dsp/measure.cpp
+  src/app/app_measure.cpp
   ${FONT_CPP})
 target_include_directories(wvt PRIVATE src third_party/stb ${PLATFORM_INCLUDES})
 target_link_libraries(wvt PRIVATE imgui_implot ${PLATFORM_LIBS} Threads::Threads)
@@ -523,10 +525,15 @@ target_compile_options(clipboard_check PRIVATE ${WVT_WARNINGS})
 
 # Session file self-test (issue #76)
 add_executable(session_check tools/session_check.cpp src/io/session.cpp src/io/iq_file.cpp src/io/recorder.cpp
-  src/common/json.cpp src/common/log.cpp src/common/ui_util.cpp)
+  src/dsp/measure.cpp src/common/json.cpp src/common/log.cpp src/common/ui_util.cpp)
 target_include_directories(session_check PRIVATE src)
 target_link_libraries(session_check PRIVATE imgui_implot Threads::Threads)
 target_compile_options(session_check PRIVATE ${WVT_WARNINGS})
+
+# Point measurement self-test (issue #80)
+add_executable(measure_check tools/measure_check.cpp src/dsp/measure.cpp)
+target_include_directories(measure_check PRIVATE src)
+target_compile_options(measure_check PRIVATE ${WVT_WARNINGS})
 
 add_executable(snapshot_check tools/snapshot_check.cpp src/io/snapshot.cpp)
 target_include_directories(snapshot_check PRIVATE src third_party/stb)
@@ -556,7 +563,7 @@ endif()
 # ---------------------------------------------------------------------------
 enable_testing()
 set(WVT_CHECKS siggen_check audio_check log_check segment_check gpu_check extract_check snapshot_check device_check
-  clipboard_check session_check)
+  clipboard_check session_check measure_check)
 if(WVT_BB_SIM)
   list(APPEND WVT_CHECKS bb_check)
 endif()

@@ -152,6 +152,7 @@ std::string App::onSourceChanged(bool resetView) {
         fmax_ = fc_ + fs_ / 2;
         fm1_ = fc_ - fs_ / 8;
         fm2_ = fc_ + fs_ / 8;
+        clearPoints();
         fitSpecY_ = true;
     } else if (nSamples_ > 0) {
         setView(tmin_, tmax_);  // keep the view inside the segment
@@ -234,6 +235,10 @@ void App::setFs(double fs) {
     if (!(fs > 0)) return;
     double k = fs_ / fs;  // keep the same samples in view
     tmin_ *= k; tmax_ *= k; tm1_ *= k; tm2_ *= k;
+    for (PointMarker& p : pts_) {
+        p.t *= k;
+        if (p.plot == MeasPlot::Waterfall || p.plot == MeasPlot::Spectrum) p.f = fc_ + (p.f - fc_) * fs / fs_;
+    }
     double df = fs / fs_;
     fmin_ = fc_ + (fmin_ - fc_) * df;
     fmax_ = fc_ + (fmax_ - fc_) * df;
@@ -244,6 +249,7 @@ void App::setFs(double fs) {
 void App::setFc(double fc) {
     double d = fc - fc_;
     fmin_ += d; fmax_ += d; fm1_ += d; fm2_ += d;
+    for (PointMarker& p : pts_) p.f += d;
     fc_ = fc;
     onSourceChanged(false);
 }
@@ -900,6 +906,8 @@ void App::drawLeft() {
         drawChannelOverlay(false);
         drawAudioOverlay();
         drawFreqMarkers();
+        drawPoints(MeasPlot::Spectrum);
+        pointInput(MeasPlot::Spectrum);
         if (std::isfinite(hoverF_)) {
             ImPlot::SetNextLineStyle(kColHover);
             ImPlot::PlotInfLines("##hf", &hoverF_, 1, ImPlotItemFlags_NoFit);
@@ -951,6 +959,8 @@ void App::drawLeft() {
         drawTimeMarkersHorizontal();
         drawExportRegion(true);
         drawPlayhead(false);
+        drawPoints(MeasPlot::Waterfall);
+        pointInput(MeasPlot::Waterfall);
         ImPlot::SetNextLineStyle(kColHover);
         if (std::isfinite(hoverT_)) ImPlot::PlotInfLines("##ht", &hoverT_, 1, (int)ImPlotItemFlags_NoFit | (int)ImPlotInfLinesFlags_Horizontal);
         ImPlot::SetNextLineStyle(kColHover);
@@ -1003,6 +1013,9 @@ void App::endTimePlot(SnapPlot p) {
     drawTimeMarkersVertical();
     drawExportRegion(false);
     drawPlayhead(true);
+    const MeasPlot mp = p == SnapPlot::IQ ? MeasPlot::I : p == SnapPlot::AM ? MeasPlot::AM : p == SnapPlot::FM ? MeasPlot::FM : MeasPlot::PM;
+    drawPoints(mp);
+    pointInput(mp);
     if (std::isfinite(hoverT_)) {
         ImPlot::SetNextLineStyle(kColHover);
         ImPlot::PlotInfLines("##ht", &hoverT_, 1, ImPlotItemFlags_NoFit);
@@ -1275,6 +1288,7 @@ void App::drawStatusBar() {
              std::to_string((long long)std::llround(dt * fs_)) + " samples)";
     }
     if (fMarkers_) s += "   | dF=" + fmtSI(std::fabs(fm2_ - fm1_), "Hz", 6);
+    if (const std::string pt = pointReadout(); !pt.empty()) s += "   | " + pt;
     char rest[64];
     snprintf(rest, sizeof rest, "%s | %.0f fps", win_.usingGL() ? "GLX" : "software", ImGui::GetIO().Framerate);
     const std::string lead = computingText();
@@ -1350,6 +1364,7 @@ void App::handleShortcuts() {
     if (ImGui::IsKeyPressed(ImGuiKey_A, false)) showAll();
     if (ImGui::IsKeyPressed(ImGuiKey_T, false)) tMarkers_ = !tMarkers_;
     if (ImGui::IsKeyPressed(ImGuiKey_F, false)) fMarkers_ = !fMarkers_;
+    if (io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_M, false)) clearPoints();  // M alone: on a plot (pointInput)
     if (ImGui::IsKeyPressed(ImGuiKey_C, false)) demod_.chanEnable = !demod_.chanEnable;
     if (ImGui::IsKeyPressed(ImGuiKey_B, false)) addBookmark();
     if (tMarkers_ && ImGui::IsKeyPressed(ImGuiKey_Z, false)) setView(std::min(tm1_, tm2_), std::max(tm1_, tm2_));

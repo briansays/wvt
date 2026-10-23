@@ -13,6 +13,7 @@ that share one time axis. When you pan or zoom one plot, all the other plots fol
 - **Audio:** AM, NFM, WFM, USB, LSB and CW demodulation to the speakers or to a WAV file.
 - **Region export:** a time range, and as an option a frequency band, to a new file.
 - **Plot snapshots:** PNG files of the plots, as they show on the screen.
+- **Point measurements:** two markers on the plots, and the time, frequency and value between them.
 - **File sessions:** save the recording, the view, the plot settings and the channel, and open them again later.
 - **GPU processing:** CUDA on NVIDIA GPUs (Linux) and Metal on Apple GPUs (macOS).
 
