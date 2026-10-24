@@ -113,6 +113,15 @@ typedef enum {
     skiq_rf_port_max = 11,
 } skiq_rf_port_t;
 
+typedef enum {
+    skiq_rf_port_config_fixed = 0,
+    skiq_rf_port_config_tdd,
+    skiq_rf_port_config_trx,
+    skiq_rf_port_config_invalid,
+} skiq_rf_port_config_t;
+
+typedef enum { skiq_chan_mode_single = 0, skiq_chan_mode_dual } skiq_chan_mode_t;
+
 typedef struct {
     skiq_xport_init_level_t init_level;
     skiq_part_t part_type;
@@ -175,6 +184,15 @@ EPIQ_API int32_t skiq_write_ref_clock_select(uint8_t card, skiq_ref_clock_select
 EPIQ_API int32_t skiq_write_iq_order_mode(uint8_t card, skiq_iq_order_t mode);
 EPIQ_API int32_t skiq_write_rx_rf_port_for_hdl(uint8_t card, skiq_rx_hdl_t hdl, skiq_rf_port_t rf_port);
 EPIQ_API int32_t skiq_read_rx_rf_port_for_hdl(uint8_t card, skiq_rx_hdl_t hdl, skiq_rf_port_t *p_rf_port);
+EPIQ_API int32_t skiq_read_num_rx_chans(uint8_t card, uint8_t *p_num_rx_chans);
+EPIQ_API int32_t skiq_read_rf_port_config_avail(uint8_t card, bool *p_fixed, bool *p_trx);
+EPIQ_API int32_t skiq_read_rf_port_config(uint8_t card, skiq_rf_port_config_t *p_config);
+EPIQ_API int32_t skiq_write_rf_port_config(uint8_t card, skiq_rf_port_config_t config);
+EPIQ_API int32_t skiq_write_rf_port_operation(uint8_t card, bool transmit);
+EPIQ_API int32_t skiq_read_rx_rf_ports_avail_for_hdl(uint8_t card, skiq_rx_hdl_t hdl, uint8_t *p_num_fixed_rf_ports,
+                                                     skiq_rf_port_t *p_fixed_rf_port_list, uint8_t *p_num_trx_rf_ports,
+                                                     skiq_rf_port_t *p_trx_rf_port_list);
+EPIQ_API int32_t skiq_write_chan_mode(uint8_t card, skiq_chan_mode_t mode);
 EPIQ_API int32_t skiq_write_rx_sample_rate_and_bandwidth(uint8_t card, skiq_rx_hdl_t hdl, uint32_t rate,
                                                          uint32_t bandwidth);
 EPIQ_API int32_t skiq_read_rx_sample_rate_and_bandwidth(uint8_t card, skiq_rx_hdl_t hdl, uint32_t *p_rate,

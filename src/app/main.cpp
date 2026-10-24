@@ -574,7 +574,7 @@ int main(int argc, char** argv) {
     });
     cli.add(nullptr, "--ext-ref", nullptr, "BB60: lock to a 10 MHz reference on port 1; Sidekiq: use the external reference clock",
             flag(dev.extRef));
-    cli.add(nullptr, "--antenna", "NAME", "USRP receive antenna (e.g. RX2, TX/RX) or Sidekiq RF port (e.g. J1; default: the device's)",
+    cli.add(nullptr, "--antenna", "NAME", "USRP receive antenna (e.g. RX2, TX/RX) or Sidekiq RF port (e.g. \"J3 (RX A2)\" or J1; default: the device's)",
             text(dev.antenna));
     cli.add(nullptr, "--usrp-channel", "N", "USRP receive / transmit channel (X310, N310, X410 have several; default 0)",
             [&](const char* v) {

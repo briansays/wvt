@@ -11,6 +11,14 @@
 // Samples have the card's resolution, sign-extended in the low bits, in Q/I
 // order until skiq_write_iq_order_mode selects I/Q. The RF timestamp counts
 // samples, and on the M.2 (AD9361) it slips on a retune, as on the real card.
+// RF ports (issue #85): the M.2 has handle A1 with the fixed ports J1 and J2
+// (default J2) and the TRX port J1; the X4 has the handles A1, A2, B1 and B2
+// with the fixed ports J1, J2, J3 and J4, and lists them only per handle
+// (skiq_read_rx_rf_ports_avail_for_hdl), not in skiq_read_parameters. A port
+// works only in its RF port configuration, a TRX port receives only after
+// skiq_write_rf_port_operation(false), and A2 and B2 stream only in the dual
+// channel mode. The tone is 10 kHz higher for each port number above J2 (lower
+// below it), so a test can see which port receives.
 // The signal is computed once per setting into a table of 64 blocks (the tone
 // rounded to whole cycles in it) and copied from there, so the simulator keeps
 // up with 245.76 MS/s. Like the FPGA, it holds up to 64 MiB of samples for a
@@ -62,6 +70,10 @@ double envNum(const char* name) {
 bool present() { return !envOn("WVT_SKIQ_SIM_NONE"); }
 bool usb() { return envOn("WVT_SKIQ_SIM_USB"); }
 
+struct Handle {
+    std::vector<skiq_rf_port_t> fixed, trx;
+};
+
 struct Part {
     skiq_part_t type;
     int res;
@@ -70,13 +82,24 @@ struct Part {
     bool agc, slips;
     uint32_t rateMin, rateMax;
     uint64_t loMin, loMax;
+    std::vector<Handle> handles;  // from A1 on
+    bool portsInParams;           // skiq_read_parameters lists the ports
 };
 
 Part part() {
     const char* e = getenv("WVT_SKIQ_SIM_PART");
     if (e && std::string(e) == "x4")
-        return {skiq_x4, 16, 195, 255, 0.5, false, false, 1000000, 245760000, 1000000, 6000000000ULL};
-    return {skiq_m2, 12, 0, 76, 1, true, true, 233000, 61440000, 70000000, 6000000000ULL};
+        return {skiq_x4, 16, 195, 255, 0.5, false, false, 1000000, 245760000, 1000000, 6000000000ULL,
+                {{{skiq_rf_port_J1}, {}}, {{skiq_rf_port_J2}, {}}, {{skiq_rf_port_J3}, {}}, {{skiq_rf_port_J4}, {}}},
+                false};
+    return {skiq_m2, 12, 0, 76, 1, true, true, 233000, 61440000, 70000000, 6000000000ULL,
+            {{{skiq_rf_port_J1, skiq_rf_port_J2}, {skiq_rf_port_J1}}}, true};
+}
+
+bool hasTrx(const Part& p) {
+    for (const auto& h : p.handles)
+        if (!h.trx.empty()) return true;
+    return false;
 }
 
 struct Sim {
@@ -87,7 +110,11 @@ struct Sim {
     int32_t timeout = RX_TRANSFER_NO_WAIT;
     skiq_iq_order_t order = skiq_iq_order_qi;
     skiq_ref_clock_select_t ref = skiq_ref_clock_internal;
-    skiq_rf_port_t port = skiq_rf_port_J2;
+    skiq_rf_port_t port[skiq_rx_hdl_end] = {};
+    skiq_rf_port_config_t config = skiq_rf_port_config_fixed;
+    bool transmit = true;  // the TRX port operation
+    skiq_chan_mode_t chanMode = skiq_chan_mode_single;
+    skiq_rx_hdl_t hdl = skiq_rx_hdl_A1;  // streaming
     uint32_t rate = 10000000, bw = 8000000;
     uint64_t lo = 1000000000ULL;
     skiq_rx_gain_t mode = skiq_rx_gain_manual;
@@ -109,6 +136,22 @@ void say(int32_t prio, const char* msg) {
 }
 
 bool active(uint8_t card) { return g.init && card == kCard && present(); }
+
+bool validHdl(skiq_rx_hdl_t hdl) { return hdl >= 0 && (size_t)hdl < part().handles.size(); }
+
+// The ports of a handle in the current RF port configuration.
+const std::vector<skiq_rf_port_t>& usablePorts(const Part& p, skiq_rx_hdl_t hdl) {
+    return g.config == skiq_rf_port_config_trx ? p.handles[hdl].trx : p.handles[hdl].fixed;
+}
+
+// Each handle on J2 if it has it in the configuration, else on its first port.
+void defaultPorts(const Part& p) {
+    for (size_t h = 0; h < p.handles.size(); ++h) {
+        const auto& l = usablePorts(p, (skiq_rx_hdl_t)h);
+        const bool j2 = std::find(l.begin(), l.end(), skiq_rf_port_J2) != l.end();
+        g.port[h] = j2 ? skiq_rf_port_J2 : l.empty() ? skiq_rf_port_unknown : l.front();
+    }
+}
 
 double gainDb() {
     const Part p = part();
@@ -174,7 +217,10 @@ int32_t skiq_init(skiq_xport_type_t, skiq_xport_init_level_t level, uint8_t* p_c
     g.timeout = RX_TRANSFER_NO_WAIT;
     g.order = skiq_iq_order_qi;
     g.ref = skiq_ref_clock_internal;
-    g.port = skiq_rf_port_J2;
+    g.config = skiq_rf_port_config_fixed;
+    g.transmit = true;
+    g.chanMode = skiq_chan_mode_single;
+    defaultPorts(p);
     g.mode = skiq_rx_gain_manual;
     g.gain = p.gmin;
     say(SKIQ_LOG_INFO, "Sidekiq simulator: card 0 initialized\n");
@@ -200,18 +246,22 @@ int32_t skiq_read_parameters(uint8_t card, skiq_param_t* p_param) {
     p_param->card_param.card = kCard;
     snprintf(p_param->card_param.serial_string, SKIQ_SERIAL_NUM_STRLEN, "%s", kSerial);
     if (!g.full) return 0;  // the rest needs a full initialization
-    skiq_rx_param_t& rx = p_param->rx_param[skiq_rx_hdl_A1];
-    rx.handle = skiq_rx_hdl_A1;
-    rx.gain_index_min = p.gmin;
-    rx.gain_index_max = p.gmax;
-    rx.iq_resolution = (uint8_t)p.res;
-    rx.lo_freq_min = p.loMin;
-    rx.lo_freq_max = p.loMax;
-    rx.sample_rate_min = p.rateMin;
-    rx.sample_rate_max = p.rateMax;
-    rx.num_fixed_rf_ports = 2;
-    rx.fixed_rf_ports[0] = skiq_rf_port_J1;
-    rx.fixed_rf_ports[1] = skiq_rf_port_J2;
+    for (size_t h = 0; h < p.handles.size(); ++h) {
+        skiq_rx_param_t& rx = p_param->rx_param[h];
+        rx.handle = (skiq_rx_hdl_t)h;
+        rx.gain_index_min = p.gmin;
+        rx.gain_index_max = p.gmax;
+        rx.iq_resolution = (uint8_t)p.res;
+        rx.lo_freq_min = p.loMin;
+        rx.lo_freq_max = p.loMax;
+        rx.sample_rate_min = p.rateMin;
+        rx.sample_rate_max = p.rateMax;
+        if (!p.portsInParams) continue;
+        rx.num_fixed_rf_ports = (uint8_t)p.handles[h].fixed.size();
+        std::copy(p.handles[h].fixed.begin(), p.handles[h].fixed.end(), rx.fixed_rf_ports);
+        rx.num_trx_rf_ports = (uint8_t)p.handles[h].trx.size();
+        std::copy(p.handles[h].trx.begin(), p.handles[h].trx.end(), rx.trx_rf_ports);
+    }
     return 0;
 }
 
@@ -244,12 +294,83 @@ int32_t skiq_write_iq_order_mode(uint8_t card, skiq_iq_order_t mode) {
     return 0;
 }
 
+int32_t skiq_read_num_rx_chans(uint8_t card, uint8_t* p_num_rx_chans) {
+    std::lock_guard<std::mutex> lk(g.m);
+    if (!active(card)) return -ENODEV;
+    if (!p_num_rx_chans) return -EFAULT;
+    *p_num_rx_chans = (uint8_t)part().handles.size();
+    return 0;
+}
+
+int32_t skiq_read_rf_port_config_avail(uint8_t card, bool* p_fixed, bool* p_trx) {
+    std::lock_guard<std::mutex> lk(g.m);
+    if (!active(card)) return -ENODEV;
+    if (!p_fixed || !p_trx) return -EINVAL;
+    *p_fixed = true;
+    *p_trx = hasTrx(part());
+    return 0;
+}
+
+int32_t skiq_read_rf_port_config(uint8_t card, skiq_rf_port_config_t* p_config) {
+    std::lock_guard<std::mutex> lk(g.m);
+    if (!active(card)) return -ENODEV;
+    if (!p_config) return -EFAULT;
+    *p_config = g.config;
+    return 0;
+}
+
+int32_t skiq_write_rf_port_config(uint8_t card, skiq_rf_port_config_t config) {
+    std::lock_guard<std::mutex> lk(g.m);
+    if (!active(card) || !g.full) return -ENODEV;
+    const Part p = part();
+    if (config != skiq_rf_port_config_fixed && !(config == skiq_rf_port_config_trx && hasTrx(p))) return -ENOTSUP;
+    if (g.streaming) return -EBUSY;
+    if (config != g.config) {
+        g.config = config;
+        defaultPorts(p);
+    }
+    return 0;
+}
+
+int32_t skiq_write_rf_port_operation(uint8_t card, bool transmit) {
+    std::lock_guard<std::mutex> lk(g.m);
+    if (!active(card) || !g.full) return -ENODEV;
+    if (g.config != skiq_rf_port_config_trx) return -ENOTSUP;
+    g.transmit = transmit;
+    return 0;
+}
+
+int32_t skiq_read_rx_rf_ports_avail_for_hdl(uint8_t card, skiq_rx_hdl_t hdl, uint8_t* p_num_fixed_rf_ports,
+                                            skiq_rf_port_t* p_fixed_rf_port_list, uint8_t* p_num_trx_rf_ports,
+                                            skiq_rf_port_t* p_trx_rf_port_list) {
+    std::lock_guard<std::mutex> lk(g.m);
+    if (!active(card) || !g.full) return -ENODEV;
+    if (!p_num_fixed_rf_ports || !p_fixed_rf_port_list || !p_num_trx_rf_ports || !p_trx_rf_port_list) return -EFAULT;
+    if (!validHdl(hdl)) return -EDOM;
+    const Handle h = part().handles[hdl];
+    *p_num_fixed_rf_ports = (uint8_t)h.fixed.size();
+    std::copy(h.fixed.begin(), h.fixed.end(), p_fixed_rf_port_list);
+    *p_num_trx_rf_ports = (uint8_t)h.trx.size();
+    std::copy(h.trx.begin(), h.trx.end(), p_trx_rf_port_list);
+    return 0;
+}
+
+int32_t skiq_write_chan_mode(uint8_t card, skiq_chan_mode_t mode) {
+    std::lock_guard<std::mutex> lk(g.m);
+    if (!active(card) || !g.full) return -ENODEV;
+    if (mode == skiq_chan_mode_dual && part().handles.size() < 2) return -ENOTSUP;
+    g.chanMode = mode;
+    return 0;
+}
+
 int32_t skiq_write_rx_rf_port_for_hdl(uint8_t card, skiq_rx_hdl_t hdl, skiq_rf_port_t rf_port) {
     std::lock_guard<std::mutex> lk(g.m);
     if (!active(card) || !g.full) return -ENODEV;
-    if (hdl != skiq_rx_hdl_A1) return -EDOM;
-    if (rf_port != skiq_rf_port_J1 && rf_port != skiq_rf_port_J2) return -EINVAL;
-    g.port = rf_port;
+    if (!validHdl(hdl)) return -EDOM;
+    const Part p = part();
+    const auto& l = usablePorts(p, hdl);
+    if (std::find(l.begin(), l.end(), rf_port) == l.end()) return -EINVAL;
+    g.port[hdl] = rf_port;
     return 0;
 }
 
@@ -257,14 +378,15 @@ int32_t skiq_read_rx_rf_port_for_hdl(uint8_t card, skiq_rx_hdl_t hdl, skiq_rf_po
     std::lock_guard<std::mutex> lk(g.m);
     if (!active(card) || !g.full) return -ENODEV;
     if (!p_rf_port) return -EFAULT;
-    *p_rf_port = g.port;
+    if (!validHdl(hdl)) return -EDOM;
+    *p_rf_port = g.port[hdl];
     return 0;
 }
 
 int32_t skiq_write_rx_sample_rate_and_bandwidth(uint8_t card, skiq_rx_hdl_t hdl, uint32_t rate, uint32_t bandwidth) {
     std::lock_guard<std::mutex> lk(g.m);
     if (!active(card) || !g.full) return -ENODEV;
-    if (hdl != skiq_rx_hdl_A1) return -EDOM;
+    if (!validHdl(hdl)) return -EDOM;
     const Part p = part();
     if (rate < p.rateMin || rate > p.rateMax || bandwidth == 0) return -EINVAL;
     g.rate = rate;
@@ -286,7 +408,7 @@ int32_t skiq_read_rx_sample_rate_and_bandwidth(uint8_t card, skiq_rx_hdl_t hdl, 
 int32_t skiq_write_rx_LO_freq(uint8_t card, skiq_rx_hdl_t hdl, uint64_t freq) {
     std::lock_guard<std::mutex> lk(g.m);
     if (!active(card) || !g.full) return -ENODEV;
-    if (hdl != skiq_rx_hdl_A1) return -EDOM;
+    if (!validHdl(hdl)) return -EDOM;
     const Part p = part();
     if (freq < p.loMin || freq > p.loMax) return -EINVAL;
     g.lo = freq;
@@ -363,8 +485,11 @@ int32_t skiq_get_rx_transfer_timeout(const uint8_t card, int32_t* p_timeout_us) 
 int32_t skiq_start_rx_streaming(uint8_t card, skiq_rx_hdl_t hdl) {
     std::lock_guard<std::mutex> lk(g.m);
     if (!active(card) || !g.full) return -ENODEV;
-    if (hdl != skiq_rx_hdl_A1) return -EDOM;
+    if (!validHdl(hdl)) return -EDOM;
     if (g.streaming) return -EBUSY;
+    if ((hdl == skiq_rx_hdl_A2 || hdl == skiq_rx_hdl_B2) && g.chanMode != skiq_chan_mode_dual) return -EINVAL;
+    if (g.config == skiq_rf_port_config_trx && g.transmit) return -EINVAL;  // the TRX port is set to transmit
+    g.hdl = hdl;
     g.t0 = Clock::now();
     g.blocks = 0;
     g.tsBase = 1000;  // the counter does not start at 0
@@ -419,18 +544,19 @@ skiq_rx_status_t skiq_receive(uint8_t card, skiq_rx_hdl_t* p_hdl, skiq_rx_block_
     b->rf_timestamp = g.tsBase + g.blocks * kBlock;
     b->sys_timestamp = (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - g.t0).count();
     b->raw_meta = 0;
-    b->hdl = skiq_rx_hdl_A1;
+    b->hdl = g.hdl;
     const double amp = std::pow(10.0, (-60 + gainDb()) / 20);
     g.overloaded = amp > std::pow(10.0, -1 / 20.0);
     if (!usb()) b->overload = g.overloaded ? 1 : 0;
     const bool iq = g.order == skiq_iq_order_iq;
-    const std::vector<double> key = {(double)g.lo, (double)g.rate, amp, iq ? 1.0 : 0.0, (double)p.res};
+    const double toneHz = kToneHz + 10e3 * ((int)g.port[g.hdl] - (int)skiq_rf_port_J2);
+    const std::vector<double> key = {(double)g.lo, (double)g.rate, amp, iq ? 1.0 : 0.0, (double)p.res, toneHz};
     if (key != g.key) {
         g.key = key;
         const uint32_t n = kTableBlocks * kBlock;
         g.table.resize((size_t)n * 2);
         const double full = (double)(1 << (p.res - 1));
-        const double cycles = std::round((kToneHz - (double)g.lo) / g.rate * n);
+        const double cycles = std::round((toneHz - (double)g.lo) / g.rate * n);
         const double w = 2 * M_PI * cycles / n;
         std::normal_distribution<double> noise(0, std::pow(10.0, -80 / 20.0) / std::sqrt(2.0));
         auto adc = [&](double v) { return (int16_t)std::clamp(std::lround(v * full), (long)-full, (long)full - 1); };
@@ -444,7 +570,7 @@ skiq_rx_status_t skiq_receive(uint8_t card, skiq_rx_hdl_t* p_hdl, skiq_rx_block_
     const size_t at = (size_t)(g.blocks % kTableBlocks) * kBlock * 2;
     memcpy((void*)b->data, g.table.data() + at, (size_t)kBlock * 4);
     ++g.blocks;
-    *p_hdl = skiq_rx_hdl_A1;
+    *p_hdl = g.hdl;
     *pp_block = b;
     *p_data_len = (uint32_t)(SKIQ_RX_HEADER_SIZE_IN_BYTES + kBlock * 4);
     return skiq_rx_status_success;

@@ -127,6 +127,18 @@ int64_t skiqLostSamples(uint64_t expected, uint64_t got);
 // (Q,I -> I,Q), and the shift moves an N-bit sample (sign-extended in the low
 // bits) to the top, so full scale is 0 dBFS for every resolution.
 void skiqConvert(const int16_t* in, int16_t* out, size_t values, int resolution, bool swap);
+// A Sidekiq receive port (issue #85): the SDK's port name ("J3"), the receive
+// handle that it belongs to ("A2"), and whether it is a TRX port.
+struct SkiqPort {
+    std::string port, handle;
+    bool trx = false;
+};
+// The name in the port list, the --antenna value and sessions: "J3 (RX A2)",
+// "J1 (TRX A1)".
+std::string skiqPortLabel(const SkiqPort& p);
+// The index of the port with the name `name` (in any case), or -1. A port name
+// alone ("J1", as before issue #85) gives the first port with that name.
+int skiqFindPort(const std::vector<SkiqPort>& ports, const std::string& name);
 
 // One line of a UHD device search ("type=x300,addr=192.168.40.2,name=,serial=
 // 31A2B3C,product=X310") as a device list entry: network devices are selected

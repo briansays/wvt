@@ -49,7 +49,7 @@ their range. For more information about an option, refer to the page in the last
 | `--atten auto\|0\|10\|20\|30` | BB60: the attenuator (default `auto`) | [Live devices](live.md#bb60-settings) |
 | `--bb-amp auto\|0-3` | BB60: the amplifier setting (default `auto`). The generator option `--amp` sets the amplitude | [Live devices](live.md#bb60-settings) |
 | `--ext-ref` | BB60: lock to a 10 MHz reference on port 1. Sidekiq: use the external reference clock | [Live devices](live.md#bb60-settings) |
-| `--antenna NAME` | The USRP receive antenna, for example `RX2` or `TX/RX`, or the Sidekiq RF port, for example `J1` | [Live devices](live.md#usrp-options) |
+| `--antenna NAME` | The USRP receive antenna, for example `RX2` or `TX/RX`, or the Sidekiq RF port, for example `"J3 (RX A2)"` or `J1` | [Live devices](live.md#usrp-options) |
 | `--usrp-channel N` | The USRP channel for receive and transmit (default 0) | [Live devices](live.md#usrp-options) |
 | `--ref SRC` | The USRP clock and time reference: `internal`, `external` or `gpsdo` | [Live devices](live.md#usrp-options) |
 | `--bandwidth HZ` | The USRP analog bandwidth, the BB60 I/Q bandwidth, or the Sidekiq RF bandwidth (default: automatic) | [Live devices](live.md) |
