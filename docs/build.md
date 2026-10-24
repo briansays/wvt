@@ -178,6 +178,9 @@ from the Sidekiq SDK, version 4.14.0 or later. Refer to [Live devices](live.md#e
 - CMake runs `bin/sidekiq-config` of the SDK for the version, the include folder and the static
   link flags. It keeps the link flags in their order. An SDK without `sidekiq-config` is linked
   from `lib/libsidekiq__<cpu>.a` and the support libraries in `lib/support/`.
+- If the system has libusb, glib and tirpc (`libusb-1.0-0-dev`, `libglib2.0-dev`,
+  `libtirpc-dev`), CMake links them instead of the SDK copies in `lib/support/`. The SDK has
+  libusb 1.0.20, and librtlsdr and UHD need 1.0.21 or later.
 - The SDK is for Linux only. On macOS, the backend is not built.
 - Without this backend, the device list does not show Sidekiq cards.
 
