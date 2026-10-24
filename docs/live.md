@@ -170,6 +170,7 @@ wvt --device uhd:addr=192.168.10.2 -c 3.5G -r 122.88M --ref external            
 wvt --device bb -c 2.45G -r 20M --ref-level -30          # Signal Hound BB60 (the first one)
 wvt --device skiq -c 915M -r 10M --gain 40               # Epiq Sidekiq (the first free card)
 wvt --device skiq:8N3H0 -c 2.4G -r 50M --antenna J1      # Sidekiq with serial number 8N3H0, RF port J1
+wvt --device skiq -c 2.4G -r 50M --antenna "J3 (RX B1)"  # Sidekiq X4, port J3 of receive handle B1
 wvt --device sim -c 100M -r 2.4M                         # built-in simulator, no hardware
 ```
 
@@ -227,8 +228,12 @@ Sample rate
   for example *Sidekiq M.2 serial 8N3H0 (USB)*.
 
 RF port
-: The receive port. The list shows the fixed receive ports of the card after it opens. *Default*
-  keeps the card's default port.
+: The receive port, and the receive handle that it belongs to: for example *J3 (RX A2)*. The list
+  shows the ports of all the receive handles of the card (an X4 has A1, A2, B1 and B2) after the
+  card opens; before that, it shows *Start the card to list its ports*. *TRX* ports, for example
+  *J1 (TRX A1)*, can also transmit: wvt switches the card to its TRX port configuration and sets
+  the port to receive. *Default* receives on handle A1 on the card's default port. `--antenna` and
+  session files take the same names, or a port name alone (`J1`) for the first port with that name.
 
 Bandwidth
 : The RF bandwidth. 0 sets 80 % of the sample rate.

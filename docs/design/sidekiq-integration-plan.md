@@ -97,7 +97,7 @@ different between SDK versions. §9.1 gives the answers from SDK 4.26.0:
 | Driver id | `"skiq"`. Device args = serial number, or `#N` for card number N | Short. The serial number stays the same when the PCIe order changes |
 | Target cards | Cards attached to an x86-64 Linux host: M.2, M.2-2280 (Stretch), NV100, X2, X4. mPCIe if available | wvt runs on a desktop. The embedded products are out of scope |
 | Transport | `skiq_xport_type_auto`. PCIe gives full rate. USB (mPCIe and M.2) gives a low rate. Show the transport in the device description | One code path. The user sees why a rate is not possible |
-| Handle | `skiq_rx_hdl_A1` only | Single-channel view. Multi-channel is out of scope |
+| Handle | One handle at a time: the handle of the chosen RF port, A1 by default (issue #85). A2 and B2 use `skiq_chan_mode_dual` | Single-channel view. Multi-channel is out of scope |
 | Build switch | `WVT_WITH_SKIQ` = `AUTO` / `ON` / `OFF`. Find the SDK with `-DSIDEKIQ_SDK_DIR=...`, then env `SIDEKIQ_SDK_DIR`, then `~/sidekiq_sdk_current` | Same pattern as `WVT_WITH_BB`. Same search order as SoapySidekiq |
 | Library lookup | Run `bin/sidekiq-config --cflags --libs-static`. Keep the static link flags in their order on an imported target | The SDK has no pkg-config file. The link order of the static libraries is important |
 | Sample format | `SampleFormat::CI16`. Set `skiq_iq_order_iq` so the data is I then Q, as in a ci16 file | The ring, the recorder and SigMF already handle ci16 (USRP, BB60) |
@@ -105,7 +105,7 @@ different between SDK versions. §9.1 gives the answers from SDK 4.26.0:
 | Gain | `StreamConfig::gain` in dB. The backend maps dB to a gain index per part type (table in §2). `GainRange` shows the dB range of the card | The user sets dB, as for the other drivers |
 | AGC | `StreamConfig::agc` → `skiq_rx_gain_auto` if the card supports it. Else the Auto box is not shown | Same control as RTL-SDR and USRP |
 | Bandwidth | `StreamConfig::bandwidth`. 0 = 80 % of the sample rate | Same field as USRP and BB60 |
-| RF port | `StreamConfig::antenna` holds the port name from `skiq_rf_port_string`. Empty = card default | Reuse the USRP antenna field and combo |
+| RF port | `StreamConfig::antenna` holds the port and its handle, `"J3 (RX A2)"` or `"J1 (TRX A1)"`, from `skiq_read_rx_rf_ports_avail_for_hdl` for every handle (issue #85). A TRX port sets `skiq_rf_port_config_trx` and receive operation. Empty = A1 on the card default | Reuse the USRP antenna field and combo |
 | External reference | `StreamConfig::extRef` → `skiq_write_ref_clock_select(external)` | Same flag as the BB60 |
 | Receive thread | One thread. `skiq_receive` with a 100 ms timeout. Copy and shift each block into a buffer of about 20 ms, then call `data_` | Same block size as the BB60 backend. Fewer ring writes |
 | Lost samples | Check `rf_timestamp` continuity. A gap of N samples calls `gap_(N, "sample loss")`. `skiq_rx_status_error_overrun` calls `gap_(-1, "overrun")` | The ring and the recorder already count gaps |

@@ -2,6 +2,7 @@
 #include "device/sdr_tx.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 
 #include "common/log.h"
@@ -256,6 +257,21 @@ void skiqConvert(const int16_t* in, int16_t* out, size_t values, int resolution,
     } else {
         for (size_t i = 0; i < values; ++i) out[i] = (int16_t)(in[i] * scale);
     }
+}
+
+std::string skiqPortLabel(const SkiqPort& p) { return p.port + (p.trx ? " (TRX " : " (RX ") + p.handle + ")"; }
+
+int skiqFindPort(const std::vector<SkiqPort>& ports, const std::string& name) {
+    auto same = [](const std::string& a, const std::string& b) {
+        return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) {
+                   return std::tolower((unsigned char)x) == std::tolower((unsigned char)y);
+               });
+    };
+    for (size_t i = 0; i < ports.size(); ++i)
+        if (same(skiqPortLabel(ports[i]), name)) return (int)i;
+    for (size_t i = 0; i < ports.size(); ++i)
+        if (same(ports[i].port, name)) return (int)i;
+    return -1;
 }
 
 std::unique_ptr<SdrTx> openTx(const TxConfig& cfg, std::string& err) {

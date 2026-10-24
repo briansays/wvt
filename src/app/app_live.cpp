@@ -444,7 +444,9 @@ void App::drawDeviceToolbar() {
                 restart |= ImGui::Checkbox("##bbref", &devCfg_.extRef);
             } else if (devCfg_.driver == "skiq") {
                 // The port list comes from the card once it has been opened.
-                row("RF port", "The receive port of handle A1. Default: the card's default.");
+                row("RF port", "The receive port and the receive handle that it belongs to, for example\n"
+                               "J3 (RX A2). TRX ports also transmit; wvt sets them to receive.\n"
+                               "Default: handle A1 on the card's default port.");
                 if (ImGui::BeginCombo("##skport", antenna_[0] ? antenna_ : "Default")) {
                     if (ImGui::Selectable("Default", !antenna_[0])) {
                         antenna_[0] = 0;
@@ -455,6 +457,7 @@ void App::drawDeviceToolbar() {
                             snprintf(antenna_, sizeof antenna_, "%s", a.c_str());
                             restart = true;
                         }
+                    if (devCaps_.antennas.empty()) ImGui::TextDisabled("Start the card to list its ports");
                     ImGui::EndCombo();
                 }
                 row("Bandwidth", "RF bandwidth. 0 = 80 % of the sample rate.");

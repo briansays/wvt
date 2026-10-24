@@ -1,13 +1,14 @@
 // Sidekiq self-test (issue #4). Every build checks the logic that needs no
 // SDK: the gain in dB to a gain index, the lost-sample count from the RF
-// timestamps, the sample conversion (I/Q order and 12-bit scaling) and the
-// sample rate rule. With -DWVT_SKIQ_SIM=ON it also checks the backend against
+// timestamps, the sample conversion (I/Q order and 12-bit scaling), the
+// sample rate rule and the RF port names. With -DWVT_SKIQ_SIM=ON it also checks the backend against
 // the simulated card in tools/skiq_sim: the device list, open and its errors,
 // streaming in real time, the tone at the right frequency and level on a
 // 12-bit and a 16-bit card, a retune while streaming (no false gap from the
 // timestamp slip), the overload note, the USB (polled) transport, an overrun
 // with the exact count of lost samples, a host that stalls at 100 MS/s (its
-// loss counted), and a card removal. Exit status is nonzero on failure.
+// loss counted), a card removal, and the RF ports of every handle, fixed and
+// TRX (issue #85). Exit status is nonzero on failure.
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -73,6 +74,17 @@ void testRate() {
     check(checkSampleRate("skiq", 10e6, err, warn) && warn.empty(), "10 MS/s allowed");
     check(checkSampleRate("skiq", 245.76e6, err, warn) && !warn.empty(), "245.76 MS/s allowed, with a disk warning");
     check(!checkSampleRate("skiq", 300e6, err, warn), "300 MS/s refused: " + err);
+}
+
+void testPortNames() {
+    printf("RF port names\n");
+    const std::vector<SkiqPort> ports = {{"J1", "A1", false}, {"J2", "A1", false}, {"J1", "A1", true}, {"J3", "A2", false}};
+    check(skiqPortLabel(ports[3]) == "J3 (RX A2)" && skiqPortLabel(ports[2]) == "J1 (TRX A1)",
+          "labels: J3 (RX A2), J1 (TRX A1)");
+    check(skiqFindPort(ports, "J1 (TRX A1)") == 2 && skiqFindPort(ports, "j3 (rx a2)") == 3, "found by label, any case");
+    check(skiqFindPort(ports, "J1") == 0 && skiqFindPort(ports, "j3") == 3, "a port name alone: the first with that name");
+    check(skiqFindPort(ports, "J9") == -1 && skiqFindPort(ports, "J3 (RX B1)") == -1 && skiqFindPort(ports, "") == -1,
+          "unknown: -1");
 }
 
 #ifdef WVT_HAVE_SKIQ
@@ -151,9 +163,10 @@ void testOpen() {
     const GainRange g = d->gainRange();
     check(g.min == 0 && g.max == 76 && g.step == 1 && g.agc, "gain 0-76 dB in 1 dB steps, with AGC");
     const DeviceCaps caps = d->caps();
-    check(caps.product == "M.2" && !caps.usb && caps.antennas.size() == 2 && caps.antennas[1] == "J2" &&
-              caps.rate.min == 233e3 && caps.rate.max == 61.44e6,
-          "caps: M.2, PCIe, ports J1 and J2, 233 kS/s to 61.44 MS/s");
+    check(caps.product == "M.2" && !caps.usb && caps.rate.min == 233e3 && caps.rate.max == 61.44e6,
+          "caps: M.2, PCIe, 233 kS/s to 61.44 MS/s");
+    const std::vector<std::string> m2Ports = {"J1 (RX A1)", "J2 (RX A1)", "J1 (TRX A1)"};
+    check(caps.antennas == m2Ports, "ports: J1 (RX A1), J2 (RX A1), J1 (TRX A1)");
     std::string e2;
     check(!openDevice(c, e2) && e2.find("open already") != std::string::npos, "a second open is refused: " + e2);
     found = false;
@@ -184,7 +197,8 @@ void testOpen() {
     check(!openDevice(c, err) && err.find("cannot tune") != std::string::npos, "10 MHz on an M.2: " + err);
     c.fc = 100e6;
     c.antenna = "J9";
-    check(!openDevice(c, err) && err.find("ports: J1, J2") != std::string::npos, "port J9: " + err);
+    check(!openDevice(c, err) && err.find("ports: J1 (RX A1), J2 (RX A1), J1 (TRX A1)") != std::string::npos,
+          "port J9: " + err);
     c.antenna = "j1";
     d = openDevice(c, err);
     check(d != nullptr, "port j1 (any case)" + (d ? "" : ": " + err));
@@ -329,6 +343,55 @@ void testX4() {
     setEnv("WVT_SKIQ_SIM_PART", nullptr);
 }
 
+// Opens with `port`, streams, and checks that the tone has the simulator's
+// offset for that port: 10 kHz per port number from J2 (+200 kHz).
+void checkPort(StreamConfig c, const std::string& port, double offsetHz) {
+    c.antenna = port;
+    std::string err;
+    auto d = openDevice(c, err);
+    if (!d) {
+        check(false, "open with port " + port + ": " + err);
+        return;
+    }
+    Capture cap;
+    const bool ok = cap.start(*d, err);
+    sleepS(0.3);
+    d->stop();
+    double off, db;
+    tone(cap.take(), 8192, c.rate, off, db);
+    char b[160];
+    snprintf(b, sizeof b, "port %s: streams, tone at %+.1f kHz (%+.0f expected)%s", port.empty() ? "(default)" : port.c_str(), off / 1e3,
+             offsetHz / 1e3, ok ? "" : (" - " + err).c_str());
+    check(ok && std::fabs(off - offsetHz) < 1e3, b);
+}
+
+void testPorts() {
+    printf("RF ports (issue #85)\n");
+    StreamConfig c = simCfg();
+    // M.2: handle A1, the fixed ports J1 and J2 (default) and the TRX port J1.
+    checkPort(c, "", 200e3);
+    checkPort(c, "J1 (RX A1)", 190e3);
+    checkPort(c, "J1 (TRX A1)", 190e3);
+    checkPort(c, "J2", 200e3);  // a port name alone, as in sessions before issue #85
+    checkPort(c, "j1", 190e3);  // the first J1: the fixed one
+
+    // X4: the handles A1, A2, B1 and B2, listed per handle only.
+    setEnv("WVT_SKIQ_SIM_PART", "x4");
+    std::string err;
+    auto d = openDevice(c, err);
+    const std::vector<std::string> x4Ports = {"J1 (RX A1)", "J2 (RX A2)", "J3 (RX B1)", "J4 (RX B2)"};
+    check(d && d->caps().antennas == x4Ports, "X4 ports: J1 (RX A1), J2 (RX A2), J3 (RX B1), J4 (RX B2)");
+    d.reset();
+    checkPort(c, "", 190e3);
+    checkPort(c, "J2 (RX A2)", 200e3);  // A2 needs the dual channel mode
+    checkPort(c, "J3 (RX B1)", 210e3);
+    checkPort(c, "j4 (rx b2)", 220e3);
+    c.antenna = "J5";
+    check(!openDevice(c, err) && err.find("(ports: J1 (RX A1), J2 (RX A2), J3 (RX B1), J4 (RX B2))") != std::string::npos,
+          "X4 port J5: " + err);
+    setEnv("WVT_SKIQ_SIM_PART", nullptr);
+}
+
 void testTransportAndFaults() {
     printf("USB transport, overrun, removal\n");
     setEnv("WVT_SKIQ_SIM_USB", "1");
@@ -388,10 +451,12 @@ int main() {
     testTimestamps();
     testConvert();
     testRate();
+    testPortNames();
 #ifdef WVT_HAVE_SKIQ
     testOpen();
     testStream();
     testX4();
+    testPorts();
     testTransportAndFaults();
 #else
     printf("(the backend checks need -DWVT_SKIQ_SIM=ON)\n");
