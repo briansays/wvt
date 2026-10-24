@@ -1,0 +1,624 @@
+<!doctype html>
+<html class="no-js" lang="en" data-content_root="./">
+  <head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="index" title="Index" href="genindex.html"><link rel="search" title="Search" href="search.html"><link rel="next" title="Load a segment" href="segments.html"><link rel="prev" title="Getting started" href="getting-started.html">
+
+    <!-- Generated with Sphinx 8.2.3 and Furo 2025.12.19 -->
+        <title>The file viewer - wvt</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=d111a655" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/furo.css?v=7bdb33bb" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/furo-extensions.css?v=8dab3a3b" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f2f2f2;
+  --color-code-foreground: #1e1e1e;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-with-moon" viewBox="0 0 24 24">
+    <title>Auto light/dark, in light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path style="opacity: 50%" d="M 5.411 14.504 C 5.471 14.504 5.532 14.504 5.591 14.504 C 3.639 16.319 4.383 19.569 6.931 20.352 C 7.693 20.586 8.512 20.551 9.25 20.252 C 8.023 23.207 4.056 23.725 2.11 21.184 C 0.166 18.642 1.702 14.949 4.874 14.536 C 5.051 14.512 5.231 14.5 5.411 14.5 L 5.411 14.504 Z"/>
+      <line x1="14.5" y1="3.25" x2="14.5" y2="1.25"/>
+      <line x1="14.5" y1="15.85" x2="14.5" y2="17.85"/>
+      <line x1="10.044" y1="5.094" x2="8.63" y2="3.68"/>
+      <line x1="19" y1="14.05" x2="20.414" y2="15.464"/>
+      <line x1="8.2" y1="9.55" x2="6.2" y2="9.55"/>
+      <line x1="20.8" y1="9.55" x2="22.8" y2="9.55"/>
+      <line x1="10.044" y1="14.006" x2="8.63" y2="15.42"/>
+      <line x1="19" y1="5.05" x2="20.414" y2="3.636"/>
+      <circle cx="14.5" cy="9.55" r="3.6"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon-with-sun" viewBox="0 0 24 24">
+    <title>Auto light/dark, in dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path d="M 8.282 7.007 C 8.385 7.007 8.494 7.007 8.595 7.007 C 5.18 10.184 6.481 15.869 10.942 17.24 C 12.275 17.648 13.706 17.589 15 17.066 C 12.851 22.236 5.91 23.143 2.505 18.696 C -0.897 14.249 1.791 7.786 7.342 7.063 C 7.652 7.021 7.965 7 8.282 7 L 8.282 7.007 Z"/>
+      <line style="opacity: 50%" x1="18" y1="3.705" x2="18" y2="2.5"/>
+      <line style="opacity: 50%" x1="18" y1="11.295" x2="18" y2="12.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="4.816" x2="14.464" y2="3.964"/>
+      <line style="opacity: 50%" x1="20.711" y1="10.212" x2="21.563" y2="11.063"/>
+      <line style="opacity: 50%" x1="14.205" y1="7.5" x2="13.001" y2="7.5"/>
+      <line style="opacity: 50%" x1="21.795" y1="7.5" x2="23" y2="7.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="10.184" x2="14.464" y2="11.036"/>
+      <line style="opacity: 50%" x1="20.711" y1="4.789" x2="21.563" y2="3.937"/>
+      <circle style="opacity: 50%" cx="18" cy="7.5" r="2.169"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-pencil" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-pencil-code">
+      <path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" />
+      <path d="M13.5 6.5l4 4" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+  <symbol id="svg-eye" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-eye-code">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" />
+      <path
+        d="M11.11 17.958c-3.209 -.307 -5.91 -2.293 -8.11 -5.958c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6c-.21 .352 -.427 .688 -.647 1.008" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle site navigation sidebar">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc" aria-label="Toggle table of contents sidebar">
+<label class="overlay sidebar-overlay" for="__navigation"></label>
+<label class="overlay toc-overlay" for="__toc"></label>
+
+<a class="skip-to-content muted-link" href="#furo-main-content">Skip to content</a>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <span class="icon"><svg><use href="#svg-menu"></use></svg></span>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="index.html"><div class="brand">wvt</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+          <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+          <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon" for="__toc">
+        <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand" href="index.html">
+  
+  <span class="sidebar-brand-text">wvt</span>
+  
+</a><form class="sidebar-search-container" method="get" action="search.html" role="search">
+  <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <p class="caption" role="heading"><span class="caption-text">User guide</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="getting-started.html">Getting started</a></li>
+<li class="toctree-l1 current current-page"><a class="current reference internal" href="#">The file viewer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="segments.html">Load a segment</a></li>
+<li class="toctree-l1"><a class="reference internal" href="export.html">Export a region</a></li>
+<li class="toctree-l1"><a class="reference internal" href="snapshots.html">Plot snapshots</a></li>
+<li class="toctree-l1"><a class="reference internal" href="sessions.html">File sessions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="live.html">Live devices</a></li>
+<li class="toctree-l1"><a class="reference internal" href="siggen.html">Signal generator</a></li>
+<li class="toctree-l1"><a class="reference internal" href="audio.html">Audio</a></li>
+<li class="toctree-l1"><a class="reference internal" href="gpu.html">GPU processing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="logging.html">Logging</a></li>
+<li class="toctree-l1"><a class="reference internal" href="controls.html">Mouse and keyboard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cli.html">Command-line reference</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="build.html">Build reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="signal-processing.html">Signal processing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="self-checks.html">Self-checks and test signals</a></li>
+<li class="toctree-l1"><a class="reference internal" href="source-layout.html">Source layout</a></li>
+<li class="toctree-l1"><a class="reference internal" href="writing-docs.html">Writing the documentation</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Design records</span></p>
+<ul>
+<li class="toctree-l1 has-children"><a class="reference internal" href="design/index.html">Design records</a><input aria-label="Toggle navigation of Design records" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l2"><a class="reference internal" href="design/audio-demod-plan.html">Plan: Audio demodulation and playback</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/verbose-logging-plan.html">Plan: Verbose console logging and a timestamped log file</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/time-segment-plan.html">Plan: open a time segment of a file (issue #16)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/cuda-gpu-plan.html">Plan: CUDA GPU acceleration (issue #3)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/region-export-plan.html">Plan: export a region of a file (issue #18)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/apple-gpu-plan.html">Plan: Apple GPU support (issue #21)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/ui-cleanup-plan.html">Plan: labels outside the plots and a tidier UI (issues #12 and #19)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/siggen-sweep-plan.html">Signal generator: frequency and amplitude sweep (issue #28)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/siggen-chain-plan.html">Signal generator: chain playback (issue #27)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/plot-snapshot-plan.html">Plan: snapshot button for all graphs (issue #13)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/usrp-models-plan.html">Plan: support other Ettus USRPs (issue #11)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/bb60-integration-plan.html">Plan: Signal Hound BB60 as a wvt live device</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/sidekiq-integration-plan.html">Plan: Epiq Solutions Sidekiq as a wvt live device</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/point-measurement-plan.html">Plan: point-to-point measurements on the plots (issue #80)</a></li>
+</ul>
+</li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="view-this-page">
+  <a class="muted-link" href="_sources/viewer.md.txt" title="View this page">
+    <svg><use href="#svg-eye"></use></svg>
+    <span class="visually-hidden">View this page</span>
+  </a>
+</div>
+<div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+              <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+              <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon" for="__toc">
+            <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+          </label>
+        </div>
+        <article role="main" id="furo-main-content">
+          <section id="the-file-viewer">
+<h1>The file viewer<a class="headerlink" href="#the-file-viewer" title="Link to this heading">¶</a></h1>
+<p>The file viewer shows a raw IQ recording. This page tells you how wvt opens a file, and what each
+area of the window shows.</p>
+<section id="open-a-file">
+<h2>Open a file<a class="headerlink" href="#open-a-file" title="Link to this heading">¶</a></h2>
+<p>Give the file on the command line, or type its path in the file row and click <strong>Open</strong>:</p>
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span>wvt<span class="w"> </span>recording.sigmf-meta
+</pre></div>
+</div>
+<p>To open a saved session (the recording and the view, plots and channel that you saved), open the
+session file in the same way. Refer to <a class="reference internal" href="sessions.html"><span class="std std-doc">File sessions</span></a>.</p>
+<section id="sample-formats">
+<h3>Sample formats<a class="headerlink" href="#sample-formats" title="Link to this heading">¶</a></h3>
+<p>wvt reads these sample formats. Add <code class="docutils literal notranslate"><span class="pre">_be</span></code> for big-endian samples, for example <code class="docutils literal notranslate"><span class="pre">ci16_be</span></code>.</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Format</p></th>
+<th class="head"><p>Sample</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">cf32</span></code></p></td>
+<td><p>Complex 32-bit float</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">cf64</span></code></p></td>
+<td><p>Complex 64-bit float</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">ci32</span></code></p></td>
+<td><p>Complex 32-bit signed integer</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">ci16</span></code></p></td>
+<td><p>Complex 16-bit signed integer</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">ci8</span></code></p></td>
+<td><p>Complex 8-bit signed integer</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">cu8</span></code></p></td>
+<td><p>Complex 8-bit unsigned integer (RTL-SDR)</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="how-wvt-finds-the-file-settings">
+<h3>How wvt finds the file settings<a class="headerlink" href="#how-wvt-finds-the-file-settings" title="Link to this heading">¶</a></h3>
+<p>wvt gets the sample format, the sample rate and the center frequency from these sources, in this
+order:</p>
+<ol class="arabic simple">
+<li><p><strong>SigMF</strong> <code class="docutils literal notranslate"><span class="pre">.sigmf-meta</span></code> and <code class="docutils literal notranslate"><span class="pre">.sigmf-data</span></code> files.</p></li>
+<li><p><strong>gqrx</strong> file names, for example <code class="docutils literal notranslate"><span class="pre">gqrx_YYYYMMDD_HHMMSS_&lt;fc&gt;_&lt;rate&gt;_fc.raw</span></code>.</p></li>
+<li><p>Values in the file name, for example <code class="docutils literal notranslate"><span class="pre">2.4MSps</span></code> or <code class="docutils literal notranslate"><span class="pre">915MHz</span></code>.</p></li>
+<li><p>The file extension, for example <code class="docutils literal notranslate"><span class="pre">.cu8</span></code>, <code class="docutils literal notranslate"><span class="pre">.cs8</span></code>, <code class="docutils literal notranslate"><span class="pre">.cs16</span></code>, <code class="docutils literal notranslate"><span class="pre">.cf32</span></code>, <code class="docutils literal notranslate"><span class="pre">.cfile</span></code> or <code class="docutils literal notranslate"><span class="pre">.raw</span></code>.</p></li>
+</ol>
+<p>wvt reads the SigMF <code class="docutils literal notranslate"><span class="pre">core:datatype</span></code> from <code class="docutils literal notranslate"><span class="pre">global</span></code>, and <code class="docutils literal notranslate"><span class="pre">core:sample_rate</span></code>, <code class="docutils literal notranslate"><span class="pre">core:frequency</span></code> and
+<code class="docutils literal notranslate"><span class="pre">core:datetime</span></code> from <code class="docutils literal notranslate"><span class="pre">global</span></code> or the first capture. The datatype must be a complex type in the
+table above (<code class="docutils literal notranslate"><span class="pre">_le</span></code> or <code class="docutils literal notranslate"><span class="pre">_be</span></code>). wvt does not open a SigMF file with a different datatype (for
+example <code class="docutils literal notranslate"><span class="pre">ri16_le</span></code>, real samples), because it would show noise. To read the file with a
+different format, give <code class="docutils literal notranslate"><span class="pre">-f</span></code>. If the metadata has no datatype, wvt reads the file as <code class="docutils literal notranslate"><span class="pre">cf32</span></code> and
+shows a warning.</p>
+<p>The command-line options override all the values that wvt finds:</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Option</p></th>
+<th class="head"><p>Value</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">-f</span></code>, <code class="docutils literal notranslate"><span class="pre">--format</span> <span class="pre">FMT</span></code></p></td>
+<td><p>The sample format</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">-r</span></code>, <code class="docutils literal notranslate"><span class="pre">--rate</span> <span class="pre">HZ</span></code></p></td>
+<td><p>The sample rate. SI suffixes are permitted, for example <code class="docutils literal notranslate"><span class="pre">2.4M</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">-c</span></code>, <code class="docutils literal notranslate"><span class="pre">--fc</span> <span class="pre">HZ</span></code></p></td>
+<td><p>The center frequency</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">-H</span></code>, <code class="docutils literal notranslate"><span class="pre">--header</span> <span class="pre">BYTES</span></code></p></td>
+<td><p>The number of bytes to skip at the start of the file</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--swap-iq</span></code></p></td>
+<td><p>Swap I and Q</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>While the file is open, you can change each value in the file row. The <strong>Format</strong> drop-down has
+the sample format, the I/Q swap, the byte order and the header size.</p>
+</section>
+<section id="large-files">
+<h3>Large files<a class="headerlink" href="#large-files" title="Link to this heading">¶</a></h3>
+<p>wvt memory-maps the file. Thus wvt can open files that are larger than the memory of the
+computer. For files that are very large, load a part of the file only. Refer to
+<a class="reference internal" href="segments.html"><span class="std std-doc">Load a segment</span></a>.</p>
+<p>wvt does not support a file that a different program is still writing. If the file gets shorter
+while it is open (for example, a recorder that starts the file again), the part after the new
+end shows as zeros, and the status bar shows a warning. To see the new length, open the file
+again.</p>
+</section>
+</section>
+<section id="screen-layout">
+<h2>Screen layout<a class="headerlink" href="#screen-layout" title="Link to this heading">¶</a></h2>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Area</p></th>
+<th class="head"><p>Contents</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><strong>Menu bar</strong></p></td>
+<td><p>The <strong>File</strong>, <strong>View</strong>, <strong>Tools</strong> and <strong>Help</strong> menus. Refer to <a class="reference internal" href="#menus">Menus</a>. On the right: <strong>TX ON</strong>, <strong>REC</strong>, a running audio or export, and the <strong>Source</strong> (File or Device)</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>File row</strong></p></td>
+<td><p>The file path, <strong>Format</strong>, sample rate, center frequency, segment (start and end time to load), and file size</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Navigation row</strong></p></td>
+<td><p>Buttons to go to the start or the end, and to move back or forward by 10 % or by one page. Zoom in, zoom out and zoom all. The span presets, the span and the start time. <strong>Go to</strong> has a sample index, <em>Add bookmark</em> and the bookmarks</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Overview strip</strong></p></td>
+<td><p>The power over the full file or segment. The white box is the current view. Drag the box to move the view. Drag its edges to change the view size. Click a different point to go there. You can hide the strip in the <strong>View</strong> menu. wvt also hides it when the window is short</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Scrollbar</strong></p></td>
+<td><p>Moves the view through the file. Drag the thumb, click the track to move one page, or turn the mouse wheel</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Left</strong></p></td>
+<td><p>The waterfall settings: FFT size, window, dB range or auto. The ⚙ button has the overlap, averaging, rows, columns, colormap and peak hold. Below the settings are the spectrum of the current view, the waterfall, and its color bar</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Right</strong></p></td>
+<td><p>The channel settings: on or off, offset, bandwidth, and <em>to peak</em>. The ⚙ button has the taps, decimation, squelch, maximum points and plot height. Below the settings are the I/Q, AM, FM and PM plots, which you can scroll. Each plot header has a show checkbox, a ⚙ button for the plot options, and the measurement readout. Thus no text covers the traces</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Status bar</strong></p></td>
+<td><p>The <strong>Snapshot…</strong> button (refer to <a class="reference internal" href="snapshots.html"><span class="std std-doc">Plot snapshots</span></a>). The values at the pointer: time, sample number, frequency, dB, AM, FM and PM. The marker ΔT, 1/ΔT and ΔF, and the point markers (P2 minus P1). <code class="docutils literal notranslate"><span class="pre">GPU</span> <span class="pre">&lt;model&gt;</span></code> or <code class="docutils literal notranslate"><span class="pre">CPU</span></code>, the renderer, and <code class="docutils literal notranslate"><span class="pre">computing...</span> <span class="pre">NN%</span></code> while wvt calculates the plots (the percentage done)</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="menus">
+<h2>Menus<a class="headerlink" href="#menus" title="Link to this heading">¶</a></h2>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Menu</p></th>
+<th class="head"><p>Items</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><strong>File</strong></p></td>
+<td><p>Open file, export region, save plot snapshots, save file session (refer to <a class="reference internal" href="sessions.html"><span class="std std-doc">File sessions</span></a>), quit</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>View</strong></p></td>
+<td><p>Time markers, frequency markers, point markers, relative frequency, peak hold, the overview strip, the time plots to show, show everything</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Tools</strong></p></td>
+<td><p>Signal generator, audio, use the GPU</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Help</strong></p></td>
+<td><p>Keyboard and mouse, about wvt</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="linked-views">
+<h2>Linked views<a class="headerlink" href="#linked-views" title="Link to this heading">¶</a></h2>
+<ul class="simple">
+<li><p>All time axes have one range: the vertical axis of the waterfall and the horizontal axis of each
+plot on the right.</p></li>
+<li><p>The spectrum and the waterfall have one frequency range.</p></li>
+<li><p>When the pointer is on a plot, all the other plots show a crosshair at the same time or
+frequency.</p></li>
+<li><p>The time markers (T1 and T2) show in all plots. You can drag them in each plot. Press <code class="docutils literal notranslate"><span class="pre">Z</span></code> to
+zoom to the span between them.</p></li>
+</ul>
+</section>
+<section id="the-spectrum-of-the-view">
+<h2>The spectrum of the view<a class="headerlink" href="#the-spectrum-of-the-view" title="Link to this heading">¶</a></h2>
+<p>The spectrum above the waterfall shows the average and the peak hold of all the waterfall rows in
+the view. When you pan or zoom, wvt calculates the spectrum again. For the calculation, refer to
+<a class="reference internal" href="signal-processing.html"><span class="std std-doc">Signal processing</span></a>.</p>
+</section>
+<section id="the-channel-filter-and-the-time-plots">
+<h2>The channel filter and the time plots<a class="headerlink" href="#the-channel-filter-and-the-time-plots" title="Link to this heading">¶</a></h2>
+<p>The channel filter selects one signal for the I/Q, AM, FM and PM plots.</p>
+<ul class="simple">
+<li><p>To enable the filter, press <code class="docutils literal notranslate"><span class="pre">C</span></code>, or tick <strong>Channel</strong> in the channel settings.</p></li>
+<li><p>To tune the channel, Ctrl+click the spectrum or the waterfall.</p></li>
+<li><p>To move the channel, drag its center line (cyan). To change the bandwidth, drag an edge line.</p></li>
+<li><p><strong>To peak</strong> puts the channel on the strongest signal in the visible spectrum.</p></li>
+</ul>
+<p>To start with the filter on, use <code class="docutils literal notranslate"><span class="pre">--chan</span> <span class="pre">OFFSET:BW</span></code>, for example <code class="docutils literal notranslate"><span class="pre">--chan</span> <span class="pre">300k:150k</span></code>. To start with
+a time range, use <code class="docutils literal notranslate"><span class="pre">--view</span> <span class="pre">T0:T1</span></code>, for example <code class="docutils literal notranslate"><span class="pre">--view</span> <span class="pre">0.5:0.52</span></code>.</p>
+<p>Each time plot has options. To see them, click its ⚙ button, or right-click the plot. For the
+calculations, refer to <a class="reference internal" href="signal-processing.html"><span class="std std-doc">Signal processing</span></a>.</p>
+</section>
+<section id="bookmarks-and-markers">
+<h2>Bookmarks and markers<a class="headerlink" href="#bookmarks-and-markers" title="Link to this heading">¶</a></h2>
+<ul class="simple">
+<li><p>Press <code class="docutils literal notranslate"><span class="pre">B</span></code> to add a bookmark at the view. <strong>Go to</strong> shows the bookmarks.</p></li>
+<li><p>Press <code class="docutils literal notranslate"><span class="pre">T</span></code> to show or hide the time markers. Press <code class="docutils literal notranslate"><span class="pre">F</span></code> to show or hide the frequency markers.</p></li>
+<li><p>The status bar shows the time between the markers (ΔT), its inverse (1/ΔT) and the frequency
+difference (ΔF).</p></li>
+</ul>
+</section>
+<section id="point-measurements">
+<h2>Point measurements<a class="headerlink" href="#point-measurements" title="Link to this heading">¶</a></h2>
+<p>Two point markers, P1 and P2, measure between two points of the signal. For example, the time
+between two pulse edges, the time between two pulses, or the change in frequency in a pulse.</p>
+<ul class="simple">
+<li><p>To put a marker at the pointer, press <code class="docutils literal notranslate"><span class="pre">M</span></code> or Alt+click a plot: the waterfall, the spectrum, I/Q,
+AM, FM or PM. The first marker is P1 and the second is P2. After that, each new marker replaces the
+older of the two.</p></li>
+<li><p>On a time plot (I/Q, AM, FM, PM), the marker goes on the trace. If a peak or a valley is less than
+8 pixels to the side and nearer to the pointer, the marker goes there. Thus, put the pointer a
+little above the top of a pulse to put the marker on the top. On the I/Q plot, the marker goes on
+the trace (I or Q) that is nearer to the pointer.</p></li>
+<li><p>On the waterfall, the marker keeps the time and the frequency of the pointer. On the spectrum, it
+keeps the frequency.</p></li>
+<li><p>To move a marker, drag it. On a time plot, it moves along the trace.</p></li>
+<li><p>To remove the markers, press <code class="docutils literal notranslate"><span class="pre">Shift+M</span></code>, or use <strong>View → Clear point markers</strong>. <strong>View → Point
+markers</strong> shows or hides them.</p></li>
+</ul>
+<p>The status bar shows P2 minus P1 for each value that the two markers have in common. The label at
+P2 shows the same values:</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>P1 and P2 on</p></th>
+<th class="head"><p>Differences</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>The same time plot</p></td>
+<td><p>dT (with 1/dT and the number of samples) and the value (for example dAM, dFM in Hz, dPM in rad or deg)</p></td>
+</tr>
+<tr class="row-odd"><td><p>I and Q</p></td>
+<td><p>dT and the amplitude (dA)</p></td>
+</tr>
+<tr class="row-even"><td><p>Two different time plots, or a time plot and the waterfall</p></td>
+<td><p>dT</p></td>
+</tr>
+<tr class="row-odd"><td><p>The waterfall</p></td>
+<td><p>dT, dF and the power (dP, dB)</p></td>
+</tr>
+<tr class="row-even"><td><p>The spectrum</p></td>
+<td><p>dF and the power (dP, dB)</p></td>
+</tr>
+<tr class="row-odd"><td><p>The spectrum and the waterfall</p></td>
+<td><p>dF</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The time axis and the frequency axis are shared by the plots, so dT and dF are correct between two
+plots. The other plots show each marker as a faint line at its time or frequency.</p>
+<p>A value comes from the plotted data. When a marker on a time plot goes out of the view, wvt keeps
+its last value until a plot setting changes. A value that wvt does not know shows as <code class="docutils literal notranslate"><span class="pre">?</span></code>: zoom or
+pan to the marker. In a sparse view (refer to the channel options), zoom in for exact values.</p>
+<p>Point markers are not available in live mode.</p>
+</section>
+</section>
+
+        </article>
+      </div>
+      <footer>
+        
+        <div class="related-pages">
+          <a class="next-page" href="segments.html">
+              <div class="page-info">
+                <div class="context">
+                  <span>Next</span>
+                </div>
+                <div class="title">Load a segment</div>
+              </div>
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+            </a>
+          <a class="prev-page" href="getting-started.html">
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+              <div class="page-info">
+                <div class="context">
+                  <span>Previous</span>
+                </div>
+                
+                <div class="title">Getting started</div>
+                
+              </div>
+            </a>
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                Copyright &#169; 2026, Brian Collette
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+            
+          </div>
+          <div class="right-details">
+            
+          </div>
+        </div>
+        
+      </footer>
+    </div>
+    <aside class="toc-drawer">
+      
+      
+      <div class="toc-sticky toc-scroll">
+        <div class="toc-title-container">
+          <span class="toc-title">
+            On this page
+          </span>
+        </div>
+        <div class="toc-tree-container">
+          <div class="toc-tree">
+            <ul>
+<li><a class="reference internal" href="#">The file viewer</a><ul>
+<li><a class="reference internal" href="#open-a-file">Open a file</a><ul>
+<li><a class="reference internal" href="#sample-formats">Sample formats</a></li>
+<li><a class="reference internal" href="#how-wvt-finds-the-file-settings">How wvt finds the file settings</a></li>
+<li><a class="reference internal" href="#large-files">Large files</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#screen-layout">Screen layout</a></li>
+<li><a class="reference internal" href="#menus">Menus</a></li>
+<li><a class="reference internal" href="#linked-views">Linked views</a></li>
+<li><a class="reference internal" href="#the-spectrum-of-the-view">The spectrum of the view</a></li>
+<li><a class="reference internal" href="#the-channel-filter-and-the-time-plots">The channel filter and the time plots</a></li>
+<li><a class="reference internal" href="#bookmarks-and-markers">Bookmarks and markers</a></li>
+<li><a class="reference internal" href="#point-measurements">Point measurements</a></li>
+</ul>
+</li>
+</ul>
+
+          </div>
+        </div>
+      </div>
+      
+      
+    </aside>
+  </div>
+</div><script src="_static/documentation_options.js?v=5929fcd5"></script>
+    <script src="_static/doctools.js?v=9bcbadda"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/scripts/furo.js?v=46bd48cc"></script>
+    </body>
+</html>

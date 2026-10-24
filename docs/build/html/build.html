@@ -1,0 +1,892 @@
+<!doctype html>
+<html class="no-js" lang="en" data-content_root="./">
+  <head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="index" title="Index" href="genindex.html"><link rel="search" title="Search" href="search.html"><link rel="next" title="Signal processing" href="signal-processing.html"><link rel="prev" title="Command-line reference" href="cli.html">
+
+    <!-- Generated with Sphinx 8.2.3 and Furo 2025.12.19 -->
+        <title>Build reference - wvt</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=d111a655" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/furo.css?v=7bdb33bb" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/furo-extensions.css?v=8dab3a3b" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f2f2f2;
+  --color-code-foreground: #1e1e1e;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-with-moon" viewBox="0 0 24 24">
+    <title>Auto light/dark, in light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path style="opacity: 50%" d="M 5.411 14.504 C 5.471 14.504 5.532 14.504 5.591 14.504 C 3.639 16.319 4.383 19.569 6.931 20.352 C 7.693 20.586 8.512 20.551 9.25 20.252 C 8.023 23.207 4.056 23.725 2.11 21.184 C 0.166 18.642 1.702 14.949 4.874 14.536 C 5.051 14.512 5.231 14.5 5.411 14.5 L 5.411 14.504 Z"/>
+      <line x1="14.5" y1="3.25" x2="14.5" y2="1.25"/>
+      <line x1="14.5" y1="15.85" x2="14.5" y2="17.85"/>
+      <line x1="10.044" y1="5.094" x2="8.63" y2="3.68"/>
+      <line x1="19" y1="14.05" x2="20.414" y2="15.464"/>
+      <line x1="8.2" y1="9.55" x2="6.2" y2="9.55"/>
+      <line x1="20.8" y1="9.55" x2="22.8" y2="9.55"/>
+      <line x1="10.044" y1="14.006" x2="8.63" y2="15.42"/>
+      <line x1="19" y1="5.05" x2="20.414" y2="3.636"/>
+      <circle cx="14.5" cy="9.55" r="3.6"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon-with-sun" viewBox="0 0 24 24">
+    <title>Auto light/dark, in dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path d="M 8.282 7.007 C 8.385 7.007 8.494 7.007 8.595 7.007 C 5.18 10.184 6.481 15.869 10.942 17.24 C 12.275 17.648 13.706 17.589 15 17.066 C 12.851 22.236 5.91 23.143 2.505 18.696 C -0.897 14.249 1.791 7.786 7.342 7.063 C 7.652 7.021 7.965 7 8.282 7 L 8.282 7.007 Z"/>
+      <line style="opacity: 50%" x1="18" y1="3.705" x2="18" y2="2.5"/>
+      <line style="opacity: 50%" x1="18" y1="11.295" x2="18" y2="12.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="4.816" x2="14.464" y2="3.964"/>
+      <line style="opacity: 50%" x1="20.711" y1="10.212" x2="21.563" y2="11.063"/>
+      <line style="opacity: 50%" x1="14.205" y1="7.5" x2="13.001" y2="7.5"/>
+      <line style="opacity: 50%" x1="21.795" y1="7.5" x2="23" y2="7.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="10.184" x2="14.464" y2="11.036"/>
+      <line style="opacity: 50%" x1="20.711" y1="4.789" x2="21.563" y2="3.937"/>
+      <circle style="opacity: 50%" cx="18" cy="7.5" r="2.169"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-pencil" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-pencil-code">
+      <path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" />
+      <path d="M13.5 6.5l4 4" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+  <symbol id="svg-eye" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-eye-code">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" />
+      <path
+        d="M11.11 17.958c-3.209 -.307 -5.91 -2.293 -8.11 -5.958c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6c-.21 .352 -.427 .688 -.647 1.008" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle site navigation sidebar">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc" aria-label="Toggle table of contents sidebar">
+<label class="overlay sidebar-overlay" for="__navigation"></label>
+<label class="overlay toc-overlay" for="__toc"></label>
+
+<a class="skip-to-content muted-link" href="#furo-main-content">Skip to content</a>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <span class="icon"><svg><use href="#svg-menu"></use></svg></span>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="index.html"><div class="brand">wvt</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+          <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+          <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon" for="__toc">
+        <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand" href="index.html">
+  
+  <span class="sidebar-brand-text">wvt</span>
+  
+</a><form class="sidebar-search-container" method="get" action="search.html" role="search">
+  <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <p class="caption" role="heading"><span class="caption-text">User guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="getting-started.html">Getting started</a></li>
+<li class="toctree-l1"><a class="reference internal" href="viewer.html">The file viewer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="segments.html">Load a segment</a></li>
+<li class="toctree-l1"><a class="reference internal" href="export.html">Export a region</a></li>
+<li class="toctree-l1"><a class="reference internal" href="snapshots.html">Plot snapshots</a></li>
+<li class="toctree-l1"><a class="reference internal" href="sessions.html">File sessions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="live.html">Live devices</a></li>
+<li class="toctree-l1"><a class="reference internal" href="siggen.html">Signal generator</a></li>
+<li class="toctree-l1"><a class="reference internal" href="audio.html">Audio</a></li>
+<li class="toctree-l1"><a class="reference internal" href="gpu.html">GPU processing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="logging.html">Logging</a></li>
+<li class="toctree-l1"><a class="reference internal" href="controls.html">Mouse and keyboard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cli.html">Command-line reference</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Reference</span></p>
+<ul class="current">
+<li class="toctree-l1 current current-page"><a class="current reference internal" href="#">Build reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="signal-processing.html">Signal processing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="self-checks.html">Self-checks and test signals</a></li>
+<li class="toctree-l1"><a class="reference internal" href="source-layout.html">Source layout</a></li>
+<li class="toctree-l1"><a class="reference internal" href="writing-docs.html">Writing the documentation</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Design records</span></p>
+<ul>
+<li class="toctree-l1 has-children"><a class="reference internal" href="design/index.html">Design records</a><input aria-label="Toggle navigation of Design records" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l2"><a class="reference internal" href="design/audio-demod-plan.html">Plan: Audio demodulation and playback</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/verbose-logging-plan.html">Plan: Verbose console logging and a timestamped log file</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/time-segment-plan.html">Plan: open a time segment of a file (issue #16)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/cuda-gpu-plan.html">Plan: CUDA GPU acceleration (issue #3)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/region-export-plan.html">Plan: export a region of a file (issue #18)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/apple-gpu-plan.html">Plan: Apple GPU support (issue #21)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/ui-cleanup-plan.html">Plan: labels outside the plots and a tidier UI (issues #12 and #19)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/siggen-sweep-plan.html">Signal generator: frequency and amplitude sweep (issue #28)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/siggen-chain-plan.html">Signal generator: chain playback (issue #27)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/plot-snapshot-plan.html">Plan: snapshot button for all graphs (issue #13)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/usrp-models-plan.html">Plan: support other Ettus USRPs (issue #11)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/bb60-integration-plan.html">Plan: Signal Hound BB60 as a wvt live device</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/sidekiq-integration-plan.html">Plan: Epiq Solutions Sidekiq as a wvt live device</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/point-measurement-plan.html">Plan: point-to-point measurements on the plots (issue #80)</a></li>
+</ul>
+</li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="view-this-page">
+  <a class="muted-link" href="_sources/build.md.txt" title="View this page">
+    <svg><use href="#svg-eye"></use></svg>
+    <span class="visually-hidden">View this page</span>
+  </a>
+</div>
+<div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+              <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+              <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon" for="__toc">
+            <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+          </label>
+        </div>
+        <article role="main" id="furo-main-content">
+          <section id="build-reference">
+<h1>Build reference<a class="headerlink" href="#build-reference" title="Link to this heading">¶</a></h1>
+<p>This page gives all the CMake settings of wvt, what each setting enables or disables, and the
+programs that the build makes.</p>
+<section id="configure-and-compile">
+<h2>Configure and compile<a class="headerlink" href="#configure-and-compile" title="Link to this heading">¶</a></h2>
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span>cmake<span class="w"> </span>-S<span class="w"> </span>.<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span><span class="o">[</span>OPTIONS<span class="o">]</span>
+cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"> </span>-j
+</pre></div>
+</div>
+<p>Give each option as <code class="docutils literal notranslate"><span class="pre">-DNAME=VALUE</span></code>. CMake keeps the values in <code class="docutils literal notranslate"><span class="pre">build/CMakeCache.txt</span></code>. Thus, when
+you configure the same build folder again, you do not have to give the options again. To go back
+to the default of an option, delete <code class="docutils literal notranslate"><span class="pre">build/CMakeCache.txt</span></code>, or give the default value.</p>
+</section>
+<section id="the-build-script">
+<h2>The build script<a class="headerlink" href="#the-build-script" title="Link to this heading">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">scripts/build.sh</span></code> does the two steps above for one CPU architecture. It builds in the folder
+<code class="docutils literal notranslate"><span class="pre">build.&lt;arch&gt;</span></code> at the top of the source tree, for example <code class="docutils literal notranslate"><span class="pre">build.arm64</span></code> or <code class="docutils literal notranslate"><span class="pre">build.x86_64</span></code>. A
+sanitizer build goes in <code class="docutils literal notranslate"><span class="pre">build.&lt;arch&gt;.&lt;sanitizer&gt;</span></code>, for example <code class="docutils literal notranslate"><span class="pre">build.arm64.thread</span></code>.</p>
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span>scripts/build.sh<span class="w"> </span><span class="o">[</span>options<span class="o">]</span><span class="w"> </span><span class="o">[</span>--<span class="w"> </span>extra<span class="w"> </span>CMake<span class="w"> </span>arguments<span class="o">]</span>
+</pre></div>
+</div>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Option</p></th>
+<th class="head"><p>Function</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">-a</span></code>, <code class="docutils literal notranslate"><span class="pre">--arch</span> <span class="pre">ARCH</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">x86_64</span></code> or <code class="docutils literal notranslate"><span class="pre">arm64</span></code> (<code class="docutils literal notranslate"><span class="pre">amd64</span></code> and <code class="docutils literal notranslate"><span class="pre">aarch64</span></code> are also accepted). The default is the architecture of the computer</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">-t</span></code>, <code class="docutils literal notranslate"><span class="pre">--type</span> <span class="pre">TYPE</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">Release</span></code> (default), <code class="docutils literal notranslate"><span class="pre">Debug</span></code>, <code class="docutils literal notranslate"><span class="pre">RelWithDebInfo</span></code> or <code class="docutils literal notranslate"><span class="pre">MinSizeRel</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">-j</span></code>, <code class="docutils literal notranslate"><span class="pre">--jobs</span> <span class="pre">N</span></code></p></td>
+<td><p>The number of parallel compile jobs. The default is the number of CPUs</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">-B</span></code>, <code class="docutils literal notranslate"><span class="pre">--build-dir</span> <span class="pre">DIR</span></code></p></td>
+<td><p>Use <code class="docutils literal notranslate"><span class="pre">DIR</span></code>, not <code class="docutils literal notranslate"><span class="pre">build.&lt;arch&gt;</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--toolchain</span> <span class="pre">FILE</span></code></p></td>
+<td><p>A CMake toolchain file. On Linux, a build for a different architecture needs one</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--clean</span></code></p></td>
+<td><p>Delete the build folder first</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--test</span></code></p></td>
+<td><p>Run the self-checks (<code class="docutils literal notranslate"><span class="pre">ctest</span></code>) after the build</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">-n</span></code>, <code class="docutils literal notranslate"><span class="pre">--dry-run</span></code></p></td>
+<td><p>Show the commands, but do not run them</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--no-rtlsdr</span></code>, <code class="docutils literal notranslate"><span class="pre">--no-uhd</span></code>, <code class="docutils literal notranslate"><span class="pre">--no-bb</span></code>, <code class="docutils literal notranslate"><span class="pre">--no-skiq</span></code>, <code class="docutils literal notranslate"><span class="pre">--no-audio</span></code>, <code class="docutils literal notranslate"><span class="pre">--no-cuda</span></code>, <code class="docutils literal notranslate"><span class="pre">--no-metal</span></code></p></td>
+<td><p>Turn the feature off (<code class="docutils literal notranslate"><span class="pre">WVT_WITH_...=OFF</span></code>)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--with-rtlsdr</span></code>, <code class="docutils literal notranslate"><span class="pre">--with-uhd</span></code>, <code class="docutils literal notranslate"><span class="pre">--with-bb</span></code>, <code class="docutils literal notranslate"><span class="pre">--with-skiq</span></code>, <code class="docutils literal notranslate"><span class="pre">--with-audio</span></code>, <code class="docutils literal notranslate"><span class="pre">--with-cuda</span></code>, <code class="docutils literal notranslate"><span class="pre">--with-metal</span></code></p></td>
+<td><p>The feature must be in the build. The configure step stops if its library is missing (<code class="docutils literal notranslate"><span class="pre">WVT_WITH_...=ON</span></code>)</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--no-gpu</span></code></p></td>
+<td><p>The same as <code class="docutils literal notranslate"><span class="pre">--no-cuda</span> <span class="pre">--no-metal</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--minimal</span></code></p></td>
+<td><p>All the features off: the file viewer, the simulator and the signal generator only</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--werror</span></code>, <code class="docutils literal notranslate"><span class="pre">--bb-sim</span></code>, <code class="docutils literal notranslate"><span class="pre">--fuzz</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">WVT_WERROR=ON</span></code>, <code class="docutils literal notranslate"><span class="pre">WVT_BB_SIM=ON</span></code>, <code class="docutils literal notranslate"><span class="pre">WVT_FUZZ=ON</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--sanitize</span> <span class="pre">KIND</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">address</span></code> or <code class="docutils literal notranslate"><span class="pre">thread</span></code> (<code class="docutils literal notranslate"><span class="pre">WVT_SANITIZE</span></code>)</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Without a <code class="docutils literal notranslate"><span class="pre">--no-</span></code> or <code class="docutils literal notranslate"><span class="pre">--with-</span></code> option, a feature is in the build if its library is found, as in a
+<code class="docutils literal notranslate"><span class="pre">cmake</span></code> build without options.</p>
+<p>A different architecture:</p>
+<ul class="simple">
+<li><p><strong>macOS</strong> compiles for it directly (<code class="docutils literal notranslate"><span class="pre">CMAKE_OSX_ARCHITECTURES</span></code>). An <code class="docutils literal notranslate"><span class="pre">x86_64</span></code> build runs on Apple
+silicon with Rosetta. But the Homebrew libraries are for one architecture only, so turn off the
+features that use them (for example <code class="docutils literal notranslate"><span class="pre">--minimal</span></code>), or install the libraries for the other
+architecture.</p></li>
+<li><p><strong>Linux</strong> needs a cross compiler and libraries for the other architecture: give them with
+<code class="docutils literal notranslate"><span class="pre">--toolchain</span> <span class="pre">FILE</span></code>.</p></li>
+</ul>
+<p>Examples:</p>
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span>scripts/build.sh<span class="w">                                   </span><span class="c1"># this computer, all the features that are found</span>
+scripts/build.sh<span class="w"> </span>--no-cuda<span class="w"> </span>--no-uhd<span class="w"> </span>--test<span class="w">         </span><span class="c1"># two features off, then the self-checks</span>
+scripts/build.sh<span class="w"> </span>--arch<span class="w"> </span>x86_64<span class="w"> </span>--minimal<span class="w">           </span><span class="c1"># macOS: an Intel build on Apple silicon</span>
+scripts/build.sh<span class="w"> </span>--sanitize<span class="w"> </span>thread<span class="w"> </span>--type<span class="w"> </span>RelWithDebInfo
+scripts/build.sh<span class="w"> </span>--<span class="w"> </span>-DCMAKE_CUDA_ARCHITECTURES<span class="o">=</span><span class="m">89</span><span class="w">  </span><span class="c1"># extra CMake arguments</span>
+</pre></div>
+</div>
+</section>
+<section id="options">
+<h2>Options<a class="headerlink" href="#options" title="Link to this heading">¶</a></h2>
+<section id="summary">
+<h3>Summary<a class="headerlink" href="#summary" title="Link to this heading">¶</a></h3>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Option</p></th>
+<th class="head"><p>Values</p></th>
+<th class="head"><p>Default</p></th>
+<th class="head"><p>Platform</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><a class="reference internal" href="#cmake-build-type"><code class="docutils literal notranslate"><span class="pre">CMAKE_BUILD_TYPE</span></code></a></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">Release</span></code>, <code class="docutils literal notranslate"><span class="pre">Debug</span></code>, <code class="docutils literal notranslate"><span class="pre">RelWithDebInfo</span></code>, <code class="docutils literal notranslate"><span class="pre">MinSizeRel</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">Release</span></code></p></td>
+<td><p>All</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#x11-root"><code class="docutils literal notranslate"><span class="pre">X11_ROOT</span></code></a></p></td>
+<td><p>A folder</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">/opt/X11</span></code></p></td>
+<td><p>macOS</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#wvt-with-rtlsdr"><code class="docutils literal notranslate"><span class="pre">WVT_WITH_RTLSDR</span></code></a></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">AUTO</span></code>, <code class="docutils literal notranslate"><span class="pre">ON</span></code>, <code class="docutils literal notranslate"><span class="pre">OFF</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">AUTO</span></code></p></td>
+<td><p>All</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#wvt-with-uhd"><code class="docutils literal notranslate"><span class="pre">WVT_WITH_UHD</span></code></a></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">AUTO</span></code>, <code class="docutils literal notranslate"><span class="pre">ON</span></code>, <code class="docutils literal notranslate"><span class="pre">OFF</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">AUTO</span></code></p></td>
+<td><p>All</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#wvt-with-bb"><code class="docutils literal notranslate"><span class="pre">WVT_WITH_BB</span></code></a></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">AUTO</span></code>, <code class="docutils literal notranslate"><span class="pre">ON</span></code>, <code class="docutils literal notranslate"><span class="pre">OFF</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">AUTO</span></code></p></td>
+<td><p>Linux, macOS ARM</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#signalhound-sdk-dir"><code class="docutils literal notranslate"><span class="pre">SIGNALHOUND_SDK_DIR</span></code></a></p></td>
+<td><p>A folder</p></td>
+<td><p>Empty</p></td>
+<td><p>Linux, macOS ARM</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#wvt-bb-sim"><code class="docutils literal notranslate"><span class="pre">WVT_BB_SIM</span></code></a></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">ON</span></code>, <code class="docutils literal notranslate"><span class="pre">OFF</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">OFF</span></code></p></td>
+<td><p>All</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#wvt-with-audio"><code class="docutils literal notranslate"><span class="pre">WVT_WITH_AUDIO</span></code></a></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">AUTO</span></code>, <code class="docutils literal notranslate"><span class="pre">ON</span></code>, <code class="docutils literal notranslate"><span class="pre">OFF</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">AUTO</span></code></p></td>
+<td><p>All</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#wvt-with-cuda"><code class="docutils literal notranslate"><span class="pre">WVT_WITH_CUDA</span></code></a></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">AUTO</span></code>, <code class="docutils literal notranslate"><span class="pre">ON</span></code>, <code class="docutils literal notranslate"><span class="pre">OFF</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">AUTO</span></code></p></td>
+<td><p>Linux</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#wvt-cuda-static"><code class="docutils literal notranslate"><span class="pre">WVT_CUDA_STATIC</span></code></a></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">ON</span></code>, <code class="docutils literal notranslate"><span class="pre">OFF</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">ON</span></code></p></td>
+<td><p>Linux</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#cmake-cuda-architectures"><code class="docutils literal notranslate"><span class="pre">CMAKE_CUDA_ARCHITECTURES</span></code></a></p></td>
+<td><p>A list of GPU architectures</p></td>
+<td><p>Refer to the section</p></td>
+<td><p>Linux</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#wvt-with-metal"><code class="docutils literal notranslate"><span class="pre">WVT_WITH_METAL</span></code></a></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">AUTO</span></code>, <code class="docutils literal notranslate"><span class="pre">ON</span></code>, <code class="docutils literal notranslate"><span class="pre">OFF</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">AUTO</span></code></p></td>
+<td><p>macOS</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#wvt-werror"><code class="docutils literal notranslate"><span class="pre">WVT_WERROR</span></code></a></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">ON</span></code>, <code class="docutils literal notranslate"><span class="pre">OFF</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">OFF</span></code></p></td>
+<td><p>All</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#wvt-sanitize"><code class="docutils literal notranslate"><span class="pre">WVT_SANITIZE</span></code></a></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">address</span></code>, <code class="docutils literal notranslate"><span class="pre">thread</span></code> or empty</p></td>
+<td><p>Empty</p></td>
+<td><p>All</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#wvt-fuzz"><code class="docutils literal notranslate"><span class="pre">WVT_FUZZ</span></code></a></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">ON</span></code>, <code class="docutils literal notranslate"><span class="pre">OFF</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">OFF</span></code></p></td>
+<td><p>All (clang only)</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The <code class="docutils literal notranslate"><span class="pre">AUTO</span></code>, <code class="docutils literal notranslate"><span class="pre">ON</span></code> and <code class="docutils literal notranslate"><span class="pre">OFF</span></code> values have the same meaning for all options:</p>
+<dl class="simple myst">
+<dt>AUTO</dt><dd><p>CMake builds the function if it finds the necessary library or toolkit. If not, CMake builds
+wvt without the function and tells you why.</p>
+</dd>
+<dt>ON</dt><dd><p>CMake must build the function. If the library or toolkit is missing, the configure step stops
+with an error.</p>
+</dd>
+<dt>OFF</dt><dd><p>CMake does not build the function. CMake does not look for the library.</p>
+</dd>
+</dl>
+<p>Use <code class="docutils literal notranslate"><span class="pre">ON</span></code> in scripts and CI jobs, where a missing library must cause an error.</p>
+</section>
+<section id="cmake-build-type">
+<h3>CMAKE_BUILD_TYPE<a class="headerlink" href="#cmake-build-type" title="Link to this heading">¶</a></h3>
+<p>Sets the compiler optimization. If you do not give a value, wvt uses <code class="docutils literal notranslate"><span class="pre">Release</span></code>.</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">Release</span></code> compiles with <code class="docutils literal notranslate"><span class="pre">-O3</span> <span class="pre">-DNDEBUG</span></code> (the CMake default for GCC and clang). Use this value for
+normal use. The waterfall and the demodulators are much slower without optimization.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Debug</span></code> compiles with <code class="docutils literal notranslate"><span class="pre">-g</span></code> and no optimization. Use it with a debugger.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">RelWithDebInfo</span></code> compiles with optimization and debug symbols.</p></li>
+</ul>
+</section>
+<section id="x11-root">
+<h3>X11_ROOT<a class="headerlink" href="#x11-root" title="Link to this heading">¶</a></h3>
+<p>macOS only. Sets the folder of XQuartz. The default is <code class="docutils literal notranslate"><span class="pre">/opt/X11</span></code>. The build links
+<code class="docutils literal notranslate"><span class="pre">${X11_ROOT}/lib/libX11.dylib</span></code> and <code class="docutils literal notranslate"><span class="pre">${X11_ROOT}/lib/libGL.dylib</span></code>, and uses the headers in
+<code class="docutils literal notranslate"><span class="pre">${X11_ROOT}/include</span></code>. If <code class="docutils literal notranslate"><span class="pre">libX11.dylib</span></code> is not in this folder, the configure step stops.</p>
+<p>On Linux, CMake finds X11 and OpenGL with its standard <code class="docutils literal notranslate"><span class="pre">FindX11</span></code> and <code class="docutils literal notranslate"><span class="pre">FindOpenGL</span></code> modules. The
+build uses the legacy <code class="docutils literal notranslate"><span class="pre">libGL.so</span></code>, which has the GL and the GLX functions.</p>
+</section>
+<section id="wvt-with-rtlsdr">
+<h3>WVT_WITH_RTLSDR<a class="headerlink" href="#wvt-with-rtlsdr" title="Link to this heading">¶</a></h3>
+<p>Enables or disables the RTL-SDR device backend (<code class="docutils literal notranslate"><span class="pre">src/device/sdr_rtlsdr.cpp</span></code>).</p>
+<ul class="simple">
+<li><p>CMake finds librtlsdr with <code class="docutils literal notranslate"><span class="pre">pkg-config</span></code> (the <code class="docutils literal notranslate"><span class="pre">librtlsdr</span></code> module).</p></li>
+<li><p>CMake also checks for <code class="docutils literal notranslate"><span class="pre">rtlsdr_set_bias_tee()</span></code>. This function is in librtlsdr builds from 2018
+and later. Without it, the <strong>bias-tee</strong> option is not available.</p></li>
+<li><p>Without this backend, the device list does not show RTL-SDR devices.</p></li>
+</ul>
+<p>Output: <code class="docutils literal notranslate"><span class="pre">wvt:</span> <span class="pre">RTL-SDR</span> <span class="pre">support</span> <span class="pre">enabled</span> <span class="pre">(librtlsdr</span> <span class="pre">&lt;version&gt;)</span></code>.</p>
+</section>
+<section id="wvt-with-uhd">
+<h3>WVT_WITH_UHD<a class="headerlink" href="#wvt-with-uhd" title="Link to this heading">¶</a></h3>
+<p>Enables or disables the USRP backend (<code class="docutils literal notranslate"><span class="pre">src/device/sdr_uhd.cpp</span></code>). This backend receives and transmits, with
+all USRPs that UHD supports: the USB B200 family and the network N3xx, X3xx and X4xx.</p>
+<ul class="simple">
+<li><p>CMake finds UHD with <code class="docutils literal notranslate"><span class="pre">pkg-config</span></code> (the <code class="docutils literal notranslate"><span class="pre">uhd</span></code> module). If <code class="docutils literal notranslate"><span class="pre">pkg-config</span></code> does not find it, CMake
+uses the <code class="docutils literal notranslate"><span class="pre">UHDConfig.cmake</span></code> file of UHD.</p></li>
+<li><p>wvt uses the C API of UHD (<code class="docutils literal notranslate"><span class="pre">uhd.h</span></code>). Thus the build does not need the Boost headers.</p></li>
+<li><p>Without this backend, wvt cannot receive from a USRP, and the signal generator cannot transmit.</p></li>
+</ul>
+<p>Output: <code class="docutils literal notranslate"><span class="pre">wvt:</span> <span class="pre">UHD</span> <span class="pre">support</span> <span class="pre">enabled</span> <span class="pre">(UHD</span> <span class="pre">&lt;version&gt;)</span></code>.</p>
+</section>
+<section id="wvt-with-bb">
+<h3>WVT_WITH_BB<a class="headerlink" href="#wvt-with-bb" title="Link to this heading">¶</a></h3>
+<p>Enables or disables the Signal Hound BB60 backend (<code class="docutils literal notranslate"><span class="pre">src/device/sdr_bb60.cpp</span></code>). It needs <code class="docutils literal notranslate"><span class="pre">bb_api</span></code> from the
+Signal Hound SDK. Refer to <a class="reference internal" href="live.html#signal-hound-bb60"><span class="std std-ref">Live devices</span></a>.</p>
+<ul class="simple">
+<li><p>CMake looks for <code class="docutils literal notranslate"><span class="pre">bb_api.h</span></code> and the library in <code class="docutils literal notranslate"><span class="pre">SIGNALHOUND_SDK_DIR</span></code>. It uses the library for the
+CPU of the build: Linux x86-64 (the newest version 5 library), Linux ARM64, or macOS ARM.</p></li>
+<li><p>CMake copies the library into <code class="docutils literal notranslate"><span class="pre">build/bb_api/</span></code> under its run-time name. wvt finds it there
+through its rpath. On Linux x86-64, CMake also copies <code class="docutils literal notranslate"><span class="pre">libftd2xx.so</span></code>.</p></li>
+<li><p>An x86-64 macOS build cannot use the ARM library. CMake then tells you to configure with
+<code class="docutils literal notranslate"><span class="pre">-DCMAKE_OSX_ARCHITECTURES=arm64</span></code>.</p></li>
+<li><p>Without this backend, the device list does not show BB60 devices.</p></li>
+</ul>
+<p>Output: <code class="docutils literal notranslate"><span class="pre">wvt:</span> <span class="pre">Signal</span> <span class="pre">Hound</span> <span class="pre">BB60</span> <span class="pre">support</span> <span class="pre">enabled</span> <span class="pre">(bb_api</span> <span class="pre">5.0.x,</span> <span class="pre">&lt;library&gt;)</span></code>.</p>
+</section>
+<section id="signalhound-sdk-dir">
+<h3>SIGNALHOUND_SDK_DIR<a class="headerlink" href="#signalhound-sdk-dir" title="Link to this heading">¶</a></h3>
+<p>The folder of the extracted Signal Hound SDK, for example <code class="docutils literal notranslate"><span class="pre">$HOME/signal_hound_sdk</span></code>. A prefix
+with <code class="docutils literal notranslate"><span class="pre">include/bb_api.h</span></code> and <code class="docutils literal notranslate"><span class="pre">lib/libbb_api.*</span></code> also works. If the library is installed in a system
+folder, such as <code class="docutils literal notranslate"><span class="pre">/usr/local/lib</span></code>, CMake finds it without this option.</p>
+</section>
+<section id="wvt-bb-sim">
+<h3>WVT_BB_SIM<a class="headerlink" href="#wvt-bb-sim" title="Link to this heading">¶</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">ON</span></code> builds the BB60 backend against a simulated BB60D (<code class="docutils literal notranslate"><span class="pre">tools/bb_sim/</span></code>) instead of the SDK. Use
+it for CI and tests. The build then also makes <code class="docutils literal notranslate"><span class="pre">bb_check</span></code>, which tests the backend. Do not use it
+for normal use: the device list then shows the simulated BB60.</p>
+</section>
+<section id="wvt-with-skiq">
+<h3>WVT_WITH_SKIQ<a class="headerlink" href="#wvt-with-skiq" title="Link to this heading">¶</a></h3>
+<p>Enables or disables the Epiq Sidekiq backend (<code class="docutils literal notranslate"><span class="pre">src/device/sdr_skiq.cpp</span></code>). It needs <code class="docutils literal notranslate"><span class="pre">libsidekiq</span></code>
+from the Sidekiq SDK, version 4.14.0 or later. Refer to <a class="reference internal" href="live.html#epiq-sidekiq"><span class="std std-ref">Live devices</span></a>.</p>
+<ul class="simple">
+<li><p>CMake uses the first SDK folder in this list: <code class="docutils literal notranslate"><span class="pre">SIDEKIQ_SDK_DIR</span></code>, the environment variable
+<code class="docutils literal notranslate"><span class="pre">SIDEKIQ_SDK_DIR</span></code>, <code class="docutils literal notranslate"><span class="pre">~/sidekiq_sdk_current</span></code>, the newest <code class="docutils literal notranslate"><span class="pre">third_party/sidekiq_sdk/sidekiq_sdk_v*</span></code>.</p></li>
+<li><p>CMake runs <code class="docutils literal notranslate"><span class="pre">bin/sidekiq-config</span></code> of the SDK for the version, the include folder and the static
+link flags. It keeps the link flags in their order. An SDK without <code class="docutils literal notranslate"><span class="pre">sidekiq-config</span></code> is linked
+from <code class="docutils literal notranslate"><span class="pre">lib/libsidekiq__&lt;cpu&gt;.a</span></code> and the support libraries in <code class="docutils literal notranslate"><span class="pre">lib/support/</span></code>.</p></li>
+<li><p>The SDK is for Linux only. On macOS, the backend is not built.</p></li>
+<li><p>Without this backend, the device list does not show Sidekiq cards.</p></li>
+</ul>
+<p>Output: <code class="docutils literal notranslate"><span class="pre">wvt:</span> <span class="pre">Sidekiq</span> <span class="pre">support</span> <span class="pre">enabled</span> <span class="pre">(SDK</span> <span class="pre">4.26.0,</span> <span class="pre">&lt;folder&gt;)</span></code>.</p>
+</section>
+<section id="sidekiq-sdk-dir">
+<h3>SIDEKIQ_SDK_DIR<a class="headerlink" href="#sidekiq-sdk-dir" title="Link to this heading">¶</a></h3>
+<p>The folder of the extracted Sidekiq SDK: the folder with <code class="docutils literal notranslate"><span class="pre">bin/sidekiq-config</span></code> and
+<code class="docutils literal notranslate"><span class="pre">sidekiq_core/inc/sidekiq_api.h</span></code>, for example <code class="docutils literal notranslate"><span class="pre">$HOME/sidekiq_sdk_v4.26.0</span></code>.</p>
+</section>
+<section id="wvt-skiq-sim">
+<h3>WVT_SKIQ_SIM<a class="headerlink" href="#wvt-skiq-sim" title="Link to this heading">¶</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">ON</span></code> builds the Sidekiq backend against a simulated card (<code class="docutils literal notranslate"><span class="pre">tools/skiq_sim/</span></code>) instead of the SDK,
+also on macOS. Use it for CI and tests. <code class="docutils literal notranslate"><span class="pre">skiq_check</span></code> then also tests the backend. Do not use it
+for normal use: the device list then shows the simulated card.</p>
+</section>
+<section id="wvt-with-audio">
+<h3>WVT_WITH_AUDIO<a class="headerlink" href="#wvt-with-audio" title="Link to this heading">¶</a></h3>
+<p>Enables or disables audio playback through the bundled miniaudio library.</p>
+<ul class="simple">
+<li><p>On macOS, the build links CoreAudio, AudioToolbox and CoreFoundation.</p></li>
+<li><p>On Linux, the build does not need development packages. At run time, miniaudio loads
+PipeWire, PulseAudio or ALSA, whichever is available.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">AUTO</span></code> and <code class="docutils literal notranslate"><span class="pre">ON</span></code> have the same result, because the library is in the repository.</p></li>
+<li><p>With <code class="docutils literal notranslate"><span class="pre">OFF</span></code>, the audio window cannot play sound. The demodulator and the WAV export still work.</p></li>
+</ul>
+<p>Output: <code class="docutils literal notranslate"><span class="pre">wvt:</span> <span class="pre">audio</span> <span class="pre">playback</span> <span class="pre">enabled</span> <span class="pre">(miniaudio)</span></code>.</p>
+</section>
+<section id="wvt-with-cuda">
+<h3>WVT_WITH_CUDA<a class="headerlink" href="#wvt-with-cuda" title="Link to this heading">¶</a></h3>
+<p>Enables or disables the CUDA GPU backend (<code class="docutils literal notranslate"><span class="pre">src/gpu/gpu_cuda.cu</span></code>) for NVIDIA GPUs. Refer to
+<a class="reference internal" href="gpu.html"><span class="std std-doc">GPU processing</span></a>.</p>
+<p>The backend needs all of these conditions:</p>
+<ul class="simple">
+<li><p>Linux. CUDA is not available on macOS.</p></li>
+<li><p>CMake 3.18 or later.</p></li>
+<li><p>The CUDA toolkit 12.0 or later, with <code class="docutils literal notranslate"><span class="pre">nvcc</span></code> and cuFFT. For RTX 50-series GPUs, use CUDA 12.8 or
+later.</p></li>
+</ul>
+<p>If CMake does not find <code class="docutils literal notranslate"><span class="pre">nvcc</span></code> on the <code class="docutils literal notranslate"><span class="pre">PATH</span></code>, give its location with
+<code class="docutils literal notranslate"><span class="pre">-DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc</span></code>.</p>
+<p>A CUDA build also runs on a computer without an NVIDIA GPU or driver. wvt then uses the CPU, and
+the log tells you why.</p>
+<p>Output: <code class="docutils literal notranslate"><span class="pre">wvt:</span> <span class="pre">CUDA</span> <span class="pre">support</span> <span class="pre">enabled</span> <span class="pre">(CUDA</span> <span class="pre">12.x,</span> <span class="pre">archs</span> <span class="pre">...,</span> <span class="pre">static</span> <span class="pre">cuFFT)</span></code>.</p>
+</section>
+<section id="wvt-cuda-static">
+<h3>WVT_CUDA_STATIC<a class="headerlink" href="#wvt-cuda-static" title="Link to this heading">¶</a></h3>
+<p>Sets how the build links the CUDA runtime and cuFFT. Applies only when the CUDA backend builds.</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">ON</span></code> (default) links the CUDA runtime and cuFFT into the binary. The binary is approximately
+270 MB larger. It needs only the NVIDIA driver at run time.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">OFF</span></code> links the shared libraries. The binary is small, but the computer that runs it must have
+the CUDA runtime and cuFFT libraries.</p></li>
+</ul>
+</section>
+<section id="cmake-cuda-architectures">
+<h3>CMAKE_CUDA_ARCHITECTURES<a class="headerlink" href="#cmake-cuda-architectures" title="Link to this heading">¶</a></h3>
+<p>Sets the GPU architectures that the CUDA code is compiled for. Applies only when the CUDA backend
+builds. If you do not give a value, wvt uses:</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>CUDA version</p></th>
+<th class="head"><p>Architectures</p></th>
+<th class="head"><p>GPUs</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>12.0 to 12.7</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">75-real</span> <span class="pre">80-real</span> <span class="pre">86-real</span> <span class="pre">89-real</span> <span class="pre">90</span></code></p></td>
+<td><p>RTX 20xx to 40xx, A100, H100, plus PTX for newer GPUs</p></td>
+</tr>
+<tr class="row-odd"><td><p>12.8 and later</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">75-real</span> <span class="pre">80-real</span> <span class="pre">86-real</span> <span class="pre">89-real</span> <span class="pre">90-real</span> <span class="pre">120</span></code></p></td>
+<td><p>The same, plus RTX 50xx</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>A shorter list makes a smaller binary and a faster build. For example, for an RTX 4090 only, use
+<code class="docutils literal notranslate"><span class="pre">-DCMAKE_CUDA_ARCHITECTURES=89</span></code>. The GPU must have compute capability 7.5 or later.</p>
+</section>
+<section id="wvt-with-metal">
+<h3>WVT_WITH_METAL<a class="headerlink" href="#wvt-with-metal" title="Link to this heading">¶</a></h3>
+<p>macOS only. Enables or disables the Metal GPU backend (<code class="docutils literal notranslate"><span class="pre">src/gpu/gpu_metal.mm</span></code>) for Apple GPUs. Refer
+to <a class="reference internal" href="gpu.html"><span class="std std-doc">GPU processing</span></a>.</p>
+<ul class="simple">
+<li><p>The backend needs an Objective-C++ compiler and the Metal and MetalPerformanceShadersGraph
+frameworks. The Command Line Tools have all of them. You do not need Xcode.</p></li>
+<li><p>The GPU kernels compile when wvt uses the GPU for the first time (approximately 0.2 s).</p></li>
+<li><p>The GPU path needs macOS 14 or later at run time. Older versions use the CPU.</p></li>
+<li><p>On Linux, <code class="docutils literal notranslate"><span class="pre">ON</span></code> causes an error, and <code class="docutils literal notranslate"><span class="pre">AUTO</span></code> disables the backend.</p></li>
+</ul>
+<p>Output: <code class="docutils literal notranslate"><span class="pre">wvt:</span> <span class="pre">Metal</span> <span class="pre">support</span> <span class="pre">enabled</span> <span class="pre">(MPSGraph</span> <span class="pre">FFT;</span> <span class="pre">the</span> <span class="pre">GPU</span> <span class="pre">path</span> <span class="pre">needs</span> <span class="pre">macOS</span> <span class="pre">14</span> <span class="pre">at</span> <span class="pre">run</span> <span class="pre">time)</span></code>.</p>
+</section>
+<section id="wvt-werror">
+<h3>WVT_WERROR<a class="headerlink" href="#wvt-werror" title="Link to this heading">¶</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">ON</span></code> makes the compiler warnings in the wvt code errors (<code class="docutils literal notranslate"><span class="pre">-Werror</span></code>). The code in <code class="docutils literal notranslate"><span class="pre">third_party/</span></code> is
+not included. All CI build jobs use <code class="docutils literal notranslate"><span class="pre">ON</span></code>, so a change that adds a warning fails CI. All the wvt
+targets compile with <code class="docutils literal notranslate"><span class="pre">-Wall</span> <span class="pre">-Wextra</span> <span class="pre">-Wno-unused-parameter</span></code>.</p>
+<p>To add your own compiler flags, use <code class="docutils literal notranslate"><span class="pre">CMAKE_CXX_FLAGS</span></code> or <code class="docutils literal notranslate"><span class="pre">CMAKE_CXX_FLAGS_RELEASE</span></code>. wvt does not
+replace them.</p>
+</section>
+<section id="wvt-sanitize">
+<h3>WVT_SANITIZE<a class="headerlink" href="#wvt-sanitize" title="Link to this heading">¶</a></h3>
+<p>Builds all the programs with compiler sanitizers. Use it to test, not for normal use: the
+programs are slower and use more memory.</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">address</span></code>: AddressSanitizer and UndefinedBehaviorSanitizer (<code class="docutils literal notranslate"><span class="pre">-fsanitize=address,undefined</span></code>). They
+find out-of-bounds access, use after free, memory leaks (Linux) and undefined behavior. An
+undefined-behavior error stops the program.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">thread</span></code>: ThreadSanitizer (<code class="docutils literal notranslate"><span class="pre">-fsanitize=thread</span></code>). It finds data races between threads. You cannot
+use it together with <code class="docutils literal notranslate"><span class="pre">address</span></code>.</p></li>
+<li><p>Empty (the default): no sanitizers.</p></li>
+</ul>
+<p>The CUDA code (<code class="docutils literal notranslate"><span class="pre">gpu_cuda.cu</span></code>) does not get the sanitizer flags. Use a separate build folder for
+each value. Refer to <a class="reference internal" href="self-checks.html#sanitizer-builds"><span class="std std-ref">Self-checks</span></a>.</p>
+<p>Output: <code class="docutils literal notranslate"><span class="pre">wvt:</span> <span class="pre">sanitizers</span> <span class="pre">enabled</span> <span class="pre">(address:</span> <span class="pre">-fsanitize=address,undefined;...)</span></code>.</p>
+</section>
+<section id="wvt-fuzz">
+<h3>WVT_FUZZ<a class="headerlink" href="#wvt-fuzz" title="Link to this heading">¶</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">ON</span></code> also builds the libFuzzer targets <code class="docutils literal notranslate"><span class="pre">fuzz_json</span></code>, <code class="docutils literal notranslate"><span class="pre">fuzz_chain</span></code>, <code class="docutils literal notranslate"><span class="pre">fuzz_meta</span></code> and <code class="docutils literal notranslate"><span class="pre">fuzz_parse_si</span></code>,
+with AddressSanitizer and UndefinedBehaviorSanitizer. CTest then also runs each target on its seed
+inputs. The option needs clang: with another compiler, the configure step stops with an error. On
+macOS, use the clang of the Homebrew <code class="docutils literal notranslate"><span class="pre">llvm</span></code> package, because Apple clang has no libFuzzer. Refer
+to <a class="reference internal" href="self-checks.html#fuzz-tests"><span class="std std-ref">Fuzz tests</span></a>.</p>
+<p>Output: <code class="docutils literal notranslate"><span class="pre">wvt:</span> <span class="pre">libFuzzer</span> <span class="pre">targets</span> <span class="pre">enabled</span> <span class="pre">(fuzz_json,</span> <span class="pre">fuzz_chain,</span> <span class="pre">fuzz_meta,</span> <span class="pre">fuzz_parse_si)</span></code>.</p>
+</section>
+</section>
+<section id="the-cpu-fft">
+<h2>The CPU FFT<a class="headerlink" href="#the-cpu-fft" title="Link to this heading">¶</a></h2>
+<p>The CPU FFT is not an option. On macOS, the build always links the Accelerate framework and uses
+its vDSP FFT. On Linux, wvt uses its own radix-2 FFT.</p>
+</section>
+<section id="examples">
+<h2>Examples<a class="headerlink" href="#examples" title="Link to this heading">¶</a></h2>
+<p>A Linux build with the two device backends, and the configure step stops if one is missing:</p>
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span>cmake<span class="w"> </span>-S<span class="w"> </span>.<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-DWVT_WITH_RTLSDR<span class="o">=</span>ON<span class="w"> </span>-DWVT_WITH_UHD<span class="o">=</span>ON
+</pre></div>
+</div>
+<p>A minimum build: the file viewer, the simulator and the signal generator file output only:</p>
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span>cmake<span class="w"> </span>-S<span class="w"> </span>.<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-DWVT_WITH_RTLSDR<span class="o">=</span>OFF<span class="w"> </span>-DWVT_WITH_UHD<span class="o">=</span>OFF<span class="w"> </span>-DWVT_WITH_AUDIO<span class="o">=</span>OFF<span class="w"> </span><span class="se">\</span>
+<span class="w">      </span>-DWVT_WITH_CUDA<span class="o">=</span>OFF<span class="w"> </span>-DWVT_WITH_METAL<span class="o">=</span>OFF
+</pre></div>
+</div>
+<p>A CUDA build for one GPU type, with shared CUDA libraries:</p>
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span>cmake<span class="w"> </span>-S<span class="w"> </span>.<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-DWVT_WITH_CUDA<span class="o">=</span>ON<span class="w"> </span>-DCMAKE_CUDA_ARCHITECTURES<span class="o">=</span><span class="m">89</span><span class="w"> </span>-DWVT_CUDA_STATIC<span class="o">=</span>OFF
+</pre></div>
+</div>
+<p>A build for ThreadSanitizer, in a separate folder:</p>
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span>cmake<span class="w"> </span>-S<span class="w"> </span>.<span class="w"> </span>-B<span class="w"> </span>build-tsan<span class="w"> </span>-DWVT_SANITIZE<span class="o">=</span>thread<span class="w"> </span>-DCMAKE_BUILD_TYPE<span class="o">=</span>RelWithDebInfo
+</pre></div>
+</div>
+<p>A debug build:</p>
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span>cmake<span class="w"> </span>-S<span class="w"> </span>.<span class="w"> </span>-B<span class="w"> </span>build-debug<span class="w"> </span>-DCMAKE_BUILD_TYPE<span class="o">=</span>Debug
+</pre></div>
+</div>
+</section>
+<section id="build-targets">
+<h2>Build targets<a class="headerlink" href="#build-targets" title="Link to this heading">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">cmake</span> <span class="pre">--build</span> <span class="pre">build</span></code> makes all these programs. To make one program only, add <code class="docutils literal notranslate"><span class="pre">--target</span> <span class="pre">NAME</span></code>.</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Target</p></th>
+<th class="head"><p>Contents</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">wvt</span></code></p></td>
+<td><p>The application</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">iqgen</span></code></p></td>
+<td><p>Writes a synthetic test recording</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">siggen_check</span></code></p></td>
+<td><p>Self-check for the signal generator</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">audio_check</span></code></p></td>
+<td><p>Self-check for the audio demodulator</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">log_check</span></code></p></td>
+<td><p>Self-check for the logger</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">segment_check</span></code></p></td>
+<td><p>Self-check for the time segment rules</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">extract_check</span></code></p></td>
+<td><p>Self-check for the region export</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">snapshot_check</span></code></p></td>
+<td><p>Self-check for the plot snapshots</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">device_check</span></code></p></td>
+<td><p>Self-check for the device list and the sample rate rules</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">bb_check</span></code></p></td>
+<td><p>Self-check for the BB60 backend, with the simulated device. Only with <code class="docutils literal notranslate"><span class="pre">WVT_BB_SIM=ON</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">skiq_check</span></code></p></td>
+<td><p>Self-check for the Sidekiq logic. With <code class="docutils literal notranslate"><span class="pre">WVT_SKIQ_SIM=ON</span></code>, also for the backend with the simulated card</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">gpu_check</span></code></p></td>
+<td><p>Compares the GPU results with the CPU results, and measures the speed</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">fuzz_json</span></code>, <code class="docutils literal notranslate"><span class="pre">fuzz_chain</span></code>, <code class="docutils literal notranslate"><span class="pre">fuzz_meta</span></code>, <code class="docutils literal notranslate"><span class="pre">fuzz_parse_si</span></code></p></td>
+<td><p>The fuzz targets. Only with <code class="docutils literal notranslate"><span class="pre">WVT_FUZZ=ON</span></code></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">ctest</span> <span class="pre">--test-dir</span> <span class="pre">build</span> <span class="pre">--output-on-failure</span></code> runs all the self-checks.</p>
+<p>For the self-checks, refer to <a class="reference internal" href="self-checks.html"><span class="std std-doc">Self-checks and test signals</span></a>.</p>
+</section>
+<section id="version-information">
+<h2>Version information<a class="headerlink" href="#version-information" title="Link to this heading">¶</a></h2>
+<p>At each build, CMake reads two values from git:</p>
+<ul class="simple">
+<li><p><strong>Build:</strong> the short commit hash, for example <code class="docutils literal notranslate"><span class="pre">523ac6c</span></code>. If tracked files have changes that are
+not committed, <code class="docutils literal notranslate"><span class="pre">-dirty</span></code> is added. Outside a git checkout (for example, a source archive), the
+value is <code class="docutils literal notranslate"><span class="pre">unknown</span></code>.</p></li>
+<li><p><strong>Version:</strong> the version tag on that commit, for example <code class="docutils literal notranslate"><span class="pre">v1.1</span></code>. If the commit has no tag, the
+value is blank.</p></li>
+</ul>
+<p><strong>Help &gt; About wvt</strong> shows the two values. wvt also writes them to the start of each log file.
+You do not have to configure again after a commit or a new tag: the next build updates the values.</p>
+</section>
+<section id="build-the-documentation">
+<h2>Build the documentation<a class="headerlink" href="#build-the-documentation" title="Link to this heading">¶</a></h2>
+<p>The documentation uses Sphinx with the MyST Markdown parser. To make the HTML pages:</p>
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span>-r<span class="w"> </span>docs/requirements.txt
+sphinx-build<span class="w"> </span>-W<span class="w"> </span>-b<span class="w"> </span>html<span class="w"> </span>docs<span class="w"> </span>build/docs
+</pre></div>
+</div>
+<p>Open <code class="docutils literal notranslate"><span class="pre">build/docs/index.html</span></code> in a browser. The <code class="docutils literal notranslate"><span class="pre">-W</span></code> option makes each warning an error. CI uses
+the same command. For the writing rules, refer to <a class="reference internal" href="writing-docs.html"><span class="std std-doc">Writing the documentation</span></a>.</p>
+</section>
+</section>
+
+        </article>
+      </div>
+      <footer>
+        
+        <div class="related-pages">
+          <a class="next-page" href="signal-processing.html">
+              <div class="page-info">
+                <div class="context">
+                  <span>Next</span>
+                </div>
+                <div class="title">Signal processing</div>
+              </div>
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+            </a>
+          <a class="prev-page" href="cli.html">
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+              <div class="page-info">
+                <div class="context">
+                  <span>Previous</span>
+                </div>
+                
+                <div class="title">Command-line reference</div>
+                
+              </div>
+            </a>
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                Copyright &#169; 2026, Brian Collette
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+            
+          </div>
+          <div class="right-details">
+            
+          </div>
+        </div>
+        
+      </footer>
+    </div>
+    <aside class="toc-drawer">
+      
+      
+      <div class="toc-sticky toc-scroll">
+        <div class="toc-title-container">
+          <span class="toc-title">
+            On this page
+          </span>
+        </div>
+        <div class="toc-tree-container">
+          <div class="toc-tree">
+            <ul>
+<li><a class="reference internal" href="#">Build reference</a><ul>
+<li><a class="reference internal" href="#configure-and-compile">Configure and compile</a></li>
+<li><a class="reference internal" href="#the-build-script">The build script</a></li>
+<li><a class="reference internal" href="#options">Options</a><ul>
+<li><a class="reference internal" href="#summary">Summary</a></li>
+<li><a class="reference internal" href="#cmake-build-type">CMAKE_BUILD_TYPE</a></li>
+<li><a class="reference internal" href="#x11-root">X11_ROOT</a></li>
+<li><a class="reference internal" href="#wvt-with-rtlsdr">WVT_WITH_RTLSDR</a></li>
+<li><a class="reference internal" href="#wvt-with-uhd">WVT_WITH_UHD</a></li>
+<li><a class="reference internal" href="#wvt-with-bb">WVT_WITH_BB</a></li>
+<li><a class="reference internal" href="#signalhound-sdk-dir">SIGNALHOUND_SDK_DIR</a></li>
+<li><a class="reference internal" href="#wvt-bb-sim">WVT_BB_SIM</a></li>
+<li><a class="reference internal" href="#wvt-with-skiq">WVT_WITH_SKIQ</a></li>
+<li><a class="reference internal" href="#sidekiq-sdk-dir">SIDEKIQ_SDK_DIR</a></li>
+<li><a class="reference internal" href="#wvt-skiq-sim">WVT_SKIQ_SIM</a></li>
+<li><a class="reference internal" href="#wvt-with-audio">WVT_WITH_AUDIO</a></li>
+<li><a class="reference internal" href="#wvt-with-cuda">WVT_WITH_CUDA</a></li>
+<li><a class="reference internal" href="#wvt-cuda-static">WVT_CUDA_STATIC</a></li>
+<li><a class="reference internal" href="#cmake-cuda-architectures">CMAKE_CUDA_ARCHITECTURES</a></li>
+<li><a class="reference internal" href="#wvt-with-metal">WVT_WITH_METAL</a></li>
+<li><a class="reference internal" href="#wvt-werror">WVT_WERROR</a></li>
+<li><a class="reference internal" href="#wvt-sanitize">WVT_SANITIZE</a></li>
+<li><a class="reference internal" href="#wvt-fuzz">WVT_FUZZ</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#the-cpu-fft">The CPU FFT</a></li>
+<li><a class="reference internal" href="#examples">Examples</a></li>
+<li><a class="reference internal" href="#build-targets">Build targets</a></li>
+<li><a class="reference internal" href="#version-information">Version information</a></li>
+<li><a class="reference internal" href="#build-the-documentation">Build the documentation</a></li>
+</ul>
+</li>
+</ul>
+
+          </div>
+        </div>
+      </div>
+      
+      
+    </aside>
+  </div>
+</div><script src="_static/documentation_options.js?v=5929fcd5"></script>
+    <script src="_static/doctools.js?v=9bcbadda"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/scripts/furo.js?v=46bd48cc"></script>
+    </body>
+</html>

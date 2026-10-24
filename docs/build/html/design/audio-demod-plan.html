@@ -1,0 +1,650 @@
+<!doctype html>
+<html class="no-js" lang="en" data-content_root="../">
+  <head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html"><link rel="next" title="Plan: Verbose console logging and a timestamped log file" href="verbose-logging-plan.html"><link rel="prev" title="Design records" href="index.html">
+
+    <!-- Generated with Sphinx 8.2.3 and Furo 2025.12.19 -->
+        <title>Plan: Audio demodulation and playback - wvt</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d111a655" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=7bdb33bb" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?v=8dab3a3b" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f2f2f2;
+  --color-code-foreground: #1e1e1e;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-with-moon" viewBox="0 0 24 24">
+    <title>Auto light/dark, in light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path style="opacity: 50%" d="M 5.411 14.504 C 5.471 14.504 5.532 14.504 5.591 14.504 C 3.639 16.319 4.383 19.569 6.931 20.352 C 7.693 20.586 8.512 20.551 9.25 20.252 C 8.023 23.207 4.056 23.725 2.11 21.184 C 0.166 18.642 1.702 14.949 4.874 14.536 C 5.051 14.512 5.231 14.5 5.411 14.5 L 5.411 14.504 Z"/>
+      <line x1="14.5" y1="3.25" x2="14.5" y2="1.25"/>
+      <line x1="14.5" y1="15.85" x2="14.5" y2="17.85"/>
+      <line x1="10.044" y1="5.094" x2="8.63" y2="3.68"/>
+      <line x1="19" y1="14.05" x2="20.414" y2="15.464"/>
+      <line x1="8.2" y1="9.55" x2="6.2" y2="9.55"/>
+      <line x1="20.8" y1="9.55" x2="22.8" y2="9.55"/>
+      <line x1="10.044" y1="14.006" x2="8.63" y2="15.42"/>
+      <line x1="19" y1="5.05" x2="20.414" y2="3.636"/>
+      <circle cx="14.5" cy="9.55" r="3.6"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon-with-sun" viewBox="0 0 24 24">
+    <title>Auto light/dark, in dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path d="M 8.282 7.007 C 8.385 7.007 8.494 7.007 8.595 7.007 C 5.18 10.184 6.481 15.869 10.942 17.24 C 12.275 17.648 13.706 17.589 15 17.066 C 12.851 22.236 5.91 23.143 2.505 18.696 C -0.897 14.249 1.791 7.786 7.342 7.063 C 7.652 7.021 7.965 7 8.282 7 L 8.282 7.007 Z"/>
+      <line style="opacity: 50%" x1="18" y1="3.705" x2="18" y2="2.5"/>
+      <line style="opacity: 50%" x1="18" y1="11.295" x2="18" y2="12.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="4.816" x2="14.464" y2="3.964"/>
+      <line style="opacity: 50%" x1="20.711" y1="10.212" x2="21.563" y2="11.063"/>
+      <line style="opacity: 50%" x1="14.205" y1="7.5" x2="13.001" y2="7.5"/>
+      <line style="opacity: 50%" x1="21.795" y1="7.5" x2="23" y2="7.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="10.184" x2="14.464" y2="11.036"/>
+      <line style="opacity: 50%" x1="20.711" y1="4.789" x2="21.563" y2="3.937"/>
+      <circle style="opacity: 50%" cx="18" cy="7.5" r="2.169"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-pencil" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-pencil-code">
+      <path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" />
+      <path d="M13.5 6.5l4 4" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+  <symbol id="svg-eye" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-eye-code">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" />
+      <path
+        d="M11.11 17.958c-3.209 -.307 -5.91 -2.293 -8.11 -5.958c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6c-.21 .352 -.427 .688 -.647 1.008" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle site navigation sidebar">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc" aria-label="Toggle table of contents sidebar">
+<label class="overlay sidebar-overlay" for="__navigation"></label>
+<label class="overlay toc-overlay" for="__toc"></label>
+
+<a class="skip-to-content muted-link" href="#furo-main-content">Skip to content</a>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <span class="icon"><svg><use href="#svg-menu"></use></svg></span>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="../index.html"><div class="brand">wvt</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+          <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+          <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon" for="__toc">
+        <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand" href="../index.html">
+  
+  <span class="sidebar-brand-text">wvt</span>
+  
+</a><form class="sidebar-search-container" method="get" action="../search.html" role="search">
+  <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <p class="caption" role="heading"><span class="caption-text">User guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../getting-started.html">Getting started</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../viewer.html">The file viewer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../segments.html">Load a segment</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../export.html">Export a region</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../snapshots.html">Plot snapshots</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../sessions.html">File sessions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../live.html">Live devices</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../siggen.html">Signal generator</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../audio.html">Audio</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../gpu.html">GPU processing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../logging.html">Logging</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../controls.html">Mouse and keyboard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../cli.html">Command-line reference</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../build.html">Build reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../signal-processing.html">Signal processing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../self-checks.html">Self-checks and test signals</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../source-layout.html">Source layout</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../writing-docs.html">Writing the documentation</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Design records</span></p>
+<ul class="current">
+<li class="toctree-l1 current has-children"><a class="reference internal" href="index.html">Design records</a><input aria-label="Toggle navigation of Design records" checked="" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul class="current">
+<li class="toctree-l2 current current-page"><a class="current reference internal" href="#">Plan: Audio demodulation and playback</a></li>
+<li class="toctree-l2"><a class="reference internal" href="verbose-logging-plan.html">Plan: Verbose console logging and a timestamped log file</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-segment-plan.html">Plan: open a time segment of a file (issue #16)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cuda-gpu-plan.html">Plan: CUDA GPU acceleration (issue #3)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="region-export-plan.html">Plan: export a region of a file (issue #18)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="apple-gpu-plan.html">Plan: Apple GPU support (issue #21)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ui-cleanup-plan.html">Plan: labels outside the plots and a tidier UI (issues #12 and #19)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="siggen-sweep-plan.html">Signal generator: frequency and amplitude sweep (issue #28)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="siggen-chain-plan.html">Signal generator: chain playback (issue #27)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="plot-snapshot-plan.html">Plan: snapshot button for all graphs (issue #13)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="usrp-models-plan.html">Plan: support other Ettus USRPs (issue #11)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="bb60-integration-plan.html">Plan: Signal Hound BB60 as a wvt live device</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sidekiq-integration-plan.html">Plan: Epiq Solutions Sidekiq as a wvt live device</a></li>
+<li class="toctree-l2"><a class="reference internal" href="point-measurement-plan.html">Plan: point-to-point measurements on the plots (issue #80)</a></li>
+</ul>
+</li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="view-this-page">
+  <a class="muted-link" href="../_sources/design/audio-demod-plan.md.txt" title="View this page">
+    <svg><use href="#svg-eye"></use></svg>
+    <span class="visually-hidden">View this page</span>
+  </a>
+</div>
+<div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+              <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+              <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon" for="__toc">
+            <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+          </label>
+        </div>
+        <article role="main" id="furo-main-content">
+          <section id="plan-audio-demodulation-and-playback">
+<h1>Plan: Audio demodulation and playback<a class="headerlink" href="#plan-audio-demodulation-and-playback" title="Link to this heading">¶</a></h1>
+<p>Branch: <code class="docutils literal notranslate"><span class="pre">7-audio-demod</span></code> (from <code class="docutils literal notranslate"><span class="pre">main</span></code> at <code class="docutils literal notranslate"><span class="pre">b50b762</span></code>)
+Status: <strong>implemented in the branch (uncommitted).</strong> Decisions are in section 6, test results and
+remaining work in section 7.</p>
+<section id="goal">
+<h2>1. Goal<a class="headerlink" href="#goal" title="Link to this heading">¶</a></h2>
+<p>Add an <strong>Audio</strong> window that demodulates one channel and plays it to the speakers:</p>
+<ul class="simple">
+<li><p><strong>File mode:</strong> play a recording from a cursor, the current view, or the marked time range,
+with a playhead that follows on the plots.</p></li>
+<li><p><strong>Live mode:</strong> play the device stream as it arrives (RTL-SDR, USRP, <code class="docutils literal notranslate"><span class="pre">sim</span></code>, or siggen
+loopback). Playback runs alongside recording.</p></li>
+</ul>
+<p>Out of scope for now: FM stereo / RDS, more than one channel at a time, network audio output.</p>
+</section>
+<section id="starting-point">
+<h2>2. Starting point<a class="headerlink" href="#starting-point" title="Link to this heading">¶</a></h2>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Area</p></th>
+<th class="head"><p>What exists</p></th>
+<th class="head"><p>Gap</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Demodulation</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">computeDemod()</span></code> (<code class="docutils literal notranslate"><span class="pre">src/dsp/engine.cpp</span></code>) — batch per view, cancellable, reduced for display</p></td>
+<td><p>No demodulator that keeps filter / phase state across blocks, so no continuous audio</p></td>
+</tr>
+<tr class="row-odd"><td><p>Live samples</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">SampleRing</span></code> (<code class="docutils literal notranslate"><span class="pre">src/common/sample_ring.h</span></code>) supports extra lossy readers with their own cursor</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">LiveEngine</span></code> does not expose <code class="docutils literal notranslate"><span class="pre">ring_</span></code>, the format, or the rate</p></td>
+</tr>
+<tr class="row-even"><td><p>Tuning</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">demod_.chanEnable/chanOffset/chanBw</span></code> and the drag overlay, file mode only</p></td>
+<td><p>Live mode is spectrum-only and has no tuner overlay</p></td>
+</tr>
+<tr class="row-odd"><td><p>Tool windows</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">drawSigGenWindow()</span></code> + <code class="docutils literal notranslate"><span class="pre">drawSigGenButton()</span></code></p></td>
+<td><p>Pattern to copy for a floating window and toolbar button</p></td>
+</tr>
+<tr class="row-even"><td><p>Audio output</p></td>
+<td><p>None — the build links only X11, GL, and threads</p></td>
+<td><p>Needs an output backend</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="design-decisions">
+<h2>3. Design decisions<a class="headerlink" href="#design-decisions" title="Link to this heading">¶</a></h2>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Topic</p></th>
+<th class="head"><p>Decision</p></th>
+<th class="head"><p>Reason</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Audio output</p></td>
+<td><p>Vendor <strong>miniaudio</strong> (single header, public domain / MIT-0) in <code class="docutils literal notranslate"><span class="pre">third_party/</span></code></p></td>
+<td><p>CoreAudio on macOS; ALSA / PulseAudio / PipeWire on Linux, loaded at runtime, so no new build dependency. Matches the vendored ImGui / ImPlot approach</p></td>
+</tr>
+<tr class="row-odd"><td><p>Build switch</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">WVT_WITH_AUDIO</span></code> = <code class="docutils literal notranslate"><span class="pre">AUTO</span></code> / <code class="docutils literal notranslate"><span class="pre">ON</span></code> / <code class="docutils literal notranslate"><span class="pre">OFF</span></code>, defines <code class="docutils literal notranslate"><span class="pre">WVT_HAVE_AUDIO</span></code></p></td>
+<td><p>Same pattern as <code class="docutils literal notranslate"><span class="pre">WVT_WITH_RTLSDR</span></code> / <code class="docutils literal notranslate"><span class="pre">WVT_WITH_UHD</span></code>. With it off, WAV export still works</p></td>
+</tr>
+<tr class="row-even"><td><p>DSP</p></td>
+<td><p>New stateful, block-based <code class="docutils literal notranslate"><span class="pre">AudioDemod</span></code> (<code class="docutils literal notranslate"><span class="pre">src/audio/audio_dsp.*</span></code>)</p></td>
+<td><p>Keeps <code class="docutils literal notranslate"><span class="pre">computeDemod</span></code> and the viewer unchanged</p></td>
+</tr>
+<tr class="row-odd"><td><p>Channelizer</p></td>
+<td><p>NCO shift → cascade of half-band decimators → final FIR to the IF rate</p></td>
+<td><p>A single direct FIR (as in <code class="docutils literal notranslate"><span class="pre">computeDemod</span></code>) is too costly in real time at 10–20 MS/s</p></td>
+</tr>
+<tr class="row-even"><td><p>Modes</p></td>
+<td><p>AM, NFM, WFM (mono, 50 / 75 µs de-emphasis), USB, LSB, CW (BFO)</p></td>
+<td><p>Covers the <code class="docutils literal notranslate"><span class="pre">sim</span></code> stations and common bands</p></td>
+</tr>
+<tr class="row-odd"><td><p>Resampling</p></td>
+<td><p>Polyphase / Farrow resampler with a variable ratio, to 48 kHz</p></td>
+<td><p>Device and file rates are arbitrary</p></td>
+</tr>
+<tr class="row-even"><td><p>Clock drift (live)</p></td>
+<td><p>PI loop on the audio ring fill level trims the resampler ratio (about ±500 ppm)</p></td>
+<td><p>SDR and sound card clocks differ; without this, audio underruns or builds up delay</p></td>
+</tr>
+<tr class="row-odd"><td><p>Threading</p></td>
+<td><p>One DSP thread per audio session fills an SPSC float ring. The miniaudio callback only copies out (no locks, no allocation) and plays zeros on underrun</p></td>
+<td><p>Keeps the audio callback real-time safe</p></td>
+</tr>
+<tr class="row-even"><td><p>Tuning</p></td>
+<td><p><strong>“Follow viewer channel”</strong> (default on) uses the existing channel offset / bandwidth; off gives the pane its own settings</p></td>
+<td><p>One tuner instead of two that disagree</p></td>
+</tr>
+<tr class="row-odd"><td><p>Window</p></td>
+<td><p>Floating ImGui window “Audio”, toolbar button and shortcut</p></td>
+<td><p>Same as the Signal Generator</p></td>
+</tr>
+<tr class="row-even"><td><p>Live retune / gap</p></td>
+<td><p>When <code class="docutils literal notranslate"><span class="pre">LiveEngine</span></code> <code class="docutils literal notranslate"><span class="pre">gen_</span></code> changes or the reader is lapped, reset the demod state and resync near <code class="docutils literal notranslate"><span class="pre">written()</span></code></p></td>
+<td><p>Avoids glitches and stale audio</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="work-breakdown">
+<h2>4. Work breakdown<a class="headerlink" href="#work-breakdown" title="Link to this heading">¶</a></h2>
+<section id="phase-1-build-and-output-backend">
+<h3>Phase 1 — Build and output backend<a class="headerlink" href="#phase-1-build-and-output-backend" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>[x] Vendor <code class="docutils literal notranslate"><span class="pre">third_party/miniaudio/miniaudio.h</span></code>; one <code class="docutils literal notranslate"><span class="pre">src/audio/audio_out.cpp</span></code> with <code class="docutils literal notranslate"><span class="pre">MINIAUDIO_IMPLEMENTATION</span></code>.</p></li>
+<li><p>[x] <code class="docutils literal notranslate"><span class="pre">src/audio/audio_out.h</span></code>: <code class="docutils literal notranslate"><span class="pre">AudioOut</span></code> — open / close, device list, 48 kHz stereo float, pull from the
+SPSC ring, underrun counter, latency.</p></li>
+<li><p>[x] CMake: <code class="docutils literal notranslate"><span class="pre">WVT_WITH_AUDIO</span></code>; link CoreAudio / AudioToolbox / CoreFoundation on macOS, <code class="docutils literal notranslate"><span class="pre">dl</span></code> / <code class="docutils literal notranslate"><span class="pre">m</span></code> on Linux.</p></li>
+<li><p>[x] <code class="docutils literal notranslate"><span class="pre">--list-audio-devices</span></code>.</p></li>
+<li><p>[x] Confirm early that audio plays from the XQuartz-linked binary on macOS.</p></li>
+</ul>
+</section>
+<section id="phase-2-streaming-dsp-src-audio-dsp-h-cpp">
+<h3>Phase 2 — Streaming DSP (<code class="docutils literal notranslate"><span class="pre">src/audio_dsp.{h,cpp}</span></code>)<a class="headerlink" href="#phase-2-streaming-dsp-src-audio-dsp-h-cpp" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>[x] <code class="docutils literal notranslate"><span class="pre">Nco</span></code>, <code class="docutils literal notranslate"><span class="pre">HalfbandDecim</span></code>, <code class="docutils literal notranslate"><span class="pre">FirDecim</span></code> (with saved history), <code class="docutils literal notranslate"><span class="pre">Resampler</span></code> (variable ratio),
+<code class="docutils literal notranslate"><span class="pre">DcBlock</span></code>, <code class="docutils literal notranslate"><span class="pre">Agc</span></code>, <code class="docutils literal notranslate"><span class="pre">Deemphasis</span></code>.</p></li>
+<li><p>[x] <code class="docutils literal notranslate"><span class="pre">AudioDemod::process(const</span> <span class="pre">cf*</span> <span class="pre">in,</span> <span class="pre">int64_t</span> <span class="pre">n,</span> <span class="pre">std::vector&lt;float&gt;&amp;</span> <span class="pre">out)</span></code>, configured by
+<code class="docutils literal notranslate"><span class="pre">AudioParams</span></code> (mode, offset, bw, squelch dB, AGC, de-emphasis, volume, BFO).</p></li>
+<li><p>[x] Reuse <code class="docutils literal notranslate"><span class="pre">designLowpass()</span></code> and <code class="docutils literal notranslate"><span class="pre">getFFT()</span></code> from <code class="docutils literal notranslate"><span class="pre">dsp.h</span></code>.</p></li>
+</ul>
+</section>
+<section id="phase-3-audio-engine-src-audio-engine-h-cpp">
+<h3>Phase 3 — Audio engine (<code class="docutils literal notranslate"><span class="pre">src/audio_engine.{h,cpp}</span></code>)<a class="headerlink" href="#phase-3-audio-engine-src-audio-engine-h-cpp" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>[x] <code class="docutils literal notranslate"><span class="pre">AudioEngine</span></code> with one small source interface and two implementations:</p>
+<ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">FileAudioSource</span></code>: <code class="docutils literal notranslate"><span class="pre">IqFile</span></code> + <code class="docutils literal notranslate"><span class="pre">FormatParams</span></code>, sample cursor, range [s0, s1], loop, seek,
+pause; reads ahead in ~20 ms blocks.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">LiveAudioSource</span></code>: lossy <code class="docutils literal notranslate"><span class="pre">SampleRing::read()</span></code> with its own cursor, starting ~100 ms behind
+<code class="docutils literal notranslate"><span class="pre">written()</span></code>; resyncs when lapped.</p></li>
+</ul>
+</li>
+<li><p>[x] Drift PI loop (live mode only; files have no drift).</p></li>
+<li><p>[x] Stats for the UI: playhead, level (dBFS), underruns, resyncs, latency, squelch state.</p></li>
+<li><p>[x] <code class="docutils literal notranslate"><span class="pre">LiveEngine</span></code>: add <code class="docutils literal notranslate"><span class="pre">ring()</span></code>, <code class="docutils literal notranslate"><span class="pre">format()</span></code>, <code class="docutils literal notranslate"><span class="pre">rate()</span></code>, <code class="docutils literal notranslate"><span class="pre">gen()</span></code> accessors.</p></li>
+</ul>
+</section>
+<section id="phase-4-ui-src-app-app-audio-cpp-members-in-src-app-app-h">
+<h3>Phase 4 — UI (<code class="docutils literal notranslate"><span class="pre">src/app/app_audio.cpp</span></code>, members in <code class="docutils literal notranslate"><span class="pre">src/app/app.h</span></code>)<a class="headerlink" href="#phase-4-ui-src-app-app-audio-cpp-members-in-src-app-app-h" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>[x] Toolbar button “Audio” (<code class="docutils literal notranslate"><span class="pre">*</span></code> while playing) and <strong>Ctrl+D</strong> (Ctrl+A would conflict with
+select-all in text fields).</p></li>
+<li><p>[x] Window contents:</p>
+<ul>
+<li><p><strong>Source:</strong> File or Live, from the app mode.</p></li>
+<li><p><strong>Tuning:</strong> follow channel, offset, bandwidth.</p></li>
+<li><p><strong>Demod:</strong> mode, AGC, de-emphasis, BFO, squelch.</p></li>
+<li><p><strong>Output:</strong> device combo, volume, mute, level meter.</p></li>
+<li><p><strong>Transport (file):</strong> play / pause / stop, range (cursor / view / markers / whole file),
+loop, position slider.</p></li>
+<li><p><strong>Status line:</strong> latency, underruns, resyncs.</p></li>
+</ul>
+</li>
+<li><p>[x] File mode: playhead line on the time plots and waterfall; modifier-click on a time plot
+seeks; optional “follow playhead” pans the view.</p></li>
+<li><p>[x] Live mode: channel overlay on the live spectrum and waterfall (drag line, shaded
+bandwidth) and click-to-tune, using the same <code class="docutils literal notranslate"><span class="pre">demod_.chanOffset</span></code>.</p></li>
+<li><p>[x] Stop audio when the source changes (open file, enter / leave live mode, device stop).</p></li>
+</ul>
+</section>
+<section id="phase-5-wav-export-and-cli">
+<h3>Phase 5 — WAV export and CLI<a class="headerlink" href="#phase-5-wav-export-and-cli" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>[x] “Save WAV…” for the selected file range, faster than real time; “Record audio” toggle in live mode.</p></li>
+<li><p>[x] <code class="docutils literal notranslate"><span class="pre">--audio</span> <span class="pre">MODE</span></code>, <code class="docutils literal notranslate"><span class="pre">--audio-out</span> <span class="pre">FILE.wav</span></code> (demodulate the file or <code class="docutils literal notranslate"><span class="pre">--view</span></code> range and exit,
+like <code class="docutils literal notranslate"><span class="pre">--gen-out</span></code>), <code class="docutils literal notranslate"><span class="pre">--audio-device</span> <span class="pre">NAME</span></code>, <code class="docutils literal notranslate"><span class="pre">--volume</span> <span class="pre">DB</span></code>.</p></li>
+</ul>
+</section>
+<section id="phase-6-tests-and-docs">
+<h3>Phase 6 — Tests and docs<a class="headerlink" href="#phase-6-tests-and-docs" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>[x] <code class="docutils literal notranslate"><span class="pre">tools/audio_check.cpp</span></code> (like <code class="docutils literal notranslate"><span class="pre">siggen_check</span></code>): synthesize AM / FM / SSB tones at a known
+offset, run <code class="docutils literal notranslate"><span class="pre">AudioDemod</span></code>, check tone frequency, SNR, and level; check resampler output
+length against the ratio; check that the drift loop converges for a ±200 ppm rate error.</p></li>
+<li><p>[x] Manual checks: <code class="docutils literal notranslate"><span class="pre">wvt</span> <span class="pre">--device</span> <span class="pre">sim</span></code> (built-in AM and FM stations) and iqgen files.</p></li>
+<li><p>[x] README: Audio section, build option, CLI flags, source-file table.</p></li>
+<li><p>[ ] Roadmap row (left for you: the table numbers versions, and 1.2 / 1.3 are not done yet).</p></li>
+</ul>
+</section>
+</section>
+<section id="risks">
+<h2>5. Risks<a class="headerlink" href="#risks" title="Link to this heading">¶</a></h2>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Risk</p></th>
+<th class="head"><p>Mitigation</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>macOS audio from an XQuartz-linked process</p></td>
+<td><p>CoreAudio works from any process; verify in Phase 1</p></td>
+</tr>
+<tr class="row-odd"><td><p>No audio device (<code class="docutils literal notranslate"><span class="pre">ssh</span> <span class="pre">-X</span></code>, Xvfb, headless)</p></td>
+<td><p>Pane shows “no output device; WAV export only” and keeps working</p></td>
+</tr>
+<tr class="row-even"><td><p>High rates (USRP at 20+ MS/s)</p></td>
+<td><p>Measure the half-band cascade; show “DSP behind” in the status line if it cannot keep up</p></td>
+</tr>
+<tr class="row-odd"><td><p>Live latency vs. robustness</p></td>
+<td><p>~150 ms target (100 ms for files); not adjustable yet</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="decisions-formerly-open-questions">
+<h2>6. Decisions (formerly open questions)<a class="headerlink" href="#decisions-formerly-open-questions" title="Link to this heading">¶</a></h2>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Question</p></th>
+<th class="head"><p>Decision</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Output backend</p></td>
+<td><p>Vendor <strong>miniaudio</strong></p></td>
+</tr>
+<tr class="row-odd"><td><p>Window</p></td>
+<td><p><strong>Floating</strong> window, like the Signal Generator</p></td>
+</tr>
+<tr class="row-even"><td><p>Modes</p></td>
+<td><p>AM, NFM, WFM (mono), USB, LSB, CW, as listed. WFM stereo is out of scope for this branch</p></td>
+</tr>
+<tr class="row-odd"><td><p>WAV export</p></td>
+<td><p><strong>In this version</strong>: “Save WAV…”, live “Record audio”, and headless <code class="docutils literal notranslate"><span class="pre">--audio-out</span></code></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="results-and-remaining-work">
+<h2>7. Results and remaining work<a class="headerlink" href="#results-and-remaining-work" title="Link to this heading">¶</a></h2>
+<p>Implemented as planned, with these details:</p>
+<ul class="simple">
+<li><p>Files: <code class="docutils literal notranslate"><span class="pre">src/audio/audio_dsp.*</span></code>, <code class="docutils literal notranslate"><span class="pre">src/audio/audio_engine.*</span></code>, <code class="docutils literal notranslate"><span class="pre">src/audio/audio_out.*</span></code>, <code class="docutils literal notranslate"><span class="pre">src/io/wav_writer.*</span></code>,
+<code class="docutils literal notranslate"><span class="pre">src/audio/miniaudio_impl.c</span></code>, <code class="docutils literal notranslate"><span class="pre">src/app/app_audio.cpp</span></code>, <code class="docutils literal notranslate"><span class="pre">tools/audio_check.cpp</span></code>, <code class="docutils literal notranslate"><span class="pre">third_party/miniaudio/</span></code>
+(0.11.25, header + license). Small changes in <code class="docutils literal notranslate"><span class="pre">app.*</span></code>, <code class="docutils literal notranslate"><span class="pre">app_live.cpp</span></code>, <code class="docutils literal notranslate"><span class="pre">live.h</span></code>, <code class="docutils literal notranslate"><span class="pre">main.cpp</span></code>,
+<code class="docutils literal notranslate"><span class="pre">recorder.*</span></code> (exports <code class="docutils literal notranslate"><span class="pre">makeDirs</span></code>), <code class="docutils literal notranslate"><span class="pre">CMakeLists.txt</span></code>, <code class="docutils literal notranslate"><span class="pre">README.md</span></code>.</p></li>
+<li><p>miniaudio on macOS uses <code class="docutils literal notranslate"><span class="pre">MA_NO_RUNTIME_LINKING</span></code> and links the CoreAudio frameworks; on Linux it
+loads the backends at run time (links only <code class="docutils literal notranslate"><span class="pre">dl</span></code>, <code class="docutils literal notranslate"><span class="pre">m</span></code>, threads). The <code class="docutils literal notranslate"><span class="pre">MA_NO_*</span></code> defines are on the
+<code class="docutils literal notranslate"><span class="pre">miniaudio</span></code> target as PUBLIC, so all files see the same configuration.</p></li>
+<li><p>For every mode, <code class="docutils literal notranslate"><span class="pre">offset</span></code> is the passband center, so the cyan / orange overlay is exactly the
+passband. USB puts the carrier at the lower edge, LSB at the upper edge.</p></li>
+<li><p>“Follow playhead” only pages views of 0.25 s or more; shorter views paged faster than the plots
+could be computed.</p></li>
+<li><p>Headless <code class="docutils literal notranslate"><span class="pre">--audio-out</span></code> with <code class="docutils literal notranslate"><span class="pre">--device</span></code> records live audio without opening a sound device
+(<code class="docutils literal notranslate"><span class="pre">AudioOutput::None</span></code>).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">App::busy()</span></code> does not include audio; <code class="docutils literal notranslate"><span class="pre">App::audioBusy()</span></code> keeps the main loop running. This keeps
+<code class="docutils literal notranslate"><span class="pre">--screenshot</span></code> working while audio plays.</p></li>
+</ul>
+<p>Verified:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">build/audio_check</span></code>: all modes at 250 kS/s, 2.4 MS/s and 10 MS/s with blocks of random size. Tone
+within 1 Hz, SNR 37-70 dB, output length within 0.15 %, ratio trim exact (+500 ppm), squelch, and
+the WAV header. DSP speed at 10 MS/s: 10-15x real time (x86_64 build under Rosetta).</p></li>
+<li><p>Headless export from an <code class="docutils literal notranslate"><span class="pre">iqgen</span></code> file (WFM 1 kHz at 53 dB SNR; AM 400 Hz) and headless live
+recording from <code class="docutils literal notranslate"><span class="pre">--device</span> <span class="pre">sim</span></code> (WFM 50 dB, AM 400 Hz, 0 resyncs).</p></li>
+<li><p>40 s live run against the MacBook speakers (muted): latency steady at 173-180 ms, drift trim
+-90 to -290 ppm, 0 underruns, 0 resyncs, DSP load 11-13 % for WFM at 2.4 MS/s.</p></li>
+<li><p>Screenshots of file playback (playhead, level meter, follow) and live playback (tuner overlay).</p></li>
+<li><p>Build with <code class="docutils literal notranslate"><span class="pre">-DWVT_WITH_AUDIO=OFF</span></code>: compiles, reports “built without audio output”, WAV export works.</p></li>
+</ul>
+<p>Checked by hand: playback with the simulator and with a handheld radio.</p>
+<p>Not yet verified by hand:</p>
+<ul class="simple">
+<li><p>[ ] Listening test of each mode.</p></li>
+<li><p>[ ] Shift+click to play, dragging the playhead and the position slider, Pause / Resume, Loop.</p></li>
+<li><p>[ ] Live “Record audio” button, device combo, audio across a retune and a stream restart.</p></li>
+<li><p>[ ] Real RTL-SDR / USRP streams (only the simulator was tested).</p></li>
+<li><p>[ ] A Linux build (only macOS was built here).</p></li>
+</ul>
+<p>Possible follow-ups: adjustable live latency, FM stereo, audio spectrum / scope in the window.</p>
+</section>
+</section>
+
+        </article>
+      </div>
+      <footer>
+        
+        <div class="related-pages">
+          <a class="next-page" href="verbose-logging-plan.html">
+              <div class="page-info">
+                <div class="context">
+                  <span>Next</span>
+                </div>
+                <div class="title">Plan: Verbose console logging and a timestamped log file</div>
+              </div>
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+            </a>
+          <a class="prev-page" href="index.html">
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+              <div class="page-info">
+                <div class="context">
+                  <span>Previous</span>
+                </div>
+                
+                <div class="title">Design records</div>
+                
+              </div>
+            </a>
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                Copyright &#169; 2026, Brian Collette
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+            
+          </div>
+          <div class="right-details">
+            
+          </div>
+        </div>
+        
+      </footer>
+    </div>
+    <aside class="toc-drawer">
+      
+      
+      <div class="toc-sticky toc-scroll">
+        <div class="toc-title-container">
+          <span class="toc-title">
+            On this page
+          </span>
+        </div>
+        <div class="toc-tree-container">
+          <div class="toc-tree">
+            <ul>
+<li><a class="reference internal" href="#">Plan: Audio demodulation and playback</a><ul>
+<li><a class="reference internal" href="#goal">1. Goal</a></li>
+<li><a class="reference internal" href="#starting-point">2. Starting point</a></li>
+<li><a class="reference internal" href="#design-decisions">3. Design decisions</a></li>
+<li><a class="reference internal" href="#work-breakdown">4. Work breakdown</a><ul>
+<li><a class="reference internal" href="#phase-1-build-and-output-backend">Phase 1 — Build and output backend</a></li>
+<li><a class="reference internal" href="#phase-2-streaming-dsp-src-audio-dsp-h-cpp">Phase 2 — Streaming DSP (<code class="docutils literal notranslate"><span class="pre">src/audio_dsp.{h,cpp}</span></code>)</a></li>
+<li><a class="reference internal" href="#phase-3-audio-engine-src-audio-engine-h-cpp">Phase 3 — Audio engine (<code class="docutils literal notranslate"><span class="pre">src/audio_engine.{h,cpp}</span></code>)</a></li>
+<li><a class="reference internal" href="#phase-4-ui-src-app-app-audio-cpp-members-in-src-app-app-h">Phase 4 — UI (<code class="docutils literal notranslate"><span class="pre">src/app/app_audio.cpp</span></code>, members in <code class="docutils literal notranslate"><span class="pre">src/app/app.h</span></code>)</a></li>
+<li><a class="reference internal" href="#phase-5-wav-export-and-cli">Phase 5 — WAV export and CLI</a></li>
+<li><a class="reference internal" href="#phase-6-tests-and-docs">Phase 6 — Tests and docs</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#risks">5. Risks</a></li>
+<li><a class="reference internal" href="#decisions-formerly-open-questions">6. Decisions (formerly open questions)</a></li>
+<li><a class="reference internal" href="#results-and-remaining-work">7. Results and remaining work</a></li>
+</ul>
+</li>
+</ul>
+
+          </div>
+        </div>
+      </div>
+      
+      
+    </aside>
+  </div>
+</div><script src="../_static/documentation_options.js?v=5929fcd5"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/scripts/furo.js?v=46bd48cc"></script>
+    </body>
+</html>

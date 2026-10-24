@@ -1,0 +1,710 @@
+<!doctype html>
+<html class="no-js" lang="en" data-content_root="../">
+  <head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html"><link rel="next" title="Plan: CUDA GPU acceleration (issue #3)" href="cuda-gpu-plan.html"><link rel="prev" title="Plan: Verbose console logging and a timestamped log file" href="verbose-logging-plan.html">
+
+    <!-- Generated with Sphinx 8.2.3 and Furo 2025.12.19 -->
+        <title>Plan: open a time segment of a file (issue #16) - wvt</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d111a655" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=7bdb33bb" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?v=8dab3a3b" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f2f2f2;
+  --color-code-foreground: #1e1e1e;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-with-moon" viewBox="0 0 24 24">
+    <title>Auto light/dark, in light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path style="opacity: 50%" d="M 5.411 14.504 C 5.471 14.504 5.532 14.504 5.591 14.504 C 3.639 16.319 4.383 19.569 6.931 20.352 C 7.693 20.586 8.512 20.551 9.25 20.252 C 8.023 23.207 4.056 23.725 2.11 21.184 C 0.166 18.642 1.702 14.949 4.874 14.536 C 5.051 14.512 5.231 14.5 5.411 14.5 L 5.411 14.504 Z"/>
+      <line x1="14.5" y1="3.25" x2="14.5" y2="1.25"/>
+      <line x1="14.5" y1="15.85" x2="14.5" y2="17.85"/>
+      <line x1="10.044" y1="5.094" x2="8.63" y2="3.68"/>
+      <line x1="19" y1="14.05" x2="20.414" y2="15.464"/>
+      <line x1="8.2" y1="9.55" x2="6.2" y2="9.55"/>
+      <line x1="20.8" y1="9.55" x2="22.8" y2="9.55"/>
+      <line x1="10.044" y1="14.006" x2="8.63" y2="15.42"/>
+      <line x1="19" y1="5.05" x2="20.414" y2="3.636"/>
+      <circle cx="14.5" cy="9.55" r="3.6"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon-with-sun" viewBox="0 0 24 24">
+    <title>Auto light/dark, in dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path d="M 8.282 7.007 C 8.385 7.007 8.494 7.007 8.595 7.007 C 5.18 10.184 6.481 15.869 10.942 17.24 C 12.275 17.648 13.706 17.589 15 17.066 C 12.851 22.236 5.91 23.143 2.505 18.696 C -0.897 14.249 1.791 7.786 7.342 7.063 C 7.652 7.021 7.965 7 8.282 7 L 8.282 7.007 Z"/>
+      <line style="opacity: 50%" x1="18" y1="3.705" x2="18" y2="2.5"/>
+      <line style="opacity: 50%" x1="18" y1="11.295" x2="18" y2="12.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="4.816" x2="14.464" y2="3.964"/>
+      <line style="opacity: 50%" x1="20.711" y1="10.212" x2="21.563" y2="11.063"/>
+      <line style="opacity: 50%" x1="14.205" y1="7.5" x2="13.001" y2="7.5"/>
+      <line style="opacity: 50%" x1="21.795" y1="7.5" x2="23" y2="7.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="10.184" x2="14.464" y2="11.036"/>
+      <line style="opacity: 50%" x1="20.711" y1="4.789" x2="21.563" y2="3.937"/>
+      <circle style="opacity: 50%" cx="18" cy="7.5" r="2.169"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-pencil" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-pencil-code">
+      <path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" />
+      <path d="M13.5 6.5l4 4" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+  <symbol id="svg-eye" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-eye-code">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" />
+      <path
+        d="M11.11 17.958c-3.209 -.307 -5.91 -2.293 -8.11 -5.958c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6c-.21 .352 -.427 .688 -.647 1.008" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle site navigation sidebar">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc" aria-label="Toggle table of contents sidebar">
+<label class="overlay sidebar-overlay" for="__navigation"></label>
+<label class="overlay toc-overlay" for="__toc"></label>
+
+<a class="skip-to-content muted-link" href="#furo-main-content">Skip to content</a>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <span class="icon"><svg><use href="#svg-menu"></use></svg></span>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="../index.html"><div class="brand">wvt</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+          <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+          <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon" for="__toc">
+        <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand" href="../index.html">
+  
+  <span class="sidebar-brand-text">wvt</span>
+  
+</a><form class="sidebar-search-container" method="get" action="../search.html" role="search">
+  <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <p class="caption" role="heading"><span class="caption-text">User guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../getting-started.html">Getting started</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../viewer.html">The file viewer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../segments.html">Load a segment</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../export.html">Export a region</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../snapshots.html">Plot snapshots</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../sessions.html">File sessions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../live.html">Live devices</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../siggen.html">Signal generator</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../audio.html">Audio</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../gpu.html">GPU processing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../logging.html">Logging</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../controls.html">Mouse and keyboard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../cli.html">Command-line reference</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../build.html">Build reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../signal-processing.html">Signal processing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../self-checks.html">Self-checks and test signals</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../source-layout.html">Source layout</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../writing-docs.html">Writing the documentation</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Design records</span></p>
+<ul class="current">
+<li class="toctree-l1 current has-children"><a class="reference internal" href="index.html">Design records</a><input aria-label="Toggle navigation of Design records" checked="" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="audio-demod-plan.html">Plan: Audio demodulation and playback</a></li>
+<li class="toctree-l2"><a class="reference internal" href="verbose-logging-plan.html">Plan: Verbose console logging and a timestamped log file</a></li>
+<li class="toctree-l2 current current-page"><a class="current reference internal" href="#">Plan: open a time segment of a file (issue #16)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cuda-gpu-plan.html">Plan: CUDA GPU acceleration (issue #3)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="region-export-plan.html">Plan: export a region of a file (issue #18)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="apple-gpu-plan.html">Plan: Apple GPU support (issue #21)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ui-cleanup-plan.html">Plan: labels outside the plots and a tidier UI (issues #12 and #19)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="siggen-sweep-plan.html">Signal generator: frequency and amplitude sweep (issue #28)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="siggen-chain-plan.html">Signal generator: chain playback (issue #27)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="plot-snapshot-plan.html">Plan: snapshot button for all graphs (issue #13)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="usrp-models-plan.html">Plan: support other Ettus USRPs (issue #11)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="bb60-integration-plan.html">Plan: Signal Hound BB60 as a wvt live device</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sidekiq-integration-plan.html">Plan: Epiq Solutions Sidekiq as a wvt live device</a></li>
+<li class="toctree-l2"><a class="reference internal" href="point-measurement-plan.html">Plan: point-to-point measurements on the plots (issue #80)</a></li>
+</ul>
+</li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="view-this-page">
+  <a class="muted-link" href="../_sources/design/time-segment-plan.md.txt" title="View this page">
+    <svg><use href="#svg-eye"></use></svg>
+    <span class="visually-hidden">View this page</span>
+  </a>
+</div>
+<div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+              <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+              <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon" for="__toc">
+            <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+          </label>
+        </div>
+        <article role="main" id="furo-main-content">
+          <section id="plan-open-a-time-segment-of-a-file-issue-16">
+<h1>Plan: open a time segment of a file (issue #16)<a class="headerlink" href="#plan-open-a-time-segment-of-a-file-issue-16" title="Link to this heading">¶</a></h1>
+<p>Branch: <code class="docutils literal notranslate"><span class="pre">16-time-segment</span></code>, from <code class="docutils literal notranslate"><span class="pre">main</span></code> at <code class="docutils literal notranslate"><span class="pre">29dca41</span></code>.
+Status: <strong>steps 1–5 implemented</strong> (2026-10-19), PR #17. The user tested the GUI on screen
+(2026-10-19).</p>
+<section id="goal">
+<h2>1. Goal<a class="headerlink" href="#goal" title="Link to this heading">¶</a></h2>
+<p>Issue #16 asks for these items:</p>
+<ol class="arabic simple">
+<li><p>Two text boxes in the main UI: a start time and an end time, in seconds.</p></li>
+<li><p>When a file opens, wvt processes only that segment of the file.</p></li>
+<li><p>The user can change the values after the file is open. A change opens the file again
+at the new times.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">-1</span></code> and <code class="docutils literal notranslate"><span class="pre">-1</span></code> mean the whole file. Any other value marks a specific time.</p></li>
+</ol>
+</section>
+<section id="starting-point-main">
+<h2>2. Starting point (<code class="docutils literal notranslate"><span class="pre">main</span></code>)<a class="headerlink" href="#starting-point-main" title="Link to this heading">¶</a></h2>
+<section id="what-is-slow-today">
+<h3>What is slow today<a class="headerlink" href="#what-is-slow-today" title="Link to this heading">¶</a></h3>
+<p>Measured on a 7.5 GB file (ci16, 20 MS/s, 100 s), on the 10-core development Mac with
+16 GB of memory. The tool was <code class="docutils literal notranslate"><span class="pre">open_bench</span></code>, run on the jobs that <code class="docutils literal notranslate"><span class="pre">App</span></code> starts after a file
+opens:</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Job</p></th>
+<th class="head"><p>Whole file</p></th>
+<th class="head"><p>40–50 s segment</p></th>
+<th class="head"><p>Whole file, second time</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">IqFile::open</span></code></p></td>
+<td><p>0.6 ms</p></td>
+<td><p>—</p></td>
+<td><p>—</p></td>
+</tr>
+<tr class="row-odd"><td><p>Waterfall</p></td>
+<td><p><strong>3394 ms</strong>, FFT sees <strong>13 %</strong></p></td>
+<td><p>427 ms, FFT sees <strong>100 %</strong></p></td>
+<td><p>255 ms, 13 %</p></td>
+</tr>
+<tr class="row-even"><td><p>Demod (sparse)</p></td>
+<td><p>37 ms</p></td>
+<td><p>21 ms</p></td>
+<td><p>23 ms</p></td>
+</tr>
+<tr class="row-odd"><td><p>Overview strip</p></td>
+<td><p>46 ms</p></td>
+<td><p>—</p></td>
+<td><p>—</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Conclusions:</p>
+<ul class="simple">
+<li><p>Opening the file costs nothing. <code class="docutils literal notranslate"><span class="pre">IqFile</span></code> memory-maps the file.</p></li>
+<li><p>The time goes into the first waterfall. It spreads 256 M samples
+(<code class="docutils literal notranslate"><span class="pre">kMaxInputSamples</span></code>) over the whole file, so it reads pages from the full 7.5 GB.
+The second run is fast because the pages are then in memory. The file in the test was
+just written, so part of it was already in memory. On a cold disk, a network drive, or a
+file larger than memory, the first view is slower than this.</p></li>
+<li><p>On the whole file, the waterfall sees only 13 % of the samples, so short signals can be
+missing. On a 10 s segment, the same work sees 100 %.</p></li>
+<li><p>Each pan or zoom over a wide view repeats this disk read.</p></li>
+</ul>
+<p>A segment fixes the slow first view. It also makes the full-coverage waterfall possible
+for the part of the file that the user wants.</p>
+</section>
+<section id="what-exists">
+<h3>What exists<a class="headerlink" href="#what-exists" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">App::openFile</span></code> (<code class="docutils literal notranslate"><span class="pre">src/app/app.cpp</span></code>) gets the metadata, opens the <code class="docutils literal notranslate"><span class="pre">IqFile</span></code>, and calls
+<code class="docutils literal notranslate"><span class="pre">onSourceChanged(true)</span></code>. That function sets <code class="docutils literal notranslate"><span class="pre">nSamples_</span></code> and <code class="docutils literal notranslate"><span class="pre">dur_</span></code> and resets the view
+to <code class="docutils literal notranslate"><span class="pre">0</span> <span class="pre">…</span> <span class="pre">dur_</span></code>. The first frame then sends the waterfall, demod and overview requests
+(<code class="docutils literal notranslate"><span class="pre">submitRequests</span></code>).</p></li>
+<li><p>The workers already take absolute sample ranges (<code class="docutils literal notranslate"><span class="pre">s0</span></code>, <code class="docutils literal notranslate"><span class="pre">s1</span></code>). The overview always reads
+the whole file (<code class="docutils literal notranslate"><span class="pre">OverviewReq</span></code> has no range).</p></li>
+<li><p>About 20 places in <code class="docutils literal notranslate"><span class="pre">src/app/app.cpp</span></code> and 2 in <code class="docutils literal notranslate"><span class="pre">src/app/app_audio.cpp</span></code> use <code class="docutils literal notranslate"><span class="pre">0</span></code> and <code class="docutils literal notranslate"><span class="pre">dur_</span></code> /
+<code class="docutils literal notranslate"><span class="pre">nSamples_</span></code> as the limits of the file:</p>
+<ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">setView</span></code> clamping;</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">|&lt;</span></code>, <code class="docutils literal notranslate"><span class="pre">&gt;|</span></code>, <code class="docutils literal notranslate"><span class="pre">All</span></code> and the span presets;</p></li>
+<li><p>the Home, End and A keys;</p></li>
+<li><p>the scrollbar and the overview axis;</p></li>
+<li><p>the plot axis constraints;</p></li>
+<li><p>the toolbar info text;</p></li>
+<li><p>the default time markers;</p></li>
+<li><p>the audio “Whole file” range and the playhead slider.</p></li>
+</ul>
+</li>
+<li><p>The command line already has <code class="docutils literal notranslate"><span class="pre">--view</span> <span class="pre">T0:T1</span></code> (initial view). In headless audio export,
+<code class="docutils literal notranslate"><span class="pre">--view</span></code> also sets the export range (<code class="docutils literal notranslate"><span class="pre">runAudioExport</span></code>, <code class="docutils literal notranslate"><span class="pre">src/app/main.cpp</span></code>).</p></li>
+<li><p>Row 2 of the toolbar already has a <strong>Start</strong> box. It moves the view, not the segment.
+The new boxes need different names.</p></li>
+</ul>
+</section>
+</section>
+<section id="design-decisions">
+<h2>3. Design decisions<a class="headerlink" href="#design-decisions" title="Link to this heading">¶</a></h2>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Topic</p></th>
+<th class="head"><p>Decision</p></th>
+<th class="head"><p>Reason</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Time axis</p></td>
+<td><p><strong>Absolute file time.</strong> The plots, readouts, bookmarks, markers and audio playhead show seconds from the start of the file. A segment from 40 s to 50 s shows 40–50 s, not 0–10 s.</p></td>
+<td><p>The values the user types match what the plots show. The sample numbers match the file and its SigMF annotations. The workers already use absolute sample numbers, so they do not change.</p></td>
+</tr>
+<tr class="row-odd"><td><p>How the segment limits work</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">App</span></code> keeps <code class="docutils literal notranslate"><span class="pre">segS0_</span></code> and <code class="docutils literal notranslate"><span class="pre">segS1_</span></code> (samples) and two helpers, <code class="docutils literal notranslate"><span class="pre">tBegin()</span></code> and <code class="docutils literal notranslate"><span class="pre">tEnd()</span></code> (seconds). Every place that now uses <code class="docutils literal notranslate"><span class="pre">0</span></code> and <code class="docutils literal notranslate"><span class="pre">dur_</span></code> / <code class="docutils literal notranslate"><span class="pre">nSamples_</span></code> as the file limits uses the helpers instead. <code class="docutils literal notranslate"><span class="pre">OverviewReq</span></code> gets an <code class="docutils literal notranslate"><span class="pre">s0</span></code> / <code class="docutils literal notranslate"><span class="pre">s1</span></code> range.</p></td>
+<td><p>One source of truth. Each limit in §2 becomes a mechanical change that is easy to check.</p></td>
+</tr>
+<tr class="row-even"><td><p>Rejected: a “virtual file” in <code class="docutils literal notranslate"><span class="pre">FormatParams</span></code> (sample offset + length)</p></td>
+<td><p>Not used.</p></td>
+<td><p>It would be fewer changes, but every time on screen would be relative to the segment start. To show file time, a time offset would then be needed in all the same places.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Values stored</p></td>
+<td><p>The two values, as typed in seconds (<code class="docutils literal notranslate"><span class="pre">segT0_</span></code>, <code class="docutils literal notranslate"><span class="pre">segT1_</span></code>). The sample range comes from them in <code class="docutils literal notranslate"><span class="pre">onSourceChanged</span></code>, each time the rate, format or header changes.</p></td>
+<td><p>A changed sample rate or format moves the samples, but the user means seconds.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">-1</span></code></p></td>
+<td><p>Start <code class="docutils literal notranslate"><span class="pre">-1</span></code> = file start. End <code class="docutils literal notranslate"><span class="pre">-1</span></code> = file end. Each one works on its own: <code class="docutils literal notranslate"><span class="pre">-1</span></code> to <code class="docutils literal notranslate"><span class="pre">20</span></code> = the first 20 s, and <code class="docutils literal notranslate"><span class="pre">80</span></code> to <code class="docutils literal notranslate"><span class="pre">-1</span></code> = from 80 s to the end. Any negative value means the same as <code class="docutils literal notranslate"><span class="pre">-1</span></code>.</p></td>
+<td><p>The issue asks for <code class="docutils literal notranslate"><span class="pre">-1</span></code> / <code class="docutils literal notranslate"><span class="pre">-1</span></code> = whole file. Treating each side on its own is the natural extension.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Bad values</p></td>
+<td><p>End at or before start, or start at or after the end of the file: the status bar and <code class="docutils literal notranslate"><span class="pre">LOG_ERROR</span></code> give the reason, and the segment stays as it was. An end past the end of the file is clamped to the end, with a <code class="docutils literal notranslate"><span class="pre">LOG_WARN</span></code>.</p></td>
+<td><p>The user never gets an empty view, and always sees why a value was not used.</p></td>
+</tr>
+<tr class="row-even"><td><p>When it applies</p></td>
+<td><p>The boxes are always in the toolbar, also before a file is open. <code class="docutils literal notranslate"><span class="pre">openFile</span></code> uses the current values. Enter in a box (or focus leaving it) applies the change to the open file.</p></td>
+<td><p>The issue says “prior to opening” and “changeable after opening”.</p></td>
+</tr>
+<tr class="row-odd"><td><p>“Opens the file again”</p></td>
+<td><p>The file is <strong>not</strong> opened again from disk. A segment change keeps the mapped file, the format settings and the bookmarks. It resets the view to the full segment and clears the old results, as <code class="docutils literal notranslate"><span class="pre">onSourceChanged(true)</span></code> does, and the workers compute again.</p></td>
+<td><p>A real reopen would cost nothing but would read the metadata again and reset the format and rate. The user sees the same result.</p></td>
+</tr>
+<tr class="row-even"><td><p>New file</p></td>
+<td><p>The segment values stay when a new file opens. If they do not fit the new file, the “bad values” rule applies, and the segment falls back to the whole file.</p></td>
+<td><p>Matches “enter the times, then open”.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Overview strip</p></td>
+<td><p>Shows the segment only.</p></td>
+<td><p>The issue says “only process that segment”. The scrollbar and the overview stay in step.</p></td>
+</tr>
+<tr class="row-even"><td><p>Audio</p></td>
+<td><p>“Whole file” becomes “Whole segment”. The playhead slider and the play ranges stay inside the segment.</p></td>
+<td><p>Audio follows the same limits.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Siggen playback “from viewer”</p></td>
+<td><p>No change: it plays the whole file.</p></td>
+<td><p>Not part of the issue. It can come later.</p></td>
+</tr>
+<tr class="row-even"><td><p>Command line</p></td>
+<td><p>New option <code class="docutils literal notranslate"><span class="pre">--segment</span> <span class="pre">T0:T1</span></code>, with <code class="docutils literal notranslate"><span class="pre">-1</span></code> allowed on each side (<code class="docutils literal notranslate"><span class="pre">--segment</span> <span class="pre">40:-1</span></code>). <code class="docutils literal notranslate"><span class="pre">--view</span></code> is then absolute time inside the segment. Headless audio export (<code class="docutils literal notranslate"><span class="pre">--audio-out</span></code>) also uses the segment.</p></td>
+<td><p>The same feature from the CLI, and a way to test it without a display.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Logging (#14)</p></td>
+<td><p>INFO <code class="docutils literal notranslate"><span class="pre">segment</span> <span class="pre">40</span> <span class="pre">s</span> <span class="pre">to</span> <span class="pre">50</span> <span class="pre">s</span> <span class="pre">(200</span> <span class="pre">MS</span> <span class="pre">of</span> <span class="pre">2</span> <span class="pre">GS)</span></code> or <code class="docutils literal notranslate"><span class="pre">whole</span> <span class="pre">file</span></code>. ERROR or WARN for the bad-value cases above.</p></td>
+<td><p>Follows <code class="docutils literal notranslate"><span class="pre">docs/design/verbose-logging-plan.md</span></code>.</p></td>
+</tr>
+<tr class="row-even"><td><p>UI labels</p></td>
+<td><p>Row 1, after <strong>File</strong>: <strong>Segment</strong> <code class="docutils literal notranslate"><span class="pre">[from]</span> <span class="pre">s</span></code> <code class="docutils literal notranslate"><span class="pre">[to]</span> <span class="pre">s</span></code>, with the tooltip “Load only this part of the file, in seconds. -1 = file start / end. Press Enter to apply.” The toolbar info text shows <code class="docutils literal notranslate"><span class="pre">segment</span> <span class="pre">10</span> <span class="pre">s</span> <span class="pre">of</span> <span class="pre">100</span> <span class="pre">s</span></code> when a segment is active.</p></td>
+<td><p>Row 2 already has a <strong>Start</strong> box for the view.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="implementation-steps">
+<h2>4. Implementation steps<a class="headerlink" href="#implementation-steps" title="Link to this heading">¶</a></h2>
+<ol class="arabic simple">
+<li><p><strong>Segment state and limits</strong> (<code class="docutils literal notranslate"><span class="pre">src/app/app.h</span></code>, <code class="docutils literal notranslate"><span class="pre">src/app/app.cpp</span></code>).</p>
+<ul class="simple">
+<li><p>Add <code class="docutils literal notranslate"><span class="pre">segT0_</span> <span class="pre">=</span> <span class="pre">-1</span></code>, <code class="docutils literal notranslate"><span class="pre">segT1_</span> <span class="pre">=</span> <span class="pre">-1</span></code>, <code class="docutils literal notranslate"><span class="pre">segS0_</span></code> and <code class="docutils literal notranslate"><span class="pre">segS1_</span></code>, and the <code class="docutils literal notranslate"><span class="pre">tBegin()</span></code> and
+<code class="docutils literal notranslate"><span class="pre">tEnd()</span></code> helpers.</p></li>
+<li><p>Add <code class="docutils literal notranslate"><span class="pre">applySegment(std::string&amp;</span> <span class="pre">err)</span></code>. It turns the values into samples with the
+rules in §3. <code class="docutils literal notranslate"><span class="pre">onSourceChanged</span></code> calls it.</p></li>
+<li><p>Change each limit listed in §2 to use the helpers.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">OverviewReq</span></code> gets <code class="docutils literal notranslate"><span class="pre">s0</span></code> / <code class="docutils literal notranslate"><span class="pre">s1</span></code>, and <code class="docutils literal notranslate"><span class="pre">computeOverview</span></code> (<code class="docutils literal notranslate"><span class="pre">src/dsp/engine.cpp</span></code>) works on
+that range.</p></li>
+</ul>
+</li>
+<li><p><strong>Toolbar boxes.</strong></p>
+<ul class="simple">
+<li><p>Add two <code class="docutils literal notranslate"><span class="pre">InputSI</span></code> boxes in row 1, with the tooltip from §3.</p></li>
+<li><p>Enter calls <code class="docutils literal notranslate"><span class="pre">setSegment(t0,</span> <span class="pre">t1)</span></code>: check the values, apply them, reset the view, log
+the result.</p></li>
+<li><p>Add the segment text to the info line.</p></li>
+</ul>
+</li>
+<li><p><strong>Audio</strong> (<code class="docutils literal notranslate"><span class="pre">src/app/app_audio.cpp</span></code>). Rename “Whole file” to “Whole segment”, and keep
+<code class="docutils literal notranslate"><span class="pre">playRange</span></code> and the playhead slider inside the segment.</p></li>
+<li><p><strong>Command line</strong> (<code class="docutils literal notranslate"><span class="pre">src/app/main.cpp</span></code>).</p>
+<ul class="simple">
+<li><p>Add <code class="docutils literal notranslate"><span class="pre">--segment</span> <span class="pre">T0:T1</span></code> and its usage text.</p></li>
+<li><p>Add a public <code class="docutils literal notranslate"><span class="pre">App::setSegment</span></code>. <code class="docutils literal notranslate"><span class="pre">openFile</span></code> applies the segment before the first
+view.</p></li>
+<li><p>Headless audio export clamps its range to the segment.</p></li>
+</ul>
+</li>
+<li><p><strong>README.</strong> Add the segment boxes and <code class="docutils literal notranslate"><span class="pre">--segment</span></code> to the user guide and the CLI table.</p></li>
+</ol>
+</section>
+<section id="testing">
+<h2>5. Testing<a class="headerlink" href="#testing" title="Link to this heading">¶</a></h2>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Test</p></th>
+<th class="head"><p>Check</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Segment math (new <code class="docutils literal notranslate"><span class="pre">tools/segment_check.cpp</span></code>, or add to an existing check)</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">applySegment</span></code> with <code class="docutils literal notranslate"><span class="pre">-1</span></code>/<code class="docutils literal notranslate"><span class="pre">-1</span></code>, <code class="docutils literal notranslate"><span class="pre">-1</span></code>/<code class="docutils literal notranslate"><span class="pre">20</span></code>, <code class="docutils literal notranslate"><span class="pre">80</span></code>/<code class="docutils literal notranslate"><span class="pre">-1</span></code>, <code class="docutils literal notranslate"><span class="pre">40</span></code>/<code class="docutils literal notranslate"><span class="pre">50</span></code>, end before start, start past the end of the file, end past the end of the file. Also after a sample-rate change and after a header-bytes change.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Overview</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">computeOverview</span></code> with a range reads only inside it. Its time values are absolute.</p></td>
+</tr>
+<tr class="row-even"><td><p>Speed</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">open_bench</span></code>-style timing on a large file: with a 10 s segment, the first waterfall reads only that span.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Headless (no display)</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">wvt</span> <span class="pre">FILE</span> <span class="pre">--audio</span> <span class="pre">nfm</span> <span class="pre">--audio-out</span> <span class="pre">x.wav</span> <span class="pre">--segment</span> <span class="pre">40:50</span></code> writes only those 10 s, and the log has the INFO segment line.</p></td>
+</tr>
+<tr class="row-even"><td><p>GUI (<strong>you must do this</strong>; this session has no X display)</p></td>
+<td><p>Type the values before and after open. The view, scrollbar, overview, the <code class="docutils literal notranslate"><span class="pre">|&lt;</span></code> <code class="docutils literal notranslate"><span class="pre">&gt;|</span></code> <code class="docutils literal notranslate"><span class="pre">All</span></code> buttons and the keys stay inside the segment. The axes show file time. Bookmarks and markers. Audio “Whole segment”. Bad values give a status message and keep the old segment.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Regression</p></td>
+<td><p>With <code class="docutils literal notranslate"><span class="pre">-1</span></code> / <code class="docutils literal notranslate"><span class="pre">-1</span></code> (the default), behavior is the same as <code class="docutils literal notranslate"><span class="pre">main</span></code>. <code class="docutils literal notranslate"><span class="pre">siggen_check</span></code>, <code class="docutils literal notranslate"><span class="pre">audio_check</span></code> and <code class="docutils literal notranslate"><span class="pre">log_check</span></code> pass.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="decisions-2026-10-19">
+<h2>6. Decisions (2026-10-19)<a class="headerlink" href="#decisions-2026-10-19" title="Link to this heading">¶</a></h2>
+<p>The user said to go ahead with the plan, so the recommendations apply:</p>
+<ol class="arabic simple">
+<li><p><strong>Time axis:</strong> absolute file time.</p></li>
+<li><p><strong>Overview strip:</strong> the segment only.</p></li>
+<li><p><strong>Next file:</strong> the segment stays.</p></li>
+<li><p><strong>“Opens the file again”:</strong> the file stays mapped. The view is reset, and the plots are
+computed again. The metadata is not read again.</p></li>
+<li><p><strong>Siggen playback from the viewer:</strong> the whole file, as before.</p></li>
+</ol>
+</section>
+<section id="implementation-notes">
+<h2>7. Implementation notes<a class="headerlink" href="#implementation-notes" title="Link to this heading">¶</a></h2>
+<section id="files">
+<h3>Files<a class="headerlink" href="#files" title="Link to this heading">¶</a></h3>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>File</p></th>
+<th class="head"><p>Change</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/dsp/engine.h</span></code>, <code class="docutils literal notranslate"><span class="pre">src/dsp/engine.cpp</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">SegmentRange</span> <span class="pre">segmentRange(t0,</span> <span class="pre">t1,</span> <span class="pre">fs,</span> <span class="pre">n)</span></code>: the rules in §3. <code class="docutils literal notranslate"><span class="pre">OverviewReq</span></code> has <code class="docutils literal notranslate"><span class="pre">s0</span></code> / <code class="docutils literal notranslate"><span class="pre">s1</span></code>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/app/app.h</span></code>, <code class="docutils literal notranslate"><span class="pre">src/app/app.cpp</span></code></p></td>
+<td><p>Segment state, <code class="docutils literal notranslate"><span class="pre">setSegment</span></code>, <code class="docutils literal notranslate"><span class="pre">applySegment</span></code>, <code class="docutils literal notranslate"><span class="pre">resetTimeView</span></code>, <code class="docutils literal notranslate"><span class="pre">tBegin()</span></code> / <code class="docutils literal notranslate"><span class="pre">tEnd()</span></code>. The Segment boxes. All the limits in §2.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/app/app_audio.cpp</span></code></p></td>
+<td><p>Play ranges and the playhead inside the segment. “Whole segment” in the Range list.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/app/main.cpp</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">--segment</span> <span class="pre">T0:T1</span></code>. The headless audio export uses the segment.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">tools/segment_check.cpp</span></code></p></td>
+<td><p>Self-test: 13 rule checks and 6 overview checks.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">README.md</span></code></p></td>
+<td><p>“Large files: load a segment”, the option, the layout table, the audio ranges.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="differences-from-the-plan">
+<h3>Differences from the plan<a class="headerlink" href="#differences-from-the-plan" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">onSourceChanged</span></code> returns the segment note. <code class="docutils literal notranslate"><span class="pre">openFile</span></code> adds the note to its “Opened”
+status message.</p></li>
+<li><p>A format, rate or header change maps the segment again. An end past the end of the file
+gives the WARN only when the sample range changes, not on each change.</p></li>
+<li><p>After a format, rate or header change, the view is clamped into the segment
+(<code class="docutils literal notranslate"><span class="pre">setView</span></code>). Before, the view was not clamped.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">--segment</span></code> checks “end before start” at parse time and exits with status 2.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">segment_check</span></code> links <code class="docutils literal notranslate"><span class="pre">ui_util.cpp</span></code> and <code class="docutils literal notranslate"><span class="pre">imgui_implot</span></code>, because <code class="docutils literal notranslate"><span class="pre">segmentRange</span></code> uses
+<code class="docutils literal notranslate"><span class="pre">fmtSI</span></code> for its messages.</p></li>
+</ul>
+</section>
+<section id="verification-macos">
+<h3>Verification (macOS)<a class="headerlink" href="#verification-macos" title="Link to this heading">¶</a></h3>
+<ul>
+<li><p>The build has no warnings. <code class="docutils literal notranslate"><span class="pre">segment_check</span></code>, <code class="docutils literal notranslate"><span class="pre">siggen_check</span></code>, <code class="docutils literal notranslate"><span class="pre">audio_check</span></code> and
+<code class="docutils literal notranslate"><span class="pre">log_check</span></code> pass.</p></li>
+<li><p>Headless export of the 7.5 GB test file (ci16, 20 MS/s, 100 s):</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Arguments</p></th>
+<th class="head"><p>Result</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--segment</span> <span class="pre">40:50</span></code></p></td>
+<td><p>10.0 s WAV, INFO “segment 40 s to 50 s”</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--segment</span> <span class="pre">40:50</span> <span class="pre">--view</span> <span class="pre">45:46</span></code></p></td>
+<td><p>1.0 s WAV</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--segment</span> <span class="pre">90:200</span></code></p></td>
+<td><p>WARN (end clamped), 10.0 s WAV</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--segment</span> <span class="pre">150:-1</span></code></p></td>
+<td><p>ERROR “start is past the end of the file”, status 2</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--segment</span> <span class="pre">50:40</span></code></p></td>
+<td><p>ERROR, status 2</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</li>
+<li><p>Compared with a <code class="docutils literal notranslate"><span class="pre">main</span></code> build on a 3 s file: the WAV export is byte-for-byte the same with
+no <code class="docutils literal notranslate"><span class="pre">--segment</span></code>, and with <code class="docutils literal notranslate"><span class="pre">--segment</span> <span class="pre">-1:-1</span></code>, with and without <code class="docutils literal notranslate"><span class="pre">--view</span></code>. <code class="docutils literal notranslate"><span class="pre">--help</span></code> differs
+only by the new option.</p></li>
+</ul>
+</section>
+<section id="gui">
+<h3>GUI<a class="headerlink" href="#gui" title="Link to this heading">¶</a></h3>
+<p>The user tested the GUI on screen (2026-10-19).</p>
+</section>
+</section>
+</section>
+
+        </article>
+      </div>
+      <footer>
+        
+        <div class="related-pages">
+          <a class="next-page" href="cuda-gpu-plan.html">
+              <div class="page-info">
+                <div class="context">
+                  <span>Next</span>
+                </div>
+                <div class="title">Plan: CUDA GPU acceleration (issue #3)</div>
+              </div>
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+            </a>
+          <a class="prev-page" href="verbose-logging-plan.html">
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+              <div class="page-info">
+                <div class="context">
+                  <span>Previous</span>
+                </div>
+                
+                <div class="title">Plan: Verbose console logging and a timestamped log file</div>
+                
+              </div>
+            </a>
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                Copyright &#169; 2026, Brian Collette
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+            
+          </div>
+          <div class="right-details">
+            
+          </div>
+        </div>
+        
+      </footer>
+    </div>
+    <aside class="toc-drawer">
+      
+      
+      <div class="toc-sticky toc-scroll">
+        <div class="toc-title-container">
+          <span class="toc-title">
+            On this page
+          </span>
+        </div>
+        <div class="toc-tree-container">
+          <div class="toc-tree">
+            <ul>
+<li><a class="reference internal" href="#">Plan: open a time segment of a file (issue #16)</a><ul>
+<li><a class="reference internal" href="#goal">1. Goal</a></li>
+<li><a class="reference internal" href="#starting-point-main">2. Starting point (<code class="docutils literal notranslate"><span class="pre">main</span></code>)</a><ul>
+<li><a class="reference internal" href="#what-is-slow-today">What is slow today</a></li>
+<li><a class="reference internal" href="#what-exists">What exists</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#design-decisions">3. Design decisions</a></li>
+<li><a class="reference internal" href="#implementation-steps">4. Implementation steps</a></li>
+<li><a class="reference internal" href="#testing">5. Testing</a></li>
+<li><a class="reference internal" href="#decisions-2026-10-19">6. Decisions (2026-10-19)</a></li>
+<li><a class="reference internal" href="#implementation-notes">7. Implementation notes</a><ul>
+<li><a class="reference internal" href="#files">Files</a></li>
+<li><a class="reference internal" href="#differences-from-the-plan">Differences from the plan</a></li>
+<li><a class="reference internal" href="#verification-macos">Verification (macOS)</a></li>
+<li><a class="reference internal" href="#gui">GUI</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+          </div>
+        </div>
+      </div>
+      
+      
+    </aside>
+  </div>
+</div><script src="../_static/documentation_options.js?v=5929fcd5"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/scripts/furo.js?v=46bd48cc"></script>
+    </body>
+</html>

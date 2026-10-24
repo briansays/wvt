@@ -1,0 +1,517 @@
+<!doctype html>
+<html class="no-js" lang="en" data-content_root="./">
+  <head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="index" title="Index" href="genindex.html"><link rel="search" title="Search" href="search.html"><link rel="next" title="GPU processing" href="gpu.html"><link rel="prev" title="Signal generator" href="siggen.html">
+
+    <!-- Generated with Sphinx 8.2.3 and Furo 2025.12.19 -->
+        <title>Audio - wvt</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=d111a655" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/furo.css?v=7bdb33bb" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/furo-extensions.css?v=8dab3a3b" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f2f2f2;
+  --color-code-foreground: #1e1e1e;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-with-moon" viewBox="0 0 24 24">
+    <title>Auto light/dark, in light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path style="opacity: 50%" d="M 5.411 14.504 C 5.471 14.504 5.532 14.504 5.591 14.504 C 3.639 16.319 4.383 19.569 6.931 20.352 C 7.693 20.586 8.512 20.551 9.25 20.252 C 8.023 23.207 4.056 23.725 2.11 21.184 C 0.166 18.642 1.702 14.949 4.874 14.536 C 5.051 14.512 5.231 14.5 5.411 14.5 L 5.411 14.504 Z"/>
+      <line x1="14.5" y1="3.25" x2="14.5" y2="1.25"/>
+      <line x1="14.5" y1="15.85" x2="14.5" y2="17.85"/>
+      <line x1="10.044" y1="5.094" x2="8.63" y2="3.68"/>
+      <line x1="19" y1="14.05" x2="20.414" y2="15.464"/>
+      <line x1="8.2" y1="9.55" x2="6.2" y2="9.55"/>
+      <line x1="20.8" y1="9.55" x2="22.8" y2="9.55"/>
+      <line x1="10.044" y1="14.006" x2="8.63" y2="15.42"/>
+      <line x1="19" y1="5.05" x2="20.414" y2="3.636"/>
+      <circle cx="14.5" cy="9.55" r="3.6"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon-with-sun" viewBox="0 0 24 24">
+    <title>Auto light/dark, in dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path d="M 8.282 7.007 C 8.385 7.007 8.494 7.007 8.595 7.007 C 5.18 10.184 6.481 15.869 10.942 17.24 C 12.275 17.648 13.706 17.589 15 17.066 C 12.851 22.236 5.91 23.143 2.505 18.696 C -0.897 14.249 1.791 7.786 7.342 7.063 C 7.652 7.021 7.965 7 8.282 7 L 8.282 7.007 Z"/>
+      <line style="opacity: 50%" x1="18" y1="3.705" x2="18" y2="2.5"/>
+      <line style="opacity: 50%" x1="18" y1="11.295" x2="18" y2="12.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="4.816" x2="14.464" y2="3.964"/>
+      <line style="opacity: 50%" x1="20.711" y1="10.212" x2="21.563" y2="11.063"/>
+      <line style="opacity: 50%" x1="14.205" y1="7.5" x2="13.001" y2="7.5"/>
+      <line style="opacity: 50%" x1="21.795" y1="7.5" x2="23" y2="7.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="10.184" x2="14.464" y2="11.036"/>
+      <line style="opacity: 50%" x1="20.711" y1="4.789" x2="21.563" y2="3.937"/>
+      <circle style="opacity: 50%" cx="18" cy="7.5" r="2.169"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-pencil" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-pencil-code">
+      <path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" />
+      <path d="M13.5 6.5l4 4" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+  <symbol id="svg-eye" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-eye-code">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" />
+      <path
+        d="M11.11 17.958c-3.209 -.307 -5.91 -2.293 -8.11 -5.958c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6c-.21 .352 -.427 .688 -.647 1.008" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle site navigation sidebar">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc" aria-label="Toggle table of contents sidebar">
+<label class="overlay sidebar-overlay" for="__navigation"></label>
+<label class="overlay toc-overlay" for="__toc"></label>
+
+<a class="skip-to-content muted-link" href="#furo-main-content">Skip to content</a>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <span class="icon"><svg><use href="#svg-menu"></use></svg></span>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="index.html"><div class="brand">wvt</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+          <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+          <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon" for="__toc">
+        <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand" href="index.html">
+  
+  <span class="sidebar-brand-text">wvt</span>
+  
+</a><form class="sidebar-search-container" method="get" action="search.html" role="search">
+  <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <p class="caption" role="heading"><span class="caption-text">User guide</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="getting-started.html">Getting started</a></li>
+<li class="toctree-l1"><a class="reference internal" href="viewer.html">The file viewer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="segments.html">Load a segment</a></li>
+<li class="toctree-l1"><a class="reference internal" href="export.html">Export a region</a></li>
+<li class="toctree-l1"><a class="reference internal" href="snapshots.html">Plot snapshots</a></li>
+<li class="toctree-l1"><a class="reference internal" href="sessions.html">File sessions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="live.html">Live devices</a></li>
+<li class="toctree-l1"><a class="reference internal" href="siggen.html">Signal generator</a></li>
+<li class="toctree-l1 current current-page"><a class="current reference internal" href="#">Audio</a></li>
+<li class="toctree-l1"><a class="reference internal" href="gpu.html">GPU processing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="logging.html">Logging</a></li>
+<li class="toctree-l1"><a class="reference internal" href="controls.html">Mouse and keyboard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cli.html">Command-line reference</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="build.html">Build reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="signal-processing.html">Signal processing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="self-checks.html">Self-checks and test signals</a></li>
+<li class="toctree-l1"><a class="reference internal" href="source-layout.html">Source layout</a></li>
+<li class="toctree-l1"><a class="reference internal" href="writing-docs.html">Writing the documentation</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Design records</span></p>
+<ul>
+<li class="toctree-l1 has-children"><a class="reference internal" href="design/index.html">Design records</a><input aria-label="Toggle navigation of Design records" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l2"><a class="reference internal" href="design/audio-demod-plan.html">Plan: Audio demodulation and playback</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/verbose-logging-plan.html">Plan: Verbose console logging and a timestamped log file</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/time-segment-plan.html">Plan: open a time segment of a file (issue #16)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/cuda-gpu-plan.html">Plan: CUDA GPU acceleration (issue #3)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/region-export-plan.html">Plan: export a region of a file (issue #18)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/apple-gpu-plan.html">Plan: Apple GPU support (issue #21)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/ui-cleanup-plan.html">Plan: labels outside the plots and a tidier UI (issues #12 and #19)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/siggen-sweep-plan.html">Signal generator: frequency and amplitude sweep (issue #28)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/siggen-chain-plan.html">Signal generator: chain playback (issue #27)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/plot-snapshot-plan.html">Plan: snapshot button for all graphs (issue #13)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/usrp-models-plan.html">Plan: support other Ettus USRPs (issue #11)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/bb60-integration-plan.html">Plan: Signal Hound BB60 as a wvt live device</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/sidekiq-integration-plan.html">Plan: Epiq Solutions Sidekiq as a wvt live device</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/point-measurement-plan.html">Plan: point-to-point measurements on the plots (issue #80)</a></li>
+</ul>
+</li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="view-this-page">
+  <a class="muted-link" href="_sources/audio.md.txt" title="View this page">
+    <svg><use href="#svg-eye"></use></svg>
+    <span class="visually-hidden">View this page</span>
+  </a>
+</div>
+<div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+              <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+              <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon" for="__toc">
+            <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+          </label>
+        </div>
+        <article role="main" id="furo-main-content">
+          <section id="audio">
+<h1>Audio<a class="headerlink" href="#audio" title="Link to this heading">¶</a></h1>
+<p>The audio window demodulates one channel (AM, NFM, WFM, USB, LSB or CW) and plays it through the
+speakers. It plays a recording or the live stream, and it writes WAV files.</p>
+<section id="open-the-audio-window">
+<h2>Open the audio window<a class="headerlink" href="#open-the-audio-window" title="Link to this heading">¶</a></h2>
+<p>Do one of these steps:</p>
+<ul class="simple">
+<li><p>Select <strong>Tools → Audio</strong>.</p></li>
+<li><p>Press <strong>Ctrl+D</strong>.</p></li>
+<li><p>Start wvt with <code class="docutils literal notranslate"><span class="pre">--audio</span> <span class="pre">MODE</span></code>.</p></li>
+</ul>
+<p>The window floats over the main window. It works in File mode and in Device mode.</p>
+</section>
+<section id="select-the-channel">
+<h2>Select the channel<a class="headerlink" href="#select-the-channel" title="Link to this heading">¶</a></h2>
+<p>With <strong>Follow viewer channel</strong> on (the default), the audio uses the channel of the viewer. This
+channel shows as the cyan lines on the spectrum and the waterfall.</p>
+<ul class="simple">
+<li><p>To tune, Ctrl+click the spectrum or the waterfall, or drag the lines.</p></li>
+<li><p>Live mode also shows these lines.</p></li>
+</ul>
+<p>With <strong>Follow viewer channel</strong> off, the audio channel is the orange line. Set its offset and its
+bandwidth in the audio window.</p>
+<p>When you select a mode, wvt sets the bandwidth to the default of that mode:</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Mode</p></th>
+<th class="head"><p>Default width</p></th>
+<th class="head"><p>Notes</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>AM</p></td>
+<td><p>10 kHz</p></td>
+<td><p>The envelope. <em>AGC</em> divides by the carrier level</p></td>
+</tr>
+<tr class="row-odd"><td><p>NFM</p></td>
+<td><p>12.5 kHz</p></td>
+<td><p>Audio up to 5 kHz</p></td>
+</tr>
+<tr class="row-even"><td><p>WFM</p></td>
+<td><p>200 kHz</p></td>
+<td><p>Mono, audio up to 15 kHz, 75 µs de-emphasis. Select 50 µs for Europe</p></td>
+</tr>
+<tr class="row-odd"><td><p>USB / LSB</p></td>
+<td><p>2.8 kHz</p></td>
+<td><p>The passband is the shaded channel. The carrier is at its lower edge (USB) or upper edge (LSB)</p></td>
+</tr>
+<tr class="row-even"><td><p>CW</p></td>
+<td><p>500 Hz</p></td>
+<td><p>A carrier at the channel center plays at the <em>BFO pitch</em> (200 Hz to 1500 Hz)</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="levels">
+<h2>Levels<a class="headerlink" href="#levels" title="Link to this heading">¶</a></h2>
+<ul class="simple">
+<li><p><strong>Gain</strong> adds gain after the demodulator.</p></li>
+<li><p><strong>Squelch</strong> mutes the audio while the channel power is below the threshold. The window shows the
+channel power. Set the threshold just above the noise.</p></li>
+<li><p><strong>Volume</strong> and <strong>Mute</strong> change only the speaker level. They do not change the WAV files.</p></li>
+<li><p><strong>Device</strong> selects the sound output. The change applies at the next <strong>Play</strong>.</p></li>
+</ul>
+</section>
+<section id="file-mode">
+<h2>File mode<a class="headerlink" href="#file-mode" title="Link to this heading">¶</a></h2>
+<p><strong>Play</strong> plays the <strong>Range</strong>. Select one of these ranges:</p>
+<ul class="simple">
+<li><p><em>From view start</em> to the end of the file.</p></li>
+<li><p><em>View</em>.</p></li>
+<li><p>The part between the <em>time markers</em>.</p></li>
+<li><p><em>Whole file</em>.</p></li>
+</ul>
+<p>With a segment loaded, each range stays in the segment, and <em>whole file</em> becomes <em>whole segment</em>.</p>
+<ul class="simple">
+<li><p>A green playhead line moves across the time plots and the waterfall. To seek, drag the line or
+the position slider.</p></li>
+<li><p>To play from a point, <strong>Shift+click</strong> a time plot or the waterfall.</p></li>
+<li><p><em>Loop</em> repeats the range.</p></li>
+<li><p><em>Follow playhead</em> moves the view forward one page when the playhead leaves it. This applies only
+to views of 0.25 s or more.</p></li>
+</ul>
+</section>
+<section id="device-mode">
+<h2>Device mode<a class="headerlink" href="#device-mode" title="Link to this heading">¶</a></h2>
+<p><strong>Play</strong> plays the live stream, with a delay of approximately 0.15 s.</p>
+<ul class="simple">
+<li><p>The sound card and the SDR use different clocks. wvt measures the buffer level and adjusts the
+resampling ratio. The window shows the correction in ppm. Thus the delay stays constant.</p></li>
+<li><p>If the demodulator falls behind, it skips to the newest samples and counts a <em>resync</em>.</p></li>
+<li><p>After a retune or a stream restart, the audio continues automatically.</p></li>
+</ul>
+</section>
+<section id="wav-files">
+<h2>WAV files<a class="headerlink" href="#wav-files" title="Link to this heading">¶</a></h2>
+<p>The WAV files are 48 kHz, 16-bit mono. The name is the <em>File prefix</em> plus the date, the time, the
+frequency and the mode, for example <code class="docutils literal notranslate"><span class="pre">~/wvt-recordings/audio_20261018_143000_100.3MHz_WFM.wav</span></code>.</p>
+<ul class="simple">
+<li><p>File mode: <strong>Save WAV</strong> demodulates the range faster than real time.</p></li>
+<li><p>Device mode: <strong>Record audio</strong> records the demodulated stream. It also works without a sound
+device.</p></li>
+</ul>
+</section>
+<section id="command-line">
+<h2>Command line<a class="headerlink" href="#command-line" title="Link to this heading">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">--chan</span> <span class="pre">OFFSET:BW</span></code> sets the channel. Without it, the channel is at 0 Hz with the default width of
+the mode.</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Option</p></th>
+<th class="head"><p>Function</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--audio</span> <span class="pre">am|nfm|wfm|usb|lsb|cw</span></code></p></td>
+<td><p>Open the audio window and play</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--audio-out</span> <span class="pre">FILE.wav</span></code></p></td>
+<td><p>Demodulate to a WAV file, then stop. The range is the file, the <code class="docutils literal notranslate"><span class="pre">--segment</span></code> or the <code class="docutils literal notranslate"><span class="pre">--view</span></code> range. With <code class="docutils literal notranslate"><span class="pre">--device</span></code>, the range is the live stream until Ctrl+C or <code class="docutils literal notranslate"><span class="pre">--record-duration</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--audio-device</span> <span class="pre">NAME</span></code></p></td>
+<td><p>The sound output. The default is the system default</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--list-audio-devices</span></code></p></td>
+<td><p>Show the sound outputs, then stop</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--volume</span> <span class="pre">DB</span></code></p></td>
+<td><p>The playback volume (default −6 dB)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--squelch</span> <span class="pre">DBFS</span></code></p></td>
+<td><p>Mute while the channel power is below this level</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span>wvt<span class="w"> </span>capture.sigmf-meta<span class="w"> </span>--chan<span class="w"> </span>300k:200k<span class="w"> </span>--audio<span class="w"> </span>wfm<span class="w">                       </span><span class="c1"># play a broadcast FM channel</span>
+wvt<span class="w"> </span>capture.sigmf-meta<span class="w"> </span>--chan<span class="w"> </span>-250k:10k<span class="w"> </span>--audio<span class="w"> </span>am<span class="w"> </span>--view<span class="w"> </span><span class="m">0</span>.5:1.5<span class="w"> </span>--audio-out<span class="w"> </span>am.wav<span class="w">   </span><span class="c1"># export 1 s</span>
+wvt<span class="w"> </span>--device<span class="w"> </span>rtlsdr<span class="w"> </span>-c<span class="w"> </span><span class="m">100</span>.4M<span class="w"> </span>-r<span class="w"> </span><span class="m">2</span>.4M<span class="w"> </span>--audio<span class="w"> </span>wfm<span class="w"> </span>--chan<span class="w"> </span>-300k:200k<span class="w">       </span><span class="c1"># listen live to 100.1 MHz</span>
+wvt<span class="w"> </span>--device<span class="w"> </span>sim<span class="w"> </span>-c<span class="w"> </span>100M<span class="w"> </span>-r<span class="w"> </span><span class="m">2</span>.4M<span class="w"> </span>--audio<span class="w"> </span>wfm<span class="w"> </span>--chan<span class="w"> </span>360k:200k<span class="w"> </span>--audio-out<span class="w"> </span>fm.wav<span class="w"> </span>--record-duration<span class="w"> </span><span class="m">10</span>
+</pre></div>
+</div>
+</section>
+<section id="how-it-works">
+<h2>How it works<a class="headerlink" href="#how-it-works" title="Link to this heading">¶</a></h2>
+<p>The demodulator does these steps:</p>
+<ol class="arabic simple">
+<li><p>It shifts the channel to 0 Hz.</p></li>
+<li><p>It decimates with half-band filters to a minimum of two times the channel width.</p></li>
+<li><p>It filters the channel with a windowed-sinc FIR filter.</p></li>
+<li><p>It demodulates.</p></li>
+<li><p>A polyphase resampler sets the audio bandwidth and the 48 kHz output rate.</p></li>
+</ol>
+<p>All stages keep their state between blocks. Thus the audio is continuous. The self-check
+<code class="docutils literal notranslate"><span class="pre">build/audio_check</span></code> tests each mode without hardware.</p>
+<p>For the design, refer to <a class="reference internal" href="design/audio-demod-plan.html"><span class="std std-doc">the audio design record</span></a>.</p>
+</section>
+</section>
+
+        </article>
+      </div>
+      <footer>
+        
+        <div class="related-pages">
+          <a class="next-page" href="gpu.html">
+              <div class="page-info">
+                <div class="context">
+                  <span>Next</span>
+                </div>
+                <div class="title">GPU processing</div>
+              </div>
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+            </a>
+          <a class="prev-page" href="siggen.html">
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+              <div class="page-info">
+                <div class="context">
+                  <span>Previous</span>
+                </div>
+                
+                <div class="title">Signal generator</div>
+                
+              </div>
+            </a>
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                Copyright &#169; 2026, Brian Collette
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+            
+          </div>
+          <div class="right-details">
+            
+          </div>
+        </div>
+        
+      </footer>
+    </div>
+    <aside class="toc-drawer">
+      
+      
+      <div class="toc-sticky toc-scroll">
+        <div class="toc-title-container">
+          <span class="toc-title">
+            On this page
+          </span>
+        </div>
+        <div class="toc-tree-container">
+          <div class="toc-tree">
+            <ul>
+<li><a class="reference internal" href="#">Audio</a><ul>
+<li><a class="reference internal" href="#open-the-audio-window">Open the audio window</a></li>
+<li><a class="reference internal" href="#select-the-channel">Select the channel</a></li>
+<li><a class="reference internal" href="#levels">Levels</a></li>
+<li><a class="reference internal" href="#file-mode">File mode</a></li>
+<li><a class="reference internal" href="#device-mode">Device mode</a></li>
+<li><a class="reference internal" href="#wav-files">WAV files</a></li>
+<li><a class="reference internal" href="#command-line">Command line</a></li>
+<li><a class="reference internal" href="#how-it-works">How it works</a></li>
+</ul>
+</li>
+</ul>
+
+          </div>
+        </div>
+      </div>
+      
+      
+    </aside>
+  </div>
+</div><script src="_static/documentation_options.js?v=5929fcd5"></script>
+    <script src="_static/doctools.js?v=9bcbadda"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/scripts/furo.js?v=46bd48cc"></script>
+    </body>
+</html>

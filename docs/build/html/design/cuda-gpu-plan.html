@@ -1,0 +1,1155 @@
+<!doctype html>
+<html class="no-js" lang="en" data-content_root="../">
+  <head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html"><link rel="next" title="Plan: export a region of a file (issue #18)" href="region-export-plan.html"><link rel="prev" title="Plan: open a time segment of a file (issue #16)" href="time-segment-plan.html">
+
+    <!-- Generated with Sphinx 8.2.3 and Furo 2025.12.19 -->
+        <title>Plan: CUDA GPU acceleration (issue #3) - wvt</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d111a655" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=7bdb33bb" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?v=8dab3a3b" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f2f2f2;
+  --color-code-foreground: #1e1e1e;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-with-moon" viewBox="0 0 24 24">
+    <title>Auto light/dark, in light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path style="opacity: 50%" d="M 5.411 14.504 C 5.471 14.504 5.532 14.504 5.591 14.504 C 3.639 16.319 4.383 19.569 6.931 20.352 C 7.693 20.586 8.512 20.551 9.25 20.252 C 8.023 23.207 4.056 23.725 2.11 21.184 C 0.166 18.642 1.702 14.949 4.874 14.536 C 5.051 14.512 5.231 14.5 5.411 14.5 L 5.411 14.504 Z"/>
+      <line x1="14.5" y1="3.25" x2="14.5" y2="1.25"/>
+      <line x1="14.5" y1="15.85" x2="14.5" y2="17.85"/>
+      <line x1="10.044" y1="5.094" x2="8.63" y2="3.68"/>
+      <line x1="19" y1="14.05" x2="20.414" y2="15.464"/>
+      <line x1="8.2" y1="9.55" x2="6.2" y2="9.55"/>
+      <line x1="20.8" y1="9.55" x2="22.8" y2="9.55"/>
+      <line x1="10.044" y1="14.006" x2="8.63" y2="15.42"/>
+      <line x1="19" y1="5.05" x2="20.414" y2="3.636"/>
+      <circle cx="14.5" cy="9.55" r="3.6"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon-with-sun" viewBox="0 0 24 24">
+    <title>Auto light/dark, in dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path d="M 8.282 7.007 C 8.385 7.007 8.494 7.007 8.595 7.007 C 5.18 10.184 6.481 15.869 10.942 17.24 C 12.275 17.648 13.706 17.589 15 17.066 C 12.851 22.236 5.91 23.143 2.505 18.696 C -0.897 14.249 1.791 7.786 7.342 7.063 C 7.652 7.021 7.965 7 8.282 7 L 8.282 7.007 Z"/>
+      <line style="opacity: 50%" x1="18" y1="3.705" x2="18" y2="2.5"/>
+      <line style="opacity: 50%" x1="18" y1="11.295" x2="18" y2="12.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="4.816" x2="14.464" y2="3.964"/>
+      <line style="opacity: 50%" x1="20.711" y1="10.212" x2="21.563" y2="11.063"/>
+      <line style="opacity: 50%" x1="14.205" y1="7.5" x2="13.001" y2="7.5"/>
+      <line style="opacity: 50%" x1="21.795" y1="7.5" x2="23" y2="7.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="10.184" x2="14.464" y2="11.036"/>
+      <line style="opacity: 50%" x1="20.711" y1="4.789" x2="21.563" y2="3.937"/>
+      <circle style="opacity: 50%" cx="18" cy="7.5" r="2.169"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-pencil" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-pencil-code">
+      <path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" />
+      <path d="M13.5 6.5l4 4" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+  <symbol id="svg-eye" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-eye-code">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" />
+      <path
+        d="M11.11 17.958c-3.209 -.307 -5.91 -2.293 -8.11 -5.958c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6c-.21 .352 -.427 .688 -.647 1.008" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle site navigation sidebar">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc" aria-label="Toggle table of contents sidebar">
+<label class="overlay sidebar-overlay" for="__navigation"></label>
+<label class="overlay toc-overlay" for="__toc"></label>
+
+<a class="skip-to-content muted-link" href="#furo-main-content">Skip to content</a>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <span class="icon"><svg><use href="#svg-menu"></use></svg></span>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="../index.html"><div class="brand">wvt</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+          <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+          <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon" for="__toc">
+        <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand" href="../index.html">
+  
+  <span class="sidebar-brand-text">wvt</span>
+  
+</a><form class="sidebar-search-container" method="get" action="../search.html" role="search">
+  <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <p class="caption" role="heading"><span class="caption-text">User guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../getting-started.html">Getting started</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../viewer.html">The file viewer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../segments.html">Load a segment</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../export.html">Export a region</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../snapshots.html">Plot snapshots</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../sessions.html">File sessions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../live.html">Live devices</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../siggen.html">Signal generator</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../audio.html">Audio</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../gpu.html">GPU processing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../logging.html">Logging</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../controls.html">Mouse and keyboard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../cli.html">Command-line reference</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../build.html">Build reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../signal-processing.html">Signal processing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../self-checks.html">Self-checks and test signals</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../source-layout.html">Source layout</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../writing-docs.html">Writing the documentation</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Design records</span></p>
+<ul class="current">
+<li class="toctree-l1 current has-children"><a class="reference internal" href="index.html">Design records</a><input aria-label="Toggle navigation of Design records" checked="" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="audio-demod-plan.html">Plan: Audio demodulation and playback</a></li>
+<li class="toctree-l2"><a class="reference internal" href="verbose-logging-plan.html">Plan: Verbose console logging and a timestamped log file</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-segment-plan.html">Plan: open a time segment of a file (issue #16)</a></li>
+<li class="toctree-l2 current current-page"><a class="current reference internal" href="#">Plan: CUDA GPU acceleration (issue #3)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="region-export-plan.html">Plan: export a region of a file (issue #18)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="apple-gpu-plan.html">Plan: Apple GPU support (issue #21)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ui-cleanup-plan.html">Plan: labels outside the plots and a tidier UI (issues #12 and #19)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="siggen-sweep-plan.html">Signal generator: frequency and amplitude sweep (issue #28)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="siggen-chain-plan.html">Signal generator: chain playback (issue #27)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="plot-snapshot-plan.html">Plan: snapshot button for all graphs (issue #13)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="usrp-models-plan.html">Plan: support other Ettus USRPs (issue #11)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="bb60-integration-plan.html">Plan: Signal Hound BB60 as a wvt live device</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sidekiq-integration-plan.html">Plan: Epiq Solutions Sidekiq as a wvt live device</a></li>
+<li class="toctree-l2"><a class="reference internal" href="point-measurement-plan.html">Plan: point-to-point measurements on the plots (issue #80)</a></li>
+</ul>
+</li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="view-this-page">
+  <a class="muted-link" href="../_sources/design/cuda-gpu-plan.md.txt" title="View this page">
+    <svg><use href="#svg-eye"></use></svg>
+    <span class="visually-hidden">View this page</span>
+  </a>
+</div>
+<div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+              <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+              <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon" for="__toc">
+            <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+          </label>
+        </div>
+        <article role="main" id="furo-main-content">
+          <section id="plan-cuda-gpu-acceleration-issue-3">
+<h1>Plan: CUDA GPU acceleration (issue #3)<a class="headerlink" href="#plan-cuda-gpu-acceleration-issue-3" title="Link to this heading">¶</a></h1>
+<p>Branch: <code class="docutils literal notranslate"><span class="pre">3-cuda-gpu</span></code>, from <code class="docutils literal notranslate"><span class="pre">main</span></code> at <code class="docutils literal notranslate"><span class="pre">29dca41</span></code> (after the logging merge, PR #15).
+Status: <strong>steps 0–8 implemented</strong> (2026-10-19). The CPU-only build is tested on
+macOS. The CUDA build is compiled and tested in CUDA 12.6 and 12.8 containers with no GPU.
+<strong>The GPU code has not run on a GPU yet</strong> (see §9).</p>
+<p>Earlier GPU work (<code class="docutils literal notranslate"><span class="pre">wvt-gpu-dev</span></code>, PR #5) is out of date. This plan starts again from <code class="docutils literal notranslate"><span class="pre">main</span></code>
+and does not use that branch.</p>
+<section id="goal">
+<h2>1. Goal<a class="headerlink" href="#goal" title="Link to this heading">¶</a></h2>
+<p>Issue #3 asks for these items:</p>
+<ol class="arabic simple">
+<li><p>Do the heavy DSP on an NVIDIA GPU when the computer has one. This reduces the time
+between the device and the display.</p></li>
+<li><p>Render images on the GPU where it is useful.</p></li>
+<li><p>Add CMake flags that turn the CUDA features on or off, based on the GPU or its drivers.</p></li>
+</ol>
+<p>Hard rules:</p>
+<ul class="simple">
+<li><p>The GPU result must look the same as the CPU result.</p></li>
+<li><p>Every computer without a usable GPU must build, start and work exactly as <code class="docutils literal notranslate"><span class="pre">main</span></code> does
+now. This includes macOS, AMD or Intel graphics, and computers with no NVIDIA driver.</p></li>
+</ul>
+</section>
+<section id="starting-point-main">
+<h2>2. Starting point (<code class="docutils literal notranslate"><span class="pre">main</span></code>)<a class="headerlink" href="#starting-point-main" title="Link to this heading">¶</a></h2>
+<section id="where-the-cpu-time-goes">
+<h3>Where the CPU time goes<a class="headerlink" href="#where-the-cpu-time-goes" title="Link to this heading">¶</a></h3>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Computation</p></th>
+<th class="head"><p>Code</p></th>
+<th class="head"><p>Work</p></th>
+<th class="head"><p>GPU value</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>File waterfall + spectrum</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">computeWaterfall</span></code>, <code class="docutils literal notranslate"><span class="pre">src/dsp/engine.cpp</span></code></p></td>
+<td><p>rows × avg FFTs of size N, |X|², fftshift, average, column max-pool, log10. Input budget 256 M samples (<code class="docutils literal notranslate"><span class="pre">kMaxInputSamples</span></code>). Past it, “FFT sees” drops below 100 %.</p></td>
+<td><p><strong>High</strong></p></td>
+</tr>
+<tr class="row-odd"><td><p>Live spectrum</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">LiveEngine::spectrumLoop</span></code>, <code class="docutils literal notranslate"><span class="pre">src/device/live.cpp</span></code></p></td>
+<td><p>Same math on the newest ring samples. One thread. Auto averaging stops at 20 MS/s (<code class="docutils literal notranslate"><span class="pre">kMaxAnalyzeRate</span></code>). A USRP B2xx at 56 MS/s is not fully analyzed.</p></td>
+<td><p><strong>High</strong></p></td>
+</tr>
+<tr class="row-even"><td><p>Channel filter for the plots</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">processRange</span></code>, <code class="docutils literal notranslate"><span class="pre">src/dsp/engine.cpp</span></code></p></td>
+<td><p>NCO mix + direct FIR with up to 8191 taps over up to 32 M input samples, then atan2 / unwrap / smoothing on the decimated output</p></td>
+<td><p><strong>Medium</strong>. Only the NCO + FIR are worth moving.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Audio demod</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">src/audio/audio_dsp.cpp</span></code></p></td>
+<td><p>Streaming FIR + resampler on small real-time blocks</p></td>
+<td><p><strong>None</strong>. The blocks are too small, and a kernel launch would add latency.</p></td>
+</tr>
+<tr class="row-even"><td><p>Overview strip</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">computeOverview</span></code></p></td>
+<td><p>4 × 2048-sample probes per bucket</p></td>
+<td><p>None (disk bound)</p></td>
+</tr>
+<tr class="row-odd"><td><p>Siggen preview, playback resampler</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">src/siggen/siggen_out.cpp</span></code>, <code class="docutils literal notranslate"><span class="pre">src/siggen/siggen.cpp</span></code></p></td>
+<td><p>Small or one-time work</p></td>
+<td><p>None</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The FFT (<code class="docutils literal notranslate"><span class="pre">src/dsp/dsp.cpp</span></code>) is a scalar radix-2 FFT. The waterfall uses <code class="docutils literal notranslate"><span class="pre">parallelFor</span></code> over
+rows. Each FFT reads and decodes its own samples through <code class="docutils literal notranslate"><span class="pre">IqFile::read</span></code>. The file is
+memory-mapped.</p>
+</section>
+<section id="rendering-today">
+<h3>Rendering today<a class="headerlink" href="#rendering-today" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>The UI is ImGui + ImPlot with the OpenGL 2 backend over GLX. When GLX works, the GPU
+already draws the frame.</p></li>
+<li><p>When GLX does not work, <code class="docutils literal notranslate"><span class="pre">src/app/sw_renderer.cpp</span></code> draws on the CPU. This happens with some
+XQuartz or remote X11 setups.</p></li>
+<li><p>The waterfall image is at most 1024 × 2048. The CPU changes dB values to colors with a
+256-entry lookup table (<code class="docutils literal notranslate"><span class="pre">src/app/app.cpp</span></code>, <code class="docutils literal notranslate"><span class="pre">src/app/app_live.cpp</span></code>), then sends the image with
+<code class="docutils literal notranslate"><span class="pre">glTexImage2D</span></code>.</p></li>
+</ul>
+<p>That is a small part of the frame time. CUDA–OpenGL interop would need a direct GLX
+context on the NVIDIA driver. It cannot work over remote X11, which is a main use of wvt.
+<strong>Recommendation: no GPU work for rendering</strong> (see §8). Measure this first (step 0).</p>
+</section>
+<section id="build">
+<h3>Build<a class="headerlink" href="#build" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">CMakeLists.txt</span></code> needs CMake 3.16. Optional parts use <code class="docutils literal notranslate"><span class="pre">WVT_WITH_&lt;X&gt;</span></code> = <code class="docutils literal notranslate"><span class="pre">AUTO</span></code> / <code class="docutils literal notranslate"><span class="pre">ON</span></code> /
+<code class="docutils literal notranslate"><span class="pre">OFF</span></code> (RTL-SDR, UHD, audio).</p></li>
+<li><p>Self-test tools: <code class="docutils literal notranslate"><span class="pre">siggen_check</span></code>, <code class="docutils literal notranslate"><span class="pre">audio_check</span></code> and <code class="docutils literal notranslate"><span class="pre">log_check</span></code>.</p></li>
+<li><p>The repository has no CI.</p></li>
+<li><p>The development computer is a Mac. It has no CUDA.</p></li>
+</ul>
+</section>
+</section>
+<section id="design-decisions">
+<h2>3. Design decisions<a class="headerlink" href="#design-decisions" title="Link to this heading">¶</a></h2>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Topic</p></th>
+<th class="head"><p>Decision</p></th>
+<th class="head"><p>Reason</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Build switch</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">WVT_WITH_CUDA</span></code> = <code class="docutils literal notranslate"><span class="pre">AUTO</span></code> / <code class="docutils literal notranslate"><span class="pre">ON</span></code> / <code class="docutils literal notranslate"><span class="pre">OFF</span></code>, default <code class="docutils literal notranslate"><span class="pre">AUTO</span></code>. <code class="docutils literal notranslate"><span class="pre">AUTO</span></code> builds the CUDA code when the CUDA toolkit is found. <code class="docutils literal notranslate"><span class="pre">ON</span></code> stops the build if the toolkit is not found.</p></td>
+<td><p>Same pattern as the other optional parts.</p></td>
+</tr>
+<tr class="row-odd"><td><p>“Based on presence of a GPU”</p></td>
+<td><p><strong>Build time:</strong> CMake checks for the CUDA toolkit (nvcc + cuFFT). <strong>Run time:</strong> wvt checks for the GPU and the driver.</p></td>
+<td><p>The computer that builds wvt is often not the one that runs it. A CUDA build must still run on a computer with no GPU.</p></td>
+</tr>
+<tr class="row-even"><td><p>CMake details</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">include(CheckLanguage)</span></code>, <code class="docutils literal notranslate"><span class="pre">check_language(CUDA)</span></code>, then <code class="docutils literal notranslate"><span class="pre">enable_language(CUDA)</span></code> and <code class="docutils literal notranslate"><span class="pre">find_package(CUDAToolkit)</span></code>, all inside the CUDA block. The CUDA block needs CMake 3.18 or later; with an older CMake, skip it with a status line. On Apple, skip it, and stop the build if <code class="docutils literal notranslate"><span class="pre">ON</span></code>.</p></td>
+<td><p>Non-CUDA builds do not change.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Code layout</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">src/gpu/gpu.h</span></code>: plain C++ interface, no CUDA headers. <code class="docutils literal notranslate"><span class="pre">src/gpu/gpu_cuda.cu</span></code>: kernels + cuFFT. <code class="docutils literal notranslate"><span class="pre">src/gpu/gpu_stub.cpp</span></code>: build without CUDA, “not available”. <code class="docutils literal notranslate"><span class="pre">src/gpu/gpu_common.cpp</span></code>: code shared by both builds (option parsing, status text).</p></td>
+<td><p>Callers stay plain C++. Same “one file per backend” style as <code class="docutils literal notranslate"><span class="pre">sdr_*.cpp</span></code>. The interface can later take a Vulkan or HIP backend.</p></td>
+</tr>
+<tr class="row-even"><td><p>FFT</p></td>
+<td><p>cuFFT, single-precision C2C, batched plans</p></td>
+<td><p>Fits “rows × avg” FFTs.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Data transfer</p></td>
+<td><p>Copy <strong>raw</strong> samples (cu8, ci16, …) to the GPU through pinned buffers. Decode, window and FFT on the GPU. Copy back only rows × cols floats.</p></td>
+<td><p>Two to eight times less PCIe traffic than decoded cf32. The output is small.</p></td>
+</tr>
+<tr class="row-even"><td><p>Geometry stays in C++</p></td>
+<td><p>The engine still computes rows, hop, avg, cols, f0/f1, the spectrum and the percentiles. The GPU code replaces only the inner loop.</p></td>
+<td><p>The two paths cannot drift apart on layout.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Concurrency</p></td>
+<td><p>One CUDA context. Each user thread (the waterfall worker, the live spectrum thread) owns its own stream, buffers and plan cache.</p></td>
+<td><p>cuFFT plans are not thread-safe to share. Streams let the live and file paths overlap.</p></td>
+</tr>
+<tr class="row-even"><td><p>Cancel</p></td>
+<td><p>Process in chunks. Check <code class="docutils literal notranslate"><span class="pre">cancelled()</span></code> between chunks.</p></td>
+<td><p>Keeps the “latest request wins” behavior of <code class="docutils literal notranslate"><span class="pre">Worker</span></code> (<code class="docutils literal notranslate"><span class="pre">src/dsp/engine.h</span></code>).</p></td>
+</tr>
+<tr class="row-odd"><td><p>Fallback</p></td>
+<td><p>Each GPU function returns <code class="docutils literal notranslate"><span class="pre">false</span></code> on any error. The caller then runs the CPU code for that request. After an error other than “out of memory”, that path stays on the CPU for the rest of the session.</p></td>
+<td><p>Never lose a result because of the GPU.</p></td>
+</tr>
+<tr class="row-even"><td><p>Run-time switch</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">--gpu</span> <span class="pre">auto|on|off</span></code>, <code class="docutils literal notranslate"><span class="pre">--gpu-device</span> <span class="pre">N</span></code>, env <code class="docutils literal notranslate"><span class="pre">WVT_GPU</span></code>. <code class="docutils literal notranslate"><span class="pre">auto</span></code> uses a device with compute capability 7.5 or later and at least 1 GB of free memory. <code class="docutils literal notranslate"><span class="pre">on</span></code> stops at startup, with the reason, if no GPU is usable.</p></td>
+<td><p>Lets the user compare with the CPU, or avoid a driver problem.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Work budget</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">kMaxInputSamples</span></code> and <code class="docutils literal notranslate"><span class="pre">kMaxAnalyzeRate</span></code> depend on the backend. The CPU keeps 256 M and 20 MS/s. The GPU values come from the benchmark (start at 2 G and 100 MS/s).</p></td>
+<td><p>This is where the user sees the gain: wider views at 100 %, and full-rate live analysis.</p></td>
+</tr>
+<tr class="row-even"><td><p>Logging (#14)</p></td>
+<td><p>Component <code class="docutils literal notranslate"><span class="pre">gpu</span></code>. The <code class="docutils literal notranslate"><span class="pre">gpuInit</span></code> result is INFO: device, compute capability, memory, CUDA and driver versions, or why the GPU is not used. Each fallback is WARN, one time for each path. Request times are DEBUG, through the existing <code class="docutils literal notranslate"><span class="pre">Worker</span></code> “job took” line plus the GPU kernel time.</p></td>
+<td><p>Follows the logging rules in <code class="docutils literal notranslate"><span class="pre">docs/design/verbose-logging-plan.md</span></code>.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Match tolerance</p></td>
+<td><p>Waterfall and spectrum: 0.05 dB on bins more than 20 dB above the noise floor. Channel filter I/Q: 1e-4 relative.</p></td>
+<td><p>cuFFT and the radix-2 FFT round differently. Both are float.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="interface-sketch-src-gpu-gpu-h">
+<h2>4. Interface sketch (<code class="docutils literal notranslate"><span class="pre">src/gpu/gpu.h</span></code>)<a class="headerlink" href="#interface-sketch-src-gpu-gpu-h" title="Link to this heading">¶</a></h2>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="cp">#pragma once</span>
+<span class="c1">// Optional NVIDIA GPU acceleration. In a build without CUDA every call reports</span>
+<span class="c1">// &quot;not available&quot; and the caller uses its CPU code.</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;cstdint&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;functional&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;memory&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;string&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;iq_file.h&quot;</span>
+
+<span class="k">enum</span><span class="w"> </span><span class="k">class</span><span class="w"> </span><span class="nc">GpuMode</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">Auto</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">On</span><span class="p">,</span><span class="w"> </span><span class="n">Off</span><span class="w"> </span><span class="p">};</span>
+
+<span class="k">struct</span><span class="w"> </span><span class="nc">GpuInfo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">bool</span><span class="w"> </span><span class="n">available</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="w"> </span><span class="n">name</span><span class="p">;</span><span class="w">    </span><span class="c1">// &quot;NVIDIA GeForce RTX 4070 (compute 8.9, 12.0 GB)&quot;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="w"> </span><span class="n">reason</span><span class="p">;</span><span class="w">  </span><span class="c1">// why not available: &quot;built without CUDA&quot;, &quot;no NVIDIA driver&quot;, ...</span>
+<span class="p">};</span>
+
+<span class="kt">bool</span><span class="w"> </span><span class="nf">gpuInit</span><span class="p">(</span><span class="n">GpuMode</span><span class="w"> </span><span class="n">mode</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">device</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="o">&amp;</span><span class="w"> </span><span class="n">err</span><span class="p">);</span><span class="w">  </span><span class="c1">// once, from main()</span>
+<span class="k">const</span><span class="w"> </span><span class="n">GpuInfo</span><span class="o">&amp;</span><span class="w"> </span><span class="nf">gpuInfo</span><span class="p">();</span>
+<span class="kt">bool</span><span class="w"> </span><span class="nf">gpuEnabled</span><span class="p">();</span><span class="w">            </span><span class="c1">// available and not switched off</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">gpuSetEnabled</span><span class="p">(</span><span class="kt">bool</span><span class="w"> </span><span class="n">on</span><span class="p">);</span><span class="w">  </span><span class="c1">// UI switch</span>
+
+<span class="c1">// File spectrogram: `rows` rows of `avg` FFTs of size n. FFT a of row r starts at</span>
+<span class="c1">// sample llround(s0 + r*hop + (a+0.5)*hop/avg) - n/2 (zero outside the file).</span>
+<span class="c1">// Writes rows*cols linear max-pooled powers (scaled by norm/avg) to lin.</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">GpuSpecReq</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">IqFile</span><span class="o">*</span><span class="w"> </span><span class="n">file</span><span class="p">;</span><span class="w"> </span><span class="n">FormatParams</span><span class="w"> </span><span class="n">fp</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">double</span><span class="w"> </span><span class="n">s0</span><span class="p">,</span><span class="w"> </span><span class="n">hop</span><span class="p">;</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">rows</span><span class="p">,</span><span class="w"> </span><span class="n">avg</span><span class="p">,</span><span class="w"> </span><span class="n">n</span><span class="p">,</span><span class="w"> </span><span class="n">cols</span><span class="p">;</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">float</span><span class="o">*</span><span class="w"> </span><span class="n">win</span><span class="p">;</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">norm</span><span class="p">;</span>
+<span class="p">};</span>
+<span class="kt">bool</span><span class="w"> </span><span class="nf">gpuSpectrogram</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">GpuSpecReq</span><span class="o">&amp;</span><span class="w"> </span><span class="n">r</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="o">*</span><span class="w"> </span><span class="n">lin</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">function</span><span class="o">&lt;</span><span class="kt">bool</span><span class="p">()</span><span class="o">&gt;&amp;</span><span class="w"> </span><span class="n">cancelled</span><span class="p">);</span>
+
+<span class="c1">// Live spectrum: one per LiveEngine thread; owns its stream, buffers and plan.</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">GpuLiveSpectrum</span><span class="w"> </span><span class="p">{</span>
+<span class="k">public</span><span class="o">:</span>
+<span class="w">    </span><span class="k">static</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">GpuLiveSpectrum</span><span class="o">&gt;</span><span class="w"> </span><span class="n">create</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">n</span><span class="p">,</span><span class="w"> </span><span class="n">SampleFormat</span><span class="w"> </span><span class="n">fmt</span><span class="p">);</span>
+<span class="w">    </span><span class="k">virtual</span><span class="w"> </span><span class="o">~</span><span class="n">GpuLiveSpectrum</span><span class="p">()</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">default</span><span class="p">;</span>
+<span class="w">    </span><span class="c1">// raw: frames*n packed samples. pw: n fftshifted powers, summed over frames.</span>
+<span class="w">    </span><span class="k">virtual</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="kt">uint8_t</span><span class="o">*</span><span class="w"> </span><span class="n">raw</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">frames</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">float</span><span class="o">*</span><span class="w"> </span><span class="n">win</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="o">*</span><span class="w"> </span><span class="n">pw</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="p">};</span>
+</pre></div>
+</div>
+</section>
+<section id="implementation-steps">
+<h2>5. Implementation steps<a class="headerlink" href="#implementation-steps" title="Link to this heading">¶</a></h2>
+<p>Each step builds and passes the tests on macOS (CPU only) before the next one. Each step
+is one commit.</p>
+<ol class="arabic" start="0">
+<li><p><strong>Baseline benchmark (no GPU code).</strong> Add <code class="docutils literal notranslate"><span class="pre">tools/gpu_check.cpp</span></code>:</p>
+<ul class="simple">
+<li><p>It makes test signals with <code class="docutils literal notranslate"><span class="pre">SigGen</span></code> (tones, chirps, short pulses, noise) in each
+<code class="docutils literal notranslate"><span class="pre">SampleFormat</span></code>, and writes temp files.</p></li>
+<li><p>It runs <code class="docutils literal notranslate"><span class="pre">computeWaterfall</span></code>, the live row math and <code class="docutils literal notranslate"><span class="pre">computeDemod</span></code>, and prints the times:</p>
+<ul>
+<li><p>waterfall at N = 1024 / 8192 / 65536 and 1× / 10× / 100× zoom-out;</p></li>
+<li><p>live rows at 20 / 40 / 61.44 MS/s;</p></li>
+<li><p>channel filter with 255 / 2047 / 8191 taps.</p></li>
+</ul>
+</li>
+<li><p>It also measures the color lookup + texture upload time, to settle the rendering
+question.</p></li>
+</ul>
+<p>Record the CPU numbers on the Linux computer that has the GPU.</p>
+</li>
+<li><p><strong>Build switch and stub.</strong></p>
+<ul class="simple">
+<li><p>Add <code class="docutils literal notranslate"><span class="pre">WVT_WITH_CUDA</span></code> to <code class="docutils literal notranslate"><span class="pre">CMakeLists.txt</span></code>, with the CUDA block from §3 and the default
+<code class="docutils literal notranslate"><span class="pre">CMAKE_CUDA_ARCHITECTURES</span></code> (§8).</p></li>
+<li><p>Add <code class="docutils literal notranslate"><span class="pre">gpu.h</span></code>, <code class="docutils literal notranslate"><span class="pre">gpu_stub.cpp</span></code> and <code class="docutils literal notranslate"><span class="pre">gpu_common.cpp</span></code>, and a <code class="docutils literal notranslate"><span class="pre">wvt_gpu</span></code> library that both
+<code class="docutils literal notranslate"><span class="pre">wvt</span></code> and <code class="docutils literal notranslate"><span class="pre">gpu_check</span></code> link.</p></li>
+<li><p>Status line: <code class="docutils literal notranslate"><span class="pre">wvt:</span> <span class="pre">CUDA</span> <span class="pre">support</span> <span class="pre">enabled</span> <span class="pre">(CUDA</span> <span class="pre">12.x,</span> <span class="pre">archs</span> <span class="pre">...,</span> <span class="pre">cuFFT)</span></code>, or the reason
+it is disabled.</p></li>
+</ul>
+</li>
+<li><p><strong>Run-time setup.</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">gpuInit</span></code> in <code class="docutils literal notranslate"><span class="pre">gpu_cuda.cu</span></code>. It treats <code class="docutils literal notranslate"><span class="pre">cudaErrorNoDevice</span></code> and
+<code class="docutils literal notranslate"><span class="pre">cudaErrorInsufficientDriver</span></code> as “not available”, and checks compute capability and
+free memory.</p></li>
+<li><p>One <code class="docutils literal notranslate"><span class="pre">CUDA_TRY</span></code> macro that logs the first error (file and line) and returns <code class="docutils literal notranslate"><span class="pre">false</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">--gpu</span></code>, <code class="docutils literal notranslate"><span class="pre">--gpu-device</span></code> and <code class="docutils literal notranslate"><span class="pre">WVT_GPU</span></code> in <code class="docutils literal notranslate"><span class="pre">main.cpp</span></code>, with usage text.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">--list-devices</span></code> also lists the GPUs.</p></li>
+</ul>
+</li>
+<li><p><strong>CI.</strong></p>
+<ul class="simple">
+<li><p>Add <code class="docutils literal notranslate"><span class="pre">.github/workflows/build.yml</span></code> with two jobs:</p>
+<ul>
+<li><p>CPU-only Linux build that runs the self-tests;</p></li>
+<li><p>build in an <code class="docutils literal notranslate"><span class="pre">nvidia/cuda:12.x-devel-ubuntu24.04</span></code> container with
+<code class="docutils literal notranslate"><span class="pre">-DWVT_WITH_CUDA=ON</span></code>, compile only.</p></li>
+</ul>
+</li>
+<li><p>Without this step, nvcc errors show up only on the GPU computer. Free GitHub runners
+have no GPU, so <code class="docutils literal notranslate"><span class="pre">gpu_check</span></code> cannot run there.</p></li>
+</ul>
+</li>
+<li><p><strong>File waterfall on the GPU.</strong></p>
+<ul class="simple">
+<li><p>Split <code class="docutils literal notranslate"><span class="pre">computeWaterfall</span></code> into a geometry part and an inner loop. Call <code class="docutils literal notranslate"><span class="pre">gpuSpectrogram</span></code>
+when <code class="docutils literal notranslate"><span class="pre">gpuEnabled()</span></code>; otherwise run the existing <code class="docutils literal notranslate"><span class="pre">parallelFor</span></code> loop.</p></li>
+<li><p>GPU side:</p>
+<ul>
+<li><p>At 100 % coverage, copy the contiguous raw span in chunks of rows. Otherwise, gather
+only the FFT segments into the pinned buffer.</p></li>
+<li><p>Kernel <code class="docutils literal notranslate"><span class="pre">decodeWindow</span></code>: same rules as <code class="docutils literal notranslate"><span class="pre">decodeSamples</span></code> (<code class="docutils literal notranslate"><span class="pre">swapIQ</span></code>, <code class="docutils literal notranslate"><span class="pre">bigEndian</span></code>,
+scale), times the window, zero outside the file.</p></li>
+<li><p>Batched <code class="docutils literal notranslate"><span class="pre">cufftExecC2C</span></code>.</p></li>
+<li><p>Kernel <code class="docutils literal notranslate"><span class="pre">powerPool</span></code>: |X|² summed over <code class="docutils literal notranslate"><span class="pre">avg</span></code> with fftshift, scaled, max-pooled to
+<code class="docutils literal notranslate"><span class="pre">cols</span></code>.</p></li>
+<li><p>Two staging slots, so the copy of chunk k+1 overlaps the work on chunk k.</p></li>
+</ul>
+</li>
+<li><p>Raise the input budget on the GPU. <code class="docutils literal notranslate"><span class="pre">gpu_check</span></code> compares GPU and CPU results.</p></li>
+</ul>
+</li>
+<li><p><strong>Live spectrum on the GPU.</strong></p>
+<ul class="simple">
+<li><p>In <code class="docutils literal notranslate"><span class="pre">spectrumLoop</span></code>, make a <code class="docutils literal notranslate"><span class="pre">GpuLiveSpectrum</span></code>. Make it again when N or the format
+changes.</p></li>
+<li><p>Send the <code class="docutils literal notranslate"><span class="pre">raw</span></code> slice that the loop already reads. Get back <code class="docutils literal notranslate"><span class="pre">n</span></code> powers. Column pooling
+stays in C++.</p></li>
+<li><p>Make <code class="docutils literal notranslate"><span class="pre">kMaxAnalyzeRate</span></code> depend on the backend. Update the “up to 20 MS/s” tooltip in
+<code class="docutils literal notranslate"><span class="pre">src/app/app_live.cpp</span></code>.</p></li>
+<li><p>Target: less than 2 ms of GPU time per row at 40 MS/s and 30 rows/s.</p></li>
+</ul>
+</li>
+<li><p><strong>UI.</strong></p>
+<ul class="simple">
+<li><p>Status bar tag <code class="docutils literal notranslate"><span class="pre">GPU</span> <span class="pre">&lt;name&gt;</span></code> or <code class="docutils literal notranslate"><span class="pre">CPU</span></code>. A tooltip with <code class="docutils literal notranslate"><span class="pre">GpuInfo</span></code> and the fallback notes.</p></li>
+<li><p>A <code class="docutils literal notranslate"><span class="pre">GPU</span></code> checkbox in the view settings. It calls <code class="docutils literal notranslate"><span class="pre">gpuSetEnabled</span></code> and invalidates the
+workers, so the view computes again.</p></li>
+<li><p>The live status bar shows <code class="docutils literal notranslate"><span class="pre">(GPU)</span></code> after “FFT sees”.</p></li>
+</ul>
+</li>
+<li><p><strong>Channel filter on the GPU (optional, after step 5 is measured).</strong></p>
+<ul class="simple">
+<li><p>Move the NCO + FIR + decimate of dense <code class="docutils literal notranslate"><span class="pre">processRange</span></code> to the GPU. Keep the NCO phase
+from the absolute sample index in double precision.</p></li>
+<li><p>Use a direct polyphase kernel for a small number of taps, and overlap-save FFT
+convolution for many taps.</p></li>
+<li><p>The atan2 / unwrap / smoothing stays on the CPU.</p></li>
+<li><p>Do this step only if step 0 shows that the channel filter is slow. It can also go to a
+new issue.</p></li>
+</ul>
+</li>
+<li><p><strong>README.</strong></p>
+<ul class="simple">
+<li><p>Add the section “Optional: GPU acceleration”: requirements, <code class="docutils literal notranslate"><span class="pre">WVT_WITH_CUDA</span></code>,
+<code class="docutils literal notranslate"><span class="pre">CMAKE_CUDA_ARCHITECTURES</span></code>, <code class="docutils literal notranslate"><span class="pre">--gpu</span></code>, and how to check with <code class="docutils literal notranslate"><span class="pre">--list-devices</span></code>.</p></li>
+<li><p>Add the new files to the file table.</p></li>
+</ul>
+</li>
+</ol>
+</section>
+<section id="testing">
+<h2>6. Testing<a class="headerlink" href="#testing" title="Link to this heading">¶</a></h2>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Where</p></th>
+<th class="head"><p>What</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>macOS (each step)</p></td>
+<td><p>Build with no warnings. <code class="docutils literal notranslate"><span class="pre">siggen_check</span></code>, <code class="docutils literal notranslate"><span class="pre">audio_check</span></code>, <code class="docutils literal notranslate"><span class="pre">log_check</span></code> and <code class="docutils literal notranslate"><span class="pre">gpu_check</span></code> (CPU only) pass. Output and log with no <code class="docutils literal notranslate"><span class="pre">--gpu</span></code> flag match <code class="docutils literal notranslate"><span class="pre">main</span></code>, except the new INFO line. <code class="docutils literal notranslate"><span class="pre">--gpu</span> <span class="pre">on</span></code> stops with the reason.</p></td>
+</tr>
+<tr class="row-odd"><td><p>CI (step 3 on)</p></td>
+<td><p>The CPU-only job and the CUDA compile job pass.</p></td>
+</tr>
+<tr class="row-even"><td><p>Linux + NVIDIA GPU (steps 4–7, <strong>you must do this</strong>)</p></td>
+<td><p>Build with <code class="docutils literal notranslate"><span class="pre">-DWVT_WITH_CUDA=ON</span></code>. <code class="docutils literal notranslate"><span class="pre">gpu_check</span></code> passes the tolerances in §3. Record the <code class="docutils literal notranslate"><span class="pre">gpu_check</span> <span class="pre">--bench</span></code> times. Run the GUI with a file and with <code class="docutils literal notranslate"><span class="pre">--device</span> <span class="pre">sim</span></code>: GPU checkbox, status bar, and a forced error to check the fallback.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Linux, CUDA build, no GPU or driver</p></td>
+<td><p>wvt starts, shows <code class="docutils literal notranslate"><span class="pre">CPU</span></code>, works, and the log gives the reason.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="acceptance-criteria">
+<h2>7. Acceptance criteria<a class="headerlink" href="#acceptance-criteria" title="Link to this heading">¶</a></h2>
+<ol class="arabic simple">
+<li><p>A build with <code class="docutils literal notranslate"><span class="pre">WVT_WITH_CUDA=OFF</span></code>, and every macOS build, has no change in behavior.</p></li>
+<li><p>A CUDA build on a computer without an NVIDIA driver starts and works on the CPU.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">gpu_check</span></code> passes on at least one RTX card.</p></li>
+<li><p>File waterfall: at least 5× faster than the CPU at N = 8192 and 100× zoom-out. 100 %
+coverage for a view at least 4× wider than the CPU budget allows.</p></li>
+<li><p>Live: at 40 MS/s with auto averaging, “FFT sees” stays at 100 % at 30 rows/s. The
+spectrum thread causes no dropped samples.</p></li>
+<li><p>A forced CUDA error moves that path to the CPU, logs a WARN, and the view still
+updates.</p></li>
+</ol>
+</section>
+<section id="decisions-needed">
+<h2>8. Decisions needed<a class="headerlink" href="#decisions-needed" title="Link to this heading">¶</a></h2>
+<ol class="arabic simple">
+<li><p><strong>GPU rendering.</strong> Recommendation: leave it out (§2). OpenGL already draws on the GPU,
+and CUDA–GL interop fails over remote X11. Step 0 measures it. Do you agree?</p></li>
+<li><p><strong>Target hardware.</strong> Desktop GeForce RTX (sm_75 / 86 / 89 / 120), data-center cards
+(sm_80 / 90), or Jetson (aarch64)? This sets <code class="docutils literal notranslate"><span class="pre">CMAKE_CUDA_ARCHITECTURES</span></code> and the
+build time.</p></li>
+<li><p><strong>Linking.</strong> Static cuFFT gives a binary of about 100–200 MB that needs only the
+driver. Shared cuFFT gives a small binary that needs the CUDA toolkit libraries at run
+time. Recommendation: static, because it runs with only the driver. The CPU build
+does not change.</p></li>
+<li><p><strong>Minimum CUDA version.</strong> Recommendation: 12.0, with 12.8 or later recommended (needed
+for RTX 50 / sm_120).</p></li>
+<li><p><strong>CI.</strong> Can step 3 add GitHub Actions to the repository?</p></li>
+<li><p><strong>Test computer.</strong> Is there a Linux computer with an NVIDIA GPU for steps 4–7, and
+which card?</p></li>
+<li><p><strong>Scope for closing #3.</strong> Close #3 after steps 0–6 and 8, and move the channel filter
+(step 7) to a new issue?</p></li>
+</ol>
+</section>
+<section id="implementation-notes">
+<h2>9. Implementation notes<a class="headerlink" href="#implementation-notes" title="Link to this heading">¶</a></h2>
+<p>The decisions in §8 are still open. Until they are answered, the code uses the
+recommendations: static cuFFT, CUDA 12.0 or later, and desktop RTX + data-center targets.</p>
+<section id="files">
+<h3>Files<a class="headerlink" href="#files" title="Link to this heading">¶</a></h3>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>File</p></th>
+<th class="head"><p>Change</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">tools/gpu_check.cpp</span></code></p></td>
+<td><p>Step 0: <code class="docutils literal notranslate"><span class="pre">--bench</span></code> CPU times. Step 1–2: checks of the setup rules (<code class="docutils literal notranslate"><span class="pre">--gpu</span></code> parsing, <code class="docutils literal notranslate"><span class="pre">auto</span></code> / <code class="docutils literal notranslate"><span class="pre">on</span></code> / <code class="docutils literal notranslate"><span class="pre">off</span></code>, the switch, the device list).</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/gpu/gpu.h</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">GpuMode</span></code>, <code class="docutils literal notranslate"><span class="pre">GpuInfo</span></code>, <code class="docutils literal notranslate"><span class="pre">gpuInit</span></code>, <code class="docutils literal notranslate"><span class="pre">gpuInfo</span></code>, <code class="docutils literal notranslate"><span class="pre">gpuEnabled</span></code>, <code class="docutils literal notranslate"><span class="pre">gpuSetEnabled</span></code>, <code class="docutils literal notranslate"><span class="pre">gpuListDevices</span></code>. <code class="docutils literal notranslate"><span class="pre">gpuSpectrogram</span></code> and <code class="docutils literal notranslate"><span class="pre">GpuLiveSpectrum</span></code> come with steps 4 and 5.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/gpu/gpu_backend.h</span></code></p></td>
+<td><p>New, not in §3: the three functions a backend provides (<code class="docutils literal notranslate"><span class="pre">gpuBackendBuilt</span></code>, <code class="docutils literal notranslate"><span class="pre">gpuBackendProbe</span></code>, <code class="docutils literal notranslate"><span class="pre">gpuBackendList</span></code>). The rules and the log line stay in <code class="docutils literal notranslate"><span class="pre">gpu_common.cpp</span></code>, so both builds share them.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/gpu/gpu_common.cpp</span></code></p></td>
+<td><p>Option parsing, the init rules, the INFO line, the switch.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/gpu/gpu_stub.cpp</span></code></p></td>
+<td><p>“built without CUDA”.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/gpu/gpu_cuda.cu</span></code></p></td>
+<td><p>Device discovery: no device, no driver, driver too old, compute below 7.5, less than 1 GB free. <code class="docutils literal notranslate"><span class="pre">auto</span></code> picks the newest architecture, then the most multiprocessors. <code class="docutils literal notranslate"><span class="pre">CUDA_TRY</span></code> is ready for step 4.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/app/main.cpp</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">--gpu</span></code>, <code class="docutils literal notranslate"><span class="pre">--gpu-device</span></code>, <code class="docutils literal notranslate"><span class="pre">WVT_GPU</span></code>, usage text, the GPU list in <code class="docutils literal notranslate"><span class="pre">--list-devices</span></code>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">CMakeLists.txt</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">WVT_WITH_CUDA</span></code>, <code class="docutils literal notranslate"><span class="pre">WVT_CUDA_STATIC</span></code> (default <code class="docutils literal notranslate"><span class="pre">ON</span></code>), the <code class="docutils literal notranslate"><span class="pre">wvt_gpu</span></code> library, <code class="docutils literal notranslate"><span class="pre">gpu_check</span></code>.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="differences-from-the-plan">
+<h3>Differences from the plan<a class="headerlink" href="#differences-from-the-plan" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">gpuInit</span></code> runs only on the GUI path. The headless paths (<code class="docutils literal notranslate"><span class="pre">--audio-out</span></code>, <code class="docutils literal notranslate"><span class="pre">--no-gui</span></code>,
+<code class="docutils literal notranslate"><span class="pre">--gen-out</span></code>, <code class="docutils literal notranslate"><span class="pre">--tx</span></code>) do not use the waterfall, so they do not start CUDA, and their
+output is the same as <code class="docutils literal notranslate"><span class="pre">main</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">gpu_check</span></code> makes its own test signal (two tones, a chirp, 1 µs pulses, noise) as one
+ci16 file. It does not use <code class="docutils literal notranslate"><span class="pre">SigGen</span></code>. The other formats come with the GPU decode checks in
+step 4.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">--gpu</span> <span class="pre">off</span></code> never calls the CUDA driver.</p></li>
+<li><p>Default <code class="docutils literal notranslate"><span class="pre">CMAKE_CUDA_ARCHITECTURES</span></code>: <code class="docutils literal notranslate"><span class="pre">75-real</span> <span class="pre">80-real</span> <span class="pre">86-real</span> <span class="pre">89-real</span> <span class="pre">90</span></code> (PTX for newer
+GPUs), plus <code class="docutils literal notranslate"><span class="pre">120</span></code> with CUDA 12.8 or later. A value given on the command line wins.</p></li>
+</ul>
+</section>
+<section id="cpu-baseline-step-0">
+<h3>CPU baseline (step 0)<a class="headerlink" href="#cpu-baseline-step-0" title="Link to this heading">¶</a></h3>
+<p>Development Mac, 10 cores, <code class="docutils literal notranslate"><span class="pre">gpu_check</span> <span class="pre">--bench</span></code> (64 M samples ci16 at 20 MS/s, 256 MB).
+Wider views need a larger file (<code class="docutils literal notranslate"><span class="pre">--samples</span> <span class="pre">1G</span></code>); the 64 M file clips them.</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Job</p></th>
+<th class="head"><p>Case</p></th>
+<th class="head"><p>Time</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>File waterfall</p></td>
+<td><p>N 1024, 100× (52 MS, 100 FFTs/row)</p></td>
+<td><p>124 ms</p></td>
+</tr>
+<tr class="row-odd"><td><p></p></td>
+<td><p>N 8192, 10× (42 MS)</p></td>
+<td><p>126 ms</p></td>
+</tr>
+<tr class="row-even"><td><p></p></td>
+<td><p>N 65536, 1× (34 MS)</p></td>
+<td><p>188 ms</p></td>
+</tr>
+<tr class="row-odd"><td><p>Live row (N 2048, 30 rows/s, no 20 MS/s cap)</p></td>
+<td><p>20 / 40 / 61.44 MS/s</p></td>
+<td><p>5.4 / 10.7 / 15.8 ms per row (16 / 32 / 47 % of a core)</p></td>
+</tr>
+<tr class="row-even"><td><p>Channel filter + demod (8 MS in, decimation 8)</p></td>
+<td><p>255 / 2047 / 8191 taps</p></td>
+<td><p>67 / 192 / 660 ms</p></td>
+</tr>
+<tr class="row-odd"><td><p>Waterfall colouring (1024 × 2048)</p></td>
+<td><p></p></td>
+<td><p>0.8 ms</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The colouring is under 1 ms, so it does not justify GPU rendering (§8, item 1). The
+texture upload needs a GL context and is not measured. The channel filter with many taps
+is slower than the waterfall, so step 7 is worth doing.</p>
+</section>
+<section id="verification-macos">
+<h3>Verification (macOS)<a class="headerlink" href="#verification-macos" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>The build has no warnings. CMake prints <code class="docutils literal notranslate"><span class="pre">CUDA</span> <span class="pre">support</span> <span class="pre">disabled</span> <span class="pre">(CUDA</span> <span class="pre">is</span> <span class="pre">not</span> <span class="pre">available</span> <span class="pre">on</span> <span class="pre">macOS)</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">gpu_check</span></code>, <code class="docutils literal notranslate"><span class="pre">siggen_check</span></code>, <code class="docutils literal notranslate"><span class="pre">audio_check</span></code>, <code class="docutils literal notranslate"><span class="pre">log_check</span></code> and <code class="docutils literal notranslate"><span class="pre">segment_check</span></code> pass.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">--gpu</span> <span class="pre">on</span></code> exits with status 1 and “built without CUDA”. <code class="docutils literal notranslate"><span class="pre">--gpu</span> <span class="pre">maybe</span></code> and
+<code class="docutils literal notranslate"><span class="pre">--gpu-device</span> <span class="pre">x</span></code> exit with status 2. A bad <code class="docutils literal notranslate"><span class="pre">WVT_GPU</span></code> gives a WARN and uses <code class="docutils literal notranslate"><span class="pre">auto</span></code>.</p></li>
+</ul>
+</section>
+<section id="verification-cuda-container-no-gpu">
+<h3>Verification (CUDA container, no GPU)<a class="headerlink" href="#verification-cuda-container-no-gpu" title="Link to this heading">¶</a></h3>
+<p>Docker on the Mac (arm64), images <code class="docutils literal notranslate"><span class="pre">nvidia/cuda:12.6.3-devel-ubuntu24.04</span></code> and
+<code class="docutils literal notranslate"><span class="pre">nvidia/cuda:12.8.1-devel-ubuntu24.04</span></code>, <code class="docutils literal notranslate"><span class="pre">-DWVT_WITH_CUDA=ON</span></code>, RTL-SDR and UHD off:</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p></p></th>
+<th class="head"><p>CUDA 12.6</p></th>
+<th class="head"><p>CUDA 12.8</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>CMake line</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">CUDA</span> <span class="pre">12.6.85,</span> <span class="pre">archs</span> <span class="pre">75-real;80-real;86-real;89-real;90,</span> <span class="pre">static</span> <span class="pre">cuFFT</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">CUDA</span> <span class="pre">12.8.93,</span> <span class="pre">archs</span> <span class="pre">...;90-real;120,</span> <span class="pre">static</span> <span class="pre">cuFFT</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>Build warnings</p></td>
+<td><p>none</p></td>
+<td><p>none</p></td>
+</tr>
+<tr class="row-even"><td><p>Self-tests</p></td>
+<td><p>all pass</p></td>
+<td><p>all pass</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">gpu_check</span></code></p></td>
+<td><p>“build: CUDA; GPU: none, no NVIDIA driver”, all pass</p></td>
+<td><p>same</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--gpu</span> <span class="pre">on</span></code></p></td>
+<td><p>“no NVIDIA driver”, status 1</p></td>
+<td><p>same</p></td>
+</tr>
+<tr class="row-odd"><td><p>CUDA shared libraries in <code class="docutils literal notranslate"><span class="pre">ldd</span> <span class="pre">wvt</span></code></p></td>
+<td><p>none</p></td>
+<td><p>none</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The binary is 5.5 MB: no cuFFT function is called yet, so the static library adds
+nothing. It grows in step 4.</p>
+<p><strong>Not done:</strong> running on a real GPU (steps 4–7 need the Linux computer, §8 item 6).</p>
+</section>
+<section id="step-4-file-waterfall-on-the-gpu">
+<h3>Step 4: file waterfall on the GPU<a class="headerlink" href="#step-4-file-waterfall-on-the-gpu" title="Link to this heading">¶</a></h3>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>File</p></th>
+<th class="head"><p>Change</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/gpu/gpu.h</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">SpecJob</span></code> (the plan’s <code class="docutils literal notranslate"><span class="pre">GpuSpecReq</span></code>, shared by the CPU and the GPU), <code class="docutils literal notranslate"><span class="pre">specFftStart</span></code>, <code class="docutils literal notranslate"><span class="pre">GpuStatus</span></code> (<code class="docutils literal notranslate"><span class="pre">Ok</span></code>, <code class="docutils literal notranslate"><span class="pre">Cancelled</span></code>, <code class="docutils literal notranslate"><span class="pre">Unavailable</span></code>, <code class="docutils literal notranslate"><span class="pre">Failed</span></code>), <code class="docutils literal notranslate"><span class="pre">gpuSpectrogram</span></code>, <code class="docutils literal notranslate"><span class="pre">gpuSpectrogramUsable</span></code>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/gpu/gpu_common.cpp</span></code></p></td>
+<td><p>The fallback rules: after a failure other than “out of memory”, the waterfall stays on the CPU until the next <code class="docutils literal notranslate"><span class="pre">gpuInit</span></code>; one WARN. Out of memory: WARN once, the path stays on. <code class="docutils literal notranslate"><span class="pre">WVT_GPU_FORCE_FAIL=1</span></code> forces a failure.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/gpu/gpu_cuda.cu</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">gpuBackendSpectrogram</span></code>, below. <code class="docutils literal notranslate"><span class="pre">CUDA_TRY</span></code> / <code class="docutils literal notranslate"><span class="pre">CUFFT_TRY</span></code> now return <code class="docutils literal notranslate"><span class="pre">Failed</span></code> with the message instead of logging.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/dsp/engine.h</span></code>, <code class="docutils literal notranslate"><span class="pre">src/dsp/engine.cpp</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">computeWaterfall</span></code> keeps the geometry and tries the GPU first (budget 2 G samples); on any result other than <code class="docutils literal notranslate"><span class="pre">Ok</span></code> or <code class="docutils literal notranslate"><span class="pre">Cancelled</span></code> it computes <code class="docutils literal notranslate"><span class="pre">avg</span></code> again with the CPU budget and runs <code class="docutils literal notranslate"><span class="pre">spectrogramCpu</span></code>, the old loop moved out unchanged. <code class="docutils literal notranslate"><span class="pre">WaterfallRes::gpu</span></code> says which one ran.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/io/iq_file.h</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">IqFile::data()</span></code>: the mapped bytes, for the upload.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">CMakeLists.txt</span></code></p></td>
+<td><p>CUDA C++20 (the headers use defaulted <code class="docutils literal notranslate"><span class="pre">operator==</span></code>). Static cuFFT needs <code class="docutils literal notranslate"><span class="pre">CUDA_SEPARABLE_COMPILATION</span></code> and <code class="docutils literal notranslate"><span class="pre">CUDA_RESOLVE_DEVICE_SYMBOLS</span></code> on <code class="docutils literal notranslate"><span class="pre">wvt_gpu</span></code> (device link). <code class="docutils literal notranslate"><span class="pre">segment_check</span></code> links <code class="docutils literal notranslate"><span class="pre">wvt_gpu</span></code>.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">tools/gpu_check.cpp</span></code></p></td>
+<td><p>GPU against CPU in all 6 formats, big-endian, swapped I/Q, a 3-byte header, FFTs before and after the file, rows longer than one chunk, <code class="docutils literal notranslate"><span class="pre">computeWaterfall</span></code>, cancel, and the forced failure. <code class="docutils literal notranslate"><span class="pre">--bench</span></code> adds GPU columns.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>How the GPU path works:</p>
+<ul class="simple">
+<li><p>The work goes in chunks of up to 8 M samples (<code class="docutils literal notranslate"><span class="pre">kChunkSamples</span></code>). A chunk holds whole
+rows, or, when one row needs more, part of one row; the row sums go on in a device
+buffer.</p></li>
+<li><p>The CPU threads copy the raw bytes of each FFT from the mapped file into one of two
+pinned buffers. The copy of chunk k+1 runs while the GPU works on chunk k (a CUDA event
+per buffer). The plan’s “contiguous span at 100 % coverage” shortcut is not done: each
+FFT is copied on its own, so 50 % overlap copies each sample twice. Measure first.</p></li>
+<li><p>Kernels: <code class="docutils literal notranslate"><span class="pre">decodeWindowKernel</span></code> (the <code class="docutils literal notranslate"><span class="pre">decodeSamples</span></code> rules, the window, zero outside the
+file), batched in-place <code class="docutils literal notranslate"><span class="pre">cufftExecC2C</span></code>, <code class="docutils literal notranslate"><span class="pre">accumulateKernel</span></code> (|X|² with fftshift, summed
+per row, no atomics), <code class="docutils literal notranslate"><span class="pre">poolKernel</span></code> (scale and max over the bins of each column).</p></li>
+<li><p>Each thread has its own stream, buffers and up to 4 cached cuFFT plans. The batch is a
+power of two, so few plans are made. The buffers stay allocated between calls.</p></li>
+<li><p>Cancel is checked before each chunk.</p></li>
+</ul>
+<p>Checks:</p>
+<ul class="simple">
+<li><p>macOS: the CPU waterfall is <strong>bit-identical</strong> to before the change (checksums of 24
+waterfalls: 6 formats × 4 views, compared with a build from before the split).
+All self-tests pass, with no warnings.</p></li>
+<li><p>CUDA 12.8 container, static cuFFT: builds with no warnings, the self-tests pass, and
+<code class="docutils literal notranslate"><span class="pre">gpu_check</span></code> skips the comparison (“no NVIDIA driver”).</p></li>
+<li><p>CUDA 12.6 container, <code class="docutils literal notranslate"><span class="pre">-DWVT_CUDA_STATIC=OFF</span></code>: the same; <code class="docutils literal notranslate"><span class="pre">wvt</span></code> loads <code class="docutils literal notranslate"><span class="pre">libcudart.so.12</span></code>
+and <code class="docutils literal notranslate"><span class="pre">libcufft.so.11</span></code>.</p></li>
+<li><p>Binary size: <strong>272 MB</strong> with static cuFFT and the 6 default GPU targets, 4.7 MB with
+shared cuFFT. This is more than the 100–200 MB in §8 item 3. Fewer targets
+(<code class="docutils literal notranslate"><span class="pre">-DCMAKE_CUDA_ARCHITECTURES=89</span></code>) make it smaller.</p></li>
+</ul>
+<p><strong>Still to do on the GPU computer:</strong> <code class="docutils literal notranslate"><span class="pre">gpu_check</span></code> (the comparisons above must pass at
+0.05 dB) and <code class="docutils literal notranslate"><span class="pre">gpu_check</span> <span class="pre">--bench</span> <span class="pre">--samples</span> <span class="pre">1G</span></code>. Then set the GPU budget (2 G samples now)
+from the times. The budget is wall time, not only FFT work: a wide view reads up to 8× more
+of the file than on the CPU.</p>
+</section>
+<section id="step-5-live-spectrum-on-the-gpu">
+<h3>Step 5: live spectrum on the GPU<a class="headerlink" href="#step-5-live-spectrum-on-the-gpu" title="Link to this heading">¶</a></h3>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>File</p></th>
+<th class="head"><p>Change</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/gpu/gpu.h</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">GpuLiveSpectrum</span></code> (a class with a hidden backend object, not the virtual <code class="docutils literal notranslate"><span class="pre">create</span></code> of §4, so the fallback rules stay in <code class="docutils literal notranslate"><span class="pre">gpu_common.cpp</span></code>) and <code class="docutils literal notranslate"><span class="pre">gpuLiveUsable</span></code>. <code class="docutils literal notranslate"><span class="pre">run</span></code> takes the format, N and the frame count on each call, so the loop does not make a new object when N or the format changes.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/gpu/gpu_common.cpp</span></code></p></td>
+<td><p>The fallback rules are now per path (<code class="docutils literal notranslate"><span class="pre">PathState</span></code>): a live failure turns off only the live path, and a waterfall failure only the waterfall. <code class="docutils literal notranslate"><span class="pre">gpuInit</span></code> resets both.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/gpu/gpu_cuda.cu</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">gpuBackendLiveRun</span></code>: copy the raw row up, then <code class="docutils literal notranslate"><span class="pre">decodeWindowKernel</span></code> (no “inside the file” table), batched cuFFT, and <code class="docutils literal notranslate"><span class="pre">accumulateKernel</span></code> as one row of all the frames. Rows over 8 M samples go in chunks. The plan cache is shared (<code class="docutils literal notranslate"><span class="pre">PlanCache</span></code>).</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/device/live.cpp</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">spectrumLoop</span></code> tries the GPU first. Auto averaging analyzes up to 100 MS/s on the GPU (<code class="docutils literal notranslate"><span class="pre">kGpuMaxAnalyzeRate</span></code>) and 20 MS/s on the CPU. The column pooling and the “FFT sees” figure are unchanged. On a GPU failure the CPU does that row; the next rows use the CPU cap.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/device/live.h</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">Stats::gpu</span></code>: the last row came from the GPU (for the status bar in step 6).</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/app/app_live.cpp</span></code></p></td>
+<td><p>The Avg tooltip: “up to 20 MS/s, or 100 MS/s on the GPU”.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">tools/gpu_check.cpp</span></code></p></td>
+<td><p>GPU against CPU for cu8, ci16 at 20 and 61.44 MS/s, one frame, big-endian cf32 with swapped I/Q, and N 65536 over two chunks. A forced live failure turns off only the live path. <code class="docutils literal notranslate"><span class="pre">--bench</span></code> adds the GPU time per row.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The row is copied from ordinary (pageable) memory: at 100 MS/s and 30 rows/s that is
+13 MB per row for ci16. If the benchmark shows the copy matters, read the ring straight into
+a pinned buffer.</p>
+<p>Checks: macOS (no warnings, all self-tests pass, <code class="docutils literal notranslate"><span class="pre">--device</span> <span class="pre">sim</span></code> records with the live
+loop running) and the CUDA 12.8 container (no warnings, self-tests pass, comparisons
+skipped: “no NVIDIA driver”).</p>
+<p><strong>Still to do on the GPU computer:</strong> <code class="docutils literal notranslate"><span class="pre">gpu_check</span></code> and <code class="docutils literal notranslate"><span class="pre">gpu_check</span> <span class="pre">--bench</span></code>; then the GUI with
+a USRP at 40 MS/s or more (acceptance §7 item 5: “FFT sees” stays at 100 % at 30 rows/s,
+no dropped samples).</p>
+</section>
+<section id="step-6-ui">
+<h3>Step 6: UI<a class="headerlink" href="#step-6-ui" title="Link to this heading">¶</a></h3>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>File</p></th>
+<th class="head"><p>Change</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/app/app.cpp</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">gpuTag</span></code>: the status bar shows <code class="docutils literal notranslate"><span class="pre">GPU</span> <span class="pre">&lt;model&gt;</span></code> or <code class="docutils literal notranslate"><span class="pre">CPU</span></code> before the renderer, by where the shown waterfall was computed (<code class="docutils literal notranslate"><span class="pre">WaterfallRes::gpu</span></code>). Its tooltip has the device, the CUDA and driver versions, “switched off”, and the fallback notes. <code class="docutils literal notranslate"><span class="pre">drawGpuCheckbox</span></code>: <strong>GPU</strong> after <strong>Peak</strong>; it calls <code class="docutils literal notranslate"><span class="pre">gpuSetEnabled</span></code> and invalidates the waterfall worker, so the view is computed again. <code class="docutils literal notranslate"><span class="pre">drawStatusRight</span></code> draws the right side of both status bars.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/app/app_live.cpp</span></code></p></td>
+<td><p>The live status bar: <code class="docutils literal notranslate"><span class="pre">FFT</span> <span class="pre">sees</span> <span class="pre">100%</span> <span class="pre">(GPU)</span></code> and the same tag (from <code class="docutils literal notranslate"><span class="pre">Stats::gpu</span></code>). The GPU checkbox after <strong>Cols</strong>; the live loop checks it on each row.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/gpu/gpu.h</span></code>, <code class="docutils literal notranslate"><span class="pre">src/gpu/gpu_common.cpp</span></code>, <code class="docutils literal notranslate"><span class="pre">src/gpu/gpu_cuda.cu</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">GpuInfo::model</span></code> (the name without “NVIDIA “), <code class="docutils literal notranslate"><span class="pre">gpuFallbackNotes()</span></code> (one line per path that fell back, with the error).</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Differences from the plan:</p>
+<ul class="simple">
+<li><p><strong>Builds without CUDA show nothing new</strong>: no tag, no checkbox. This keeps the
+“macOS builds do not change” rule (§1). A CUDA build always shows the tag: <code class="docutils literal notranslate"><span class="pre">CPU</span></code> when no
+GPU can be used, with the reason in the tooltip. The checkbox appears only when a GPU can
+be used.</p></li>
+<li><p>The tag uses the short model name (“GPU GeForce RTX 4070”); the full name is in the tooltip.</p></li>
+</ul>
+<p>Checks:</p>
+<ul class="simple">
+<li><p>macOS: no warnings, the self-tests pass. The X display could not be opened from this
+session, so the Mac GUI was not looked at; by the code, a build without CUDA draws the
+same status bar as before.</p></li>
+<li><p>CUDA 12.8 container with Xvfb and <code class="docutils literal notranslate"><span class="pre">--software</span></code>, no driver: the screenshots show
+<code class="docutils literal notranslate"><span class="pre">CPU</span> <span class="pre">|</span> <span class="pre">software</span> <span class="pre">|</span> <span class="pre">39</span> <span class="pre">fps</span></code> (file) and <code class="docutils literal notranslate"><span class="pre">FFT</span> <span class="pre">sees</span> <span class="pre">99%</span> <span class="pre">|</span> <span class="pre">CPU</span> <span class="pre">|</span> <span class="pre">software</span> <span class="pre">|</span> <span class="pre">56</span> <span class="pre">fps</span></code> (live
+<code class="docutils literal notranslate"><span class="pre">--device</span> <span class="pre">sim</span></code>). No GPU checkbox, as expected.</p></li>
+</ul>
+<p><strong>Still to do on the GPU computer:</strong> the tag shows <code class="docutils literal notranslate"><span class="pre">GPU</span> <span class="pre">&lt;model&gt;</span></code>; turning the checkbox off
+and on computes the view again on the other side (the log has “GPU processing off / on”);
+the live status shows <code class="docutils literal notranslate"><span class="pre">(GPU)</span></code>; with <code class="docutils literal notranslate"><span class="pre">WVT_GPU_FORCE_FAIL=1</span></code> the tag shows <code class="docutils literal notranslate"><span class="pre">CPU</span></code> and its
+tooltip has the fallback note.</p>
+</section>
+<section id="step-8-readme">
+<h3>Step 8: README<a class="headerlink" href="#step-8-readme" title="Link to this heading">¶</a></h3>
+<p>“Optional: GPU acceleration” after “Optional: device support” (requirements, the CMake
+options, <code class="docutils literal notranslate"><span class="pre">--gpu</span></code>, the checkbox, the fallback, <code class="docutils literal notranslate"><span class="pre">gpu_check</span></code>). The options list, the live
+<em>Avg</em> text (100 MS/s on the GPU), the waterfall budget (2 G on the GPU), the status bar row
+and the source table are updated.</p>
+</section>
+<section id="step-7-channel-filter-on-the-gpu">
+<h3>Step 7: channel filter on the GPU<a class="headerlink" href="#step-7-channel-filter-on-the-gpu" title="Link to this heading">¶</a></h3>
+<p>Done after step 6, without a GPU measurement first: the CPU baseline already shows the
+filter as the slowest job (660 ms for 8191 taps on 8 MS).</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>File</p></th>
+<th class="head"><p>Change</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/gpu/gpu.h</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">ChanJob</span></code> (mix, FIR, decimate; shared by the CPU and the GPU), <code class="docutils literal notranslate"><span class="pre">gpuChannelize</span></code>, <code class="docutils literal notranslate"><span class="pre">gpuChannelUsable</span></code>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/gpu/gpu_common.cpp</span></code></p></td>
+<td><p>A third fallback path, “channel filter”.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/gpu/gpu_cuda.cu</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">decodeOne</span></code> (the decode rules, now shared by all kernels), <code class="docutils literal notranslate"><span class="pre">decodeMixKernel</span></code> (decode, zero outside the file, mix with the phase from the absolute index: <code class="docutils literal notranslate"><span class="pre">frac</span> <span class="pre">*</span> <span class="pre">index</span></code> in double, reduced to [0, 1), then <code class="docutils literal notranslate"><span class="pre">sincospif</span></code> in float), <code class="docutils literal notranslate"><span class="pre">firKernel</span></code> (direct FIR, only the kept outputs, taps in shared memory up to 12000), <code class="docutils literal notranslate"><span class="pre">gpuBackendChannelize</span></code> (chunks of up to 8 M input samples; the raw bytes go up straight from the mapping).</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/dsp/engine.h</span></code>, <code class="docutils literal notranslate"><span class="pre">src/dsp/engine.cpp</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">channelizeCpu</span></code>: the old mix + FIR code, moved unchanged. <code class="docutils literal notranslate"><span class="pre">processRange</span></code> tries the GPU in dense mode when the job has at least 2·10⁷ multiply-adds (<code class="docutils literal notranslate"><span class="pre">kGpuMinChanMacs</span></code>, a few ms of CPU work); sparse mode (short blocks per pixel) stays on the CPU. The atan2 / unwrap / smoothing stays on the CPU.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">tools/gpu_check.cpp</span></code></p></td>
+<td><p>GPU against CPU (1e-4 of the peak): 255 to 13001 taps, decimation 1 to 10, no mix, before and after the file, 3 chunks, cu8 / ci16 / cf32; cancel; a forced failure turns off only this path. <code class="docutils literal notranslate"><span class="pre">--bench</span></code> adds the GPU column.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Differences from the plan: no overlap-save FFT convolution for many taps. The direct
+kernel does N multiply-adds per kept output with the taps in shared memory; the benchmark
+on the GPU will show if FFT convolution is needed.</p>
+<p>Checks: the CPU demodulator is <strong>bit-identical</strong> to before (checksums of 18 <code class="docutils literal notranslate"><span class="pre">computeDemod</span></code>
+results: cf32 / ci16 / cu8, dense and sparse, decimation 1, 8191 taps, mix on and off,
+views before and past the file). macOS and the CUDA 12.8 container: no warnings, all
+self-tests pass, the GPU comparisons are skipped there.</p>
+<p><strong>Still to do on the GPU computer:</strong> <code class="docutils literal notranslate"><span class="pre">gpu_check</span></code> and the channel filter rows of
+<code class="docutils literal notranslate"><span class="pre">gpu_check</span> <span class="pre">--bench</span></code>.</p>
+</section>
+<section id="step-3-ci">
+<h3>Step 3: CI<a class="headerlink" href="#step-3-ci" title="Link to this heading">¶</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">.github/workflows/build.yml</span></code>, on pushes to <code class="docutils literal notranslate"><span class="pre">main</span></code> and on pull requests, or by hand (a
+newer push to the same branch cancels the running one). Pushes to other branches build only
+through their pull request, so each commit builds once. <code class="docutils literal notranslate"><span class="pre">actions/checkout&#64;v5</span></code> (Node.js 24).</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Job</p></th>
+<th class="head"><p>What it does</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Linux (CPU, RTL-SDR, UHD)</p></td>
+<td><p>Ubuntu 24.04 with <code class="docutils literal notranslate"><span class="pre">librtlsdr-dev</span></code> and <code class="docutils literal notranslate"><span class="pre">libuhd-dev</span></code>, <code class="docutils literal notranslate"><span class="pre">WVT_WITH_CUDA=OFF</span></code>. Builds, runs the 5 self-tests, <code class="docutils literal notranslate"><span class="pre">--list-devices</span></code>, and a headless WAV export with <code class="docutils literal notranslate"><span class="pre">--segment</span></code>.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Linux CUDA 12.0 (compile only)</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">nvidia/cuda:12.0.1-devel-ubuntu22.04</span></code> (CMake 3.22): the minimum CUDA version.</p></td>
+</tr>
+<tr class="row-even"><td><p>Linux CUDA 12.8 (compile only)</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">nvidia/cuda:12.8.1-devel-ubuntu24.04</span></code>: adds sm_120.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The CUDA jobs build with <code class="docutils literal notranslate"><span class="pre">-DWVT_WITH_CUDA=ON</span></code> and run the self-tests with no GPU, so they
+also check the “CUDA build on a computer without a GPU” rule; <code class="docutils literal notranslate"><span class="pre">--gpu</span> <span class="pre">on</span></code> must fail.</p>
+<p>Found while adding it: CMake before 3.25 does not know nvcc’s C++20 flag, so the CUDA 12.0
+build on Ubuntu 22.04 failed to configure. <code class="docutils literal notranslate"><span class="pre">CMakeLists.txt</span></code> now defines
+<code class="docutils literal notranslate"><span class="pre">CMAKE_CUDA20_STANDARD_COMPILE_OPTION</span></code> when CMake lacks it.</p>
+<p>Checked before pushing: the CPU job’s steps in an <code class="docutils literal notranslate"><span class="pre">ubuntu:24.04</span></code> container (RTL-SDR and UHD
+on, no warnings, all pass), and both CUDA images (no warnings, all pass). The containers
+were arm64; the GitHub runners are x86-64.</p>
+</section>
+</section>
+</section>
+
+        </article>
+      </div>
+      <footer>
+        
+        <div class="related-pages">
+          <a class="next-page" href="region-export-plan.html">
+              <div class="page-info">
+                <div class="context">
+                  <span>Next</span>
+                </div>
+                <div class="title">Plan: export a region of a file (issue #18)</div>
+              </div>
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+            </a>
+          <a class="prev-page" href="time-segment-plan.html">
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+              <div class="page-info">
+                <div class="context">
+                  <span>Previous</span>
+                </div>
+                
+                <div class="title">Plan: open a time segment of a file (issue #16)</div>
+                
+              </div>
+            </a>
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                Copyright &#169; 2026, Brian Collette
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+            
+          </div>
+          <div class="right-details">
+            
+          </div>
+        </div>
+        
+      </footer>
+    </div>
+    <aside class="toc-drawer">
+      
+      
+      <div class="toc-sticky toc-scroll">
+        <div class="toc-title-container">
+          <span class="toc-title">
+            On this page
+          </span>
+        </div>
+        <div class="toc-tree-container">
+          <div class="toc-tree">
+            <ul>
+<li><a class="reference internal" href="#">Plan: CUDA GPU acceleration (issue #3)</a><ul>
+<li><a class="reference internal" href="#goal">1. Goal</a></li>
+<li><a class="reference internal" href="#starting-point-main">2. Starting point (<code class="docutils literal notranslate"><span class="pre">main</span></code>)</a><ul>
+<li><a class="reference internal" href="#where-the-cpu-time-goes">Where the CPU time goes</a></li>
+<li><a class="reference internal" href="#rendering-today">Rendering today</a></li>
+<li><a class="reference internal" href="#build">Build</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#design-decisions">3. Design decisions</a></li>
+<li><a class="reference internal" href="#interface-sketch-src-gpu-gpu-h">4. Interface sketch (<code class="docutils literal notranslate"><span class="pre">src/gpu/gpu.h</span></code>)</a></li>
+<li><a class="reference internal" href="#implementation-steps">5. Implementation steps</a></li>
+<li><a class="reference internal" href="#testing">6. Testing</a></li>
+<li><a class="reference internal" href="#acceptance-criteria">7. Acceptance criteria</a></li>
+<li><a class="reference internal" href="#decisions-needed">8. Decisions needed</a></li>
+<li><a class="reference internal" href="#implementation-notes">9. Implementation notes</a><ul>
+<li><a class="reference internal" href="#files">Files</a></li>
+<li><a class="reference internal" href="#differences-from-the-plan">Differences from the plan</a></li>
+<li><a class="reference internal" href="#cpu-baseline-step-0">CPU baseline (step 0)</a></li>
+<li><a class="reference internal" href="#verification-macos">Verification (macOS)</a></li>
+<li><a class="reference internal" href="#verification-cuda-container-no-gpu">Verification (CUDA container, no GPU)</a></li>
+<li><a class="reference internal" href="#step-4-file-waterfall-on-the-gpu">Step 4: file waterfall on the GPU</a></li>
+<li><a class="reference internal" href="#step-5-live-spectrum-on-the-gpu">Step 5: live spectrum on the GPU</a></li>
+<li><a class="reference internal" href="#step-6-ui">Step 6: UI</a></li>
+<li><a class="reference internal" href="#step-8-readme">Step 8: README</a></li>
+<li><a class="reference internal" href="#step-7-channel-filter-on-the-gpu">Step 7: channel filter on the GPU</a></li>
+<li><a class="reference internal" href="#step-3-ci">Step 3: CI</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+          </div>
+        </div>
+      </div>
+      
+      
+    </aside>
+  </div>
+</div><script src="../_static/documentation_options.js?v=5929fcd5"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/scripts/furo.js?v=46bd48cc"></script>
+    </body>
+</html>

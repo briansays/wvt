@@ -1,0 +1,798 @@
+<!doctype html>
+<html class="no-js" lang="en" data-content_root="../">
+  <head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html"><link rel="next" title="Plan: Epiq Solutions Sidekiq as a wvt live device" href="sidekiq-integration-plan.html"><link rel="prev" title="Plan: support other Ettus USRPs (issue #11)" href="usrp-models-plan.html">
+
+    <!-- Generated with Sphinx 8.2.3 and Furo 2025.12.19 -->
+        <title>Plan: Signal Hound BB60 as a wvt live device - wvt</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d111a655" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=7bdb33bb" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?v=8dab3a3b" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f2f2f2;
+  --color-code-foreground: #1e1e1e;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-with-moon" viewBox="0 0 24 24">
+    <title>Auto light/dark, in light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path style="opacity: 50%" d="M 5.411 14.504 C 5.471 14.504 5.532 14.504 5.591 14.504 C 3.639 16.319 4.383 19.569 6.931 20.352 C 7.693 20.586 8.512 20.551 9.25 20.252 C 8.023 23.207 4.056 23.725 2.11 21.184 C 0.166 18.642 1.702 14.949 4.874 14.536 C 5.051 14.512 5.231 14.5 5.411 14.5 L 5.411 14.504 Z"/>
+      <line x1="14.5" y1="3.25" x2="14.5" y2="1.25"/>
+      <line x1="14.5" y1="15.85" x2="14.5" y2="17.85"/>
+      <line x1="10.044" y1="5.094" x2="8.63" y2="3.68"/>
+      <line x1="19" y1="14.05" x2="20.414" y2="15.464"/>
+      <line x1="8.2" y1="9.55" x2="6.2" y2="9.55"/>
+      <line x1="20.8" y1="9.55" x2="22.8" y2="9.55"/>
+      <line x1="10.044" y1="14.006" x2="8.63" y2="15.42"/>
+      <line x1="19" y1="5.05" x2="20.414" y2="3.636"/>
+      <circle cx="14.5" cy="9.55" r="3.6"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon-with-sun" viewBox="0 0 24 24">
+    <title>Auto light/dark, in dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path d="M 8.282 7.007 C 8.385 7.007 8.494 7.007 8.595 7.007 C 5.18 10.184 6.481 15.869 10.942 17.24 C 12.275 17.648 13.706 17.589 15 17.066 C 12.851 22.236 5.91 23.143 2.505 18.696 C -0.897 14.249 1.791 7.786 7.342 7.063 C 7.652 7.021 7.965 7 8.282 7 L 8.282 7.007 Z"/>
+      <line style="opacity: 50%" x1="18" y1="3.705" x2="18" y2="2.5"/>
+      <line style="opacity: 50%" x1="18" y1="11.295" x2="18" y2="12.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="4.816" x2="14.464" y2="3.964"/>
+      <line style="opacity: 50%" x1="20.711" y1="10.212" x2="21.563" y2="11.063"/>
+      <line style="opacity: 50%" x1="14.205" y1="7.5" x2="13.001" y2="7.5"/>
+      <line style="opacity: 50%" x1="21.795" y1="7.5" x2="23" y2="7.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="10.184" x2="14.464" y2="11.036"/>
+      <line style="opacity: 50%" x1="20.711" y1="4.789" x2="21.563" y2="3.937"/>
+      <circle style="opacity: 50%" cx="18" cy="7.5" r="2.169"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-pencil" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-pencil-code">
+      <path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" />
+      <path d="M13.5 6.5l4 4" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+  <symbol id="svg-eye" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-eye-code">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" />
+      <path
+        d="M11.11 17.958c-3.209 -.307 -5.91 -2.293 -8.11 -5.958c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6c-.21 .352 -.427 .688 -.647 1.008" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle site navigation sidebar">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc" aria-label="Toggle table of contents sidebar">
+<label class="overlay sidebar-overlay" for="__navigation"></label>
+<label class="overlay toc-overlay" for="__toc"></label>
+
+<a class="skip-to-content muted-link" href="#furo-main-content">Skip to content</a>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <span class="icon"><svg><use href="#svg-menu"></use></svg></span>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="../index.html"><div class="brand">wvt</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+          <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+          <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon" for="__toc">
+        <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand" href="../index.html">
+  
+  <span class="sidebar-brand-text">wvt</span>
+  
+</a><form class="sidebar-search-container" method="get" action="../search.html" role="search">
+  <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <p class="caption" role="heading"><span class="caption-text">User guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../getting-started.html">Getting started</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../viewer.html">The file viewer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../segments.html">Load a segment</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../export.html">Export a region</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../snapshots.html">Plot snapshots</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../sessions.html">File sessions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../live.html">Live devices</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../siggen.html">Signal generator</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../audio.html">Audio</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../gpu.html">GPU processing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../logging.html">Logging</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../controls.html">Mouse and keyboard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../cli.html">Command-line reference</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../build.html">Build reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../signal-processing.html">Signal processing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../self-checks.html">Self-checks and test signals</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../source-layout.html">Source layout</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../writing-docs.html">Writing the documentation</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Design records</span></p>
+<ul class="current">
+<li class="toctree-l1 current has-children"><a class="reference internal" href="index.html">Design records</a><input aria-label="Toggle navigation of Design records" checked="" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="audio-demod-plan.html">Plan: Audio demodulation and playback</a></li>
+<li class="toctree-l2"><a class="reference internal" href="verbose-logging-plan.html">Plan: Verbose console logging and a timestamped log file</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-segment-plan.html">Plan: open a time segment of a file (issue #16)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cuda-gpu-plan.html">Plan: CUDA GPU acceleration (issue #3)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="region-export-plan.html">Plan: export a region of a file (issue #18)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="apple-gpu-plan.html">Plan: Apple GPU support (issue #21)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ui-cleanup-plan.html">Plan: labels outside the plots and a tidier UI (issues #12 and #19)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="siggen-sweep-plan.html">Signal generator: frequency and amplitude sweep (issue #28)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="siggen-chain-plan.html">Signal generator: chain playback (issue #27)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="plot-snapshot-plan.html">Plan: snapshot button for all graphs (issue #13)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="usrp-models-plan.html">Plan: support other Ettus USRPs (issue #11)</a></li>
+<li class="toctree-l2 current current-page"><a class="current reference internal" href="#">Plan: Signal Hound BB60 as a wvt live device</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sidekiq-integration-plan.html">Plan: Epiq Solutions Sidekiq as a wvt live device</a></li>
+<li class="toctree-l2"><a class="reference internal" href="point-measurement-plan.html">Plan: point-to-point measurements on the plots (issue #80)</a></li>
+</ul>
+</li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="view-this-page">
+  <a class="muted-link" href="../_sources/design/bb60-integration-plan.md.txt" title="View this page">
+    <svg><use href="#svg-eye"></use></svg>
+    <span class="visually-hidden">View this page</span>
+  </a>
+</div>
+<div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+              <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+              <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon" for="__toc">
+            <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+          </label>
+        </div>
+        <article role="main" id="furo-main-content">
+          <section id="plan-signal-hound-bb60-as-a-wvt-live-device">
+<h1>Plan: Signal Hound BB60 as a wvt live device<a class="headerlink" href="#plan-signal-hound-bb60-as-a-wvt-live-device" title="Link to this heading">¶</a></h1>
+<p>Issue: #2. Branch: <code class="docutils literal notranslate"><span class="pre">2-signal-hound</span></code> (from <code class="docutils literal notranslate"><span class="pre">main</span></code>; the first version was on <code class="docutils literal notranslate"><span class="pre">wvt-sh-dev</span></code>, commit
+<code class="docutils literal notranslate"><span class="pre">72f9d8a</span></code>).
+Status: <strong>implemented on <code class="docutils literal notranslate"><span class="pre">2-signal-hound</span></code> (2026-10-20)</strong> against bb_api 5.0.11 (SDK
+2026-10-05), tested with a simulated BB60 (section 7). <strong>Not yet run against hardware.</strong> Sections
+1 to 6 are the first plan and its review; section 7 records the second pass.</p>
+<section id="goal">
+<h2>1. Goal<a class="headerlink" href="#goal" title="Link to this heading">¶</a></h2>
+<p>Add the Signal Hound BB60D (and BB60C / BB60A) to the hardware device options, next to
+RTL-SDR and USRP B2xx. The user can select it in the Device list or with <code class="docutils literal notranslate"><span class="pre">--device</span> <span class="pre">bb</span></code>, tune
+it, set its reference level, view the spectrum and waterfall, and record SigMF or raw IQ.</p>
+<p>Out of scope: BB60 sweep mode, triggers / GPS time stamps, the SM200/SM435 or other Signal
+Hound devices, transmit.</p>
+</section>
+<section id="design-decisions">
+<h2>2. Design decisions<a class="headerlink" href="#design-decisions" title="Link to this heading">¶</a></h2>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Topic</p></th>
+<th class="head"><p>Decision</p></th>
+<th class="head"><p>Reason</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>API</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">bb_api</span></code> from the Signal Hound SDK, linked as an imported shared library</p></td>
+<td><p>No distro package or pkg-config file exists</p></td>
+</tr>
+<tr class="row-odd"><td><p>Build switch</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">WVT_WITH_BB</span></code> = <code class="docutils literal notranslate"><span class="pre">AUTO</span></code> / <code class="docutils literal notranslate"><span class="pre">ON</span></code> / <code class="docutils literal notranslate"><span class="pre">OFF</span></code>, <code class="docutils literal notranslate"><span class="pre">SIGNALHOUND_SDK_DIR</span></code> hint</p></td>
+<td><p>Same pattern as <code class="docutils literal notranslate"><span class="pre">WVT_WITH_RTLSDR</span></code> / <code class="docutils literal notranslate"><span class="pre">WVT_WITH_UHD</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>Driver id</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">&quot;bb&quot;</span></code>, device args = serial number</p></td>
+<td><p>Short, matches <code class="docutils literal notranslate"><span class="pre">rtlsdr</span></code> / <code class="docutils literal notranslate"><span class="pre">uhd</span></code> naming</p></td>
+</tr>
+<tr class="row-odd"><td><p>Sample format</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">bbDataType16sc</span></code> → <code class="docutils literal notranslate"><span class="pre">SampleFormat::CI16</span></code></p></td>
+<td><p>Half the bandwidth of cf32; recorder and ring already handle ci16 (USRP)</p></td>
+</tr>
+<tr class="row-even"><td><p>Sample rate</p></td>
+<td><p>40 MS/s / 2^n, n = 0..13 (40 MS/s .. 4.883 kS/s), shown as a combo, requests snapped on a log scale</p></td>
+<td><p>The BB60 only decimates by powers of 2</p></td>
+</tr>
+<tr class="row-odd"><td><p>“Gain”</p></td>
+<td><p>Reused <code class="docutils literal notranslate"><span class="pre">StreamConfig::gain</span></code> as <strong>reference level in dBm</strong> (-130 .. +20); <code class="docutils literal notranslate"><span class="pre">GainRange</span></code> gets <code class="docutils literal notranslate"><span class="pre">label</span></code> / <code class="docutils literal notranslate"><span class="pre">unit</span></code></p></td>
+<td><p>The BB60 has no gain control; ref level picks atten/amp</p></td>
+</tr>
+<tr class="row-even"><td><p>Manual RF</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">atten</span></code> (-1 auto, 0-3 → 0/10/20/30 dB) and <code class="docutils literal notranslate"><span class="pre">rfGain</span></code> (-1 auto, 0-3)</p></td>
+<td><p>Expose <code class="docutils literal notranslate"><span class="pre">bbConfigureGainAtten</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>Bandwidth</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">StreamConfig::bandwidth</span></code> reused as the I/Q filter bandwidth; 0 = widest for the rate</p></td>
+<td><p>Same field the USRP uses</p></td>
+</tr>
+<tr class="row-even"><td><p>External ref</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">extRef</span></code> → <code class="docutils literal notranslate"><span class="pre">bbConfigureIO</span></code> port 1 = 10 MHz in</p></td>
+<td><p>Lab use</p></td>
+</tr>
+<tr class="row-odd"><td><p>Retune / ref-level change</p></td>
+<td><p>Stop thread → <code class="docutils literal notranslate"><span class="pre">bbAbort</span></code> → configure → <code class="docutils literal notranslate"><span class="pre">bbInitiate</span></code> → restart thread with purge</p></td>
+<td><p>The BB60 applies settings only at <code class="docutils literal notranslate"><span class="pre">bbInitiate</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>Retune gap</p></td>
+<td><p>Not reported as a gap; the recorder starts a new SigMF capture segment and the purge drops old samples</p></td>
+<td><p>Matches how retunes already work for the other drivers</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="work-breakdown-as-implemented">
+<h2>3. Work breakdown (as implemented)<a class="headerlink" href="#work-breakdown-as-implemented" title="Link to this heading">¶</a></h2>
+<section id="phase-1-build-system-cmakelists-txt">
+<h3>Phase 1 — Build system (<code class="docutils literal notranslate"><span class="pre">CMakeLists.txt</span></code>)<a class="headerlink" href="#phase-1-build-system-cmakelists-txt" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>[x] <code class="docutils literal notranslate"><span class="pre">WVT_WITH_BB</span></code>, <code class="docutils literal notranslate"><span class="pre">SIGNALHOUND_SDK_DIR</span></code> cache variables.</p></li>
+<li><p>[x] <code class="docutils literal notranslate"><span class="pre">find_path(bb_api.h)</span></code> with SDK sub-folder suffixes; <code class="docutils literal notranslate"><span class="pre">find_library(bb_api)</span></code>.</p></li>
+<li><p>[x] Fallback glob for the versioned <code class="docutils literal notranslate"><span class="pre">libbb_api.so.5.0.x</span></code>, choosing x86-64 vs aarch64 from
+<code class="docutils literal notranslate"><span class="pre">CMAKE_SYSTEM_PROCESSOR</span></code>, skipping symlinks.</p></li>
+<li><p>[x] Imported target <code class="docutils literal notranslate"><span class="pre">bb_api</span></code>, adds <code class="docutils literal notranslate"><span class="pre">src/device/sdr_bb60.cpp</span></code>, defines <code class="docutils literal notranslate"><span class="pre">WVT_HAVE_BB</span></code>.</p></li>
+<li><p>[x] <code class="docutils literal notranslate"><span class="pre">ON</span></code> fails hard when not found; <code class="docutils literal notranslate"><span class="pre">AUTO</span></code> prints a status line.</p></li>
+</ul>
+</section>
+<section id="phase-2-device-abstraction-src-device-sdr-device-h-cpp">
+<h3>Phase 2 — Device abstraction (<code class="docutils literal notranslate"><span class="pre">src/device/sdr_device.h/.cpp</span></code>)<a class="headerlink" href="#phase-2-device-abstraction-src-device-sdr-device-h-cpp" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>[x] <code class="docutils literal notranslate"><span class="pre">StreamConfig</span></code>: <code class="docutils literal notranslate"><span class="pre">atten</span></code>, <code class="docutils literal notranslate"><span class="pre">rfGain</span></code>, <code class="docutils literal notranslate"><span class="pre">extRef</span></code>; comments for <code class="docutils literal notranslate"><span class="pre">bb</span></code> use of <code class="docutils literal notranslate"><span class="pre">args</span></code>, <code class="docutils literal notranslate"><span class="pre">gain</span></code>, <code class="docutils literal notranslate"><span class="pre">bandwidth</span></code>.</p></li>
+<li><p>[x] <code class="docutils literal notranslate"><span class="pre">GainRange</span></code>: <code class="docutils literal notranslate"><span class="pre">label</span></code>, <code class="docutils literal notranslate"><span class="pre">unit</span></code>.</p></li>
+<li><p>[x] <code class="docutils literal notranslate"><span class="pre">sdrDrivers()</span></code>, <code class="docutils literal notranslate"><span class="pre">enumerateDevices()</span></code> (with a “none detected” placeholder), <code class="docutils literal notranslate"><span class="pre">openDevice()</span></code> dispatch.</p></li>
+<li><p>[x] <code class="docutils literal notranslate"><span class="pre">checkSampleRate(&quot;bb&quot;)</span></code>: range check + warning above 10 MS/s (host-side filtering).</p></li>
+<li><p>[x] New <code class="docutils literal notranslate"><span class="pre">supportedRates(driver)</span></code> and <code class="docutils literal notranslate"><span class="pre">snapSampleRate(driver,</span> <span class="pre">rate)</span></code>.</p></li>
+</ul>
+</section>
+<section id="phase-3-backend-src-device-sdr-bb60-cpp-new">
+<h3>Phase 3 — Backend (<code class="docutils literal notranslate"><span class="pre">src/device/sdr_bb60.cpp</span></code>, new)<a class="headerlink" href="#phase-3-backend-src-device-sdr-bb60-cpp-new" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>[x] Open by first device or by serial; read device type and serial for the description.</p></li>
+<li><p>[x] Configure: ext ref (BB60D vs BB60C port constants), 16-bit I/Q, center, ref level,
+gain/atten, decimation + bandwidth (clamped to the per-decimation maximum).</p></li>
+<li><p>[x] Streaming thread: <code class="docutils literal notranslate"><span class="pre">bbGetIQUnpacked</span></code> in ~20 ms blocks (1 k – 256 k samples), purge on
+(re)start, sample-loss → <code class="docutils literal notranslate"><span class="pre">gap_(-1,</span> <span class="pre">…)</span></code>, <code class="docutils literal notranslate"><span class="pre">bbADCOverflow</span></code> → “ADC overload” note for 1 s,
+<code class="docutils literal notranslate"><span class="pre">bbDeviceConnectionErr</span></code> → fatal error.</p></li>
+<li><p>[x] <code class="docutils literal notranslate"><span class="pre">reconfigure()</span></code> restarts the stream for retune / ref level and rolls back on failure.</p></li>
+<li><p>[x] Reads back the actual rate with <code class="docutils literal notranslate"><span class="pre">bbQueryIQParameters</span></code>.</p></li>
+<li><p>[x] <code class="docutils literal notranslate"><span class="pre">enumerateBb()</span></code> via <code class="docutils literal notranslate"><span class="pre">bbGetSerialNumberList2</span></code>.</p></li>
+</ul>
+</section>
+<section id="phase-4-cli-src-app-main-cpp">
+<h3>Phase 4 — CLI (<code class="docutils literal notranslate"><span class="pre">src/app/main.cpp</span></code>)<a class="headerlink" href="#phase-4-cli-src-app-main-cpp" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>[x] <code class="docutils literal notranslate"><span class="pre">--device</span> <span class="pre">bb[:SERIAL]</span></code>, <code class="docutils literal notranslate"><span class="pre">--ref-level</span> <span class="pre">DBM</span></code>, <code class="docutils literal notranslate"><span class="pre">--atten</span> <span class="pre">auto|0|10|20|30</span></code>, <code class="docutils literal notranslate"><span class="pre">--bb-amp</span> <span class="pre">auto|0-3</span></code> (first <code class="docutils literal notranslate"><span class="pre">--amp</span></code>, which the generator amplitude option already used; renamed in #54), <code class="docutils literal notranslate"><span class="pre">--ext-ref</span></code>.</p></li>
+<li><p>[x] Default rate 10 MS/s and ref level -20 dBm for <code class="docutils literal notranslate"><span class="pre">bb</span></code> when not given.</p></li>
+<li><p>[x] Help text updates.</p></li>
+</ul>
+</section>
+<section id="phase-5-gui-src-app-app-live-cpp">
+<h3>Phase 5 — GUI (<code class="docutils literal notranslate"><span class="pre">src/app/app_live.cpp</span></code>)<a class="headerlink" href="#phase-5-gui-src-app-app-live-cpp" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>[x] Driver name “BB60”, default gain range as ref level.</p></li>
+<li><p>[x] Rate combo for drivers with discrete rates.</p></li>
+<li><p>[x] Gain slider uses <code class="docutils literal notranslate"><span class="pre">GainRange::label/unit</span></code>; for BB60 the value applies on slider release
+(each change restarts the stream).</p></li>
+<li><p>[x] Reset gain to a meaningful default when switching to / from <code class="docutils literal notranslate"><span class="pre">bb</span></code>.</p></li>
+<li><p>[x] BB60 toolbar row: Atten, Amp, Bandwidth, Ext ref (each restarts the stream).</p></li>
+</ul>
+</section>
+<section id="phase-6-docs-readme-md">
+<h3>Phase 6 — Docs (<code class="docutils literal notranslate"><span class="pre">README.md</span></code>)<a class="headerlink" href="#phase-6-docs-readme-md" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>[x] Build instructions for the SDK, udev / USB 3 / Spike notes, device table column,
+CLI options, ref-level behavior, source-file table.</p></li>
+</ul>
+</section>
+</section>
+<section id="review-findings-to-fix-or-verify">
+<h2>4. Review findings (to fix or verify)<a class="headerlink" href="#review-findings-to-fix-or-verify" title="Link to this heading">¶</a></h2>
+<p>Ordered by expected impact.</p>
+<ol class="arabic simple">
+<li><p><strong>Platform support is not stated.</strong> The Signal Hound SDK ships <code class="docutils literal notranslate"><span class="pre">bb_api</span></code> for Windows and
+Linux (x86-64, aarch64) only. wvt builds on Linux and macOS (XQuartz), so on macOS BB60
+support is always off, and the CMake glob only searches <code class="docutils literal notranslate"><span class="pre">.so*</span></code>. README should say
+“Linux only” in the BB60 build section and the device table.</p></li>
+<li><p><strong>Device re-scan while a BB60 streams.</strong> <code class="docutils literal notranslate"><span class="pre">bbGetSerialNumberList2</span></code> may not list a device that
+is already open. Then <code class="docutils literal notranslate"><span class="pre">App::scanDevices()</span></code> sees <code class="docutils literal notranslate"><span class="pre">found</span> <span class="pre">==</span> <span class="pre">false</span></code> and calls
+<code class="docutils literal notranslate"><span class="pre">selectDevice(devices_.front())</span></code>, which changes <code class="docutils literal notranslate"><span class="pre">devCfg_</span></code> while the BB60 still streams.
+Verify on hardware; if it happens, keep the open device in the list (add it from
+<code class="docutils literal notranslate"><span class="pre">liveStats_</span></code> when streaming) or skip re-selection while running.</p></li>
+<li><p><strong>Max I/Q bandwidth table is approximate.</strong> <code class="docutils literal notranslate"><span class="pre">maxBandwidth()</span></code> uses 0.8 × rate for decimation
+≥ 4. Check against the SDK manual’s table for <code class="docutils literal notranslate"><span class="pre">bbConfigureIQ</span></code> (some decimations allow less
+than 80%). If the API rejects the value, open fails with a generic error; clamp to the
+documented table instead.</p></li>
+<li><p><strong>Retune marker timing relies on the first block taking ~20 ms.</strong> <code class="docutils literal notranslate"><span class="pre">LiveEngine::setCenterFreq</span></code>
+sets <code class="docutils literal notranslate"><span class="pre">freshFrom_</span></code> and calls <code class="docutils literal notranslate"><span class="pre">rec_.noteRetune()</span></code> <em>after</em> <code class="docutils literal notranslate"><span class="pre">dev_-&gt;setCenterFreq()</span></code> returns, but
+the BB60 thread already restarted inside that call. The comment in <code class="docutils literal notranslate"><span class="pre">reconfigure()</span></code> assumes
+~20 ms, but the block size is clamped to 262 144 samples, so the first block takes only
+~6.5 ms at 40 MS/s and ~13 ms at 20 MS/s (plus <code class="docutils literal notranslate"><span class="pre">bbInitiate</span></code> latency). At low rates it is
+safe (1024 samples ≈ 210 ms at 4.88 kS/s). A more robust option: let the backend mark the boundary itself (e.g. a callback, or start
+the thread only after the engine records the marker).</p></li>
+<li><p><strong>UI stall on retune.</strong> <code class="docutils literal notranslate"><span class="pre">setCenterFreq</span></code> / <code class="docutils literal notranslate"><span class="pre">setGain</span></code> run on the UI thread and do join +
+<code class="docutils literal notranslate"><span class="pre">bbAbort</span></code> + <code class="docutils literal notranslate"><span class="pre">bbInitiate</span></code>. Measure; if &gt; ~100 ms, move reconfigure to the device thread or
+debounce frequency edits.</p></li>
+<li><p><strong>External reference on BB60A.</strong> The code uses the BB60C port-1 constant for any non-D
+device. Confirm the BB60A accepts it, or disable <em>Ext ref</em> for the BB60A.</p></li>
+<li><p><strong><code class="docutils literal notranslate"><span class="pre">setGain</span></code> compares <code class="docutils literal notranslate"><span class="pre">refLevel_</span></code> without <code class="docutils literal notranslate"><span class="pre">cfgM_</span></code>.</strong> Harmless today (UI thread only), but
+take the lock for consistency with <code class="docutils literal notranslate"><span class="pre">reconfigure()</span></code>.</p></li>
+<li><p><strong>Style:</strong> in <code class="docutils literal notranslate"><span class="pre">src/app/main.cpp</span></code> the <code class="docutils literal notranslate"><span class="pre">--ext-ref</span></code> branch shares a line with <code class="docutils literal notranslate"><span class="pre">--antenna</span></code>
+(<code class="docutils literal notranslate"><span class="pre">...</span> <span class="pre">dev.extRef</span> <span class="pre">=</span> <span class="pre">true;</span> <span class="pre">else</span> <span class="pre">if</span> <span class="pre">(a</span> <span class="pre">==</span> <span class="pre">&quot;--antenna&quot;)</span> <span class="pre">...</span></code>). Split it to match the
+surrounding one-option-per-branch layout.</p></li>
+<li><p><strong><code class="docutils literal notranslate"><span class="pre">--gain</span> <span class="pre">auto</span></code> with <code class="docutils literal notranslate"><span class="pre">--device</span> <span class="pre">bb</span></code></strong> sets <code class="docutils literal notranslate"><span class="pre">agc</span> <span class="pre">=</span> <span class="pre">true</span></code>, which the BB60 ignores. Either
+reject it with a message (“BB60: use –ref-level”) or document it.</p></li>
+</ol>
+</section>
+<section id="remaining-work">
+<h2>5. Remaining work<a class="headerlink" href="#remaining-work" title="Link to this heading">¶</a></h2>
+<section id="code">
+<h3>5.1 Code<a class="headerlink" href="#code" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>[ ] Fix items 1, 7, 8, 9 above (small).</p></li>
+<li><p>[ ] Decide and fix items 2–6 after the hardware test (5.3).</p></li>
+<li><p>[ ] Optional: compile-only stub of <code class="docutils literal notranslate"><span class="pre">bb_api.h</span></code> + empty library under <code class="docutils literal notranslate"><span class="pre">tools/</span></code> or a test folder,
+so CI and macOS can build <code class="docutils literal notranslate"><span class="pre">sdr_bb60.cpp</span></code> without the SDK.</p></li>
+</ul>
+</section>
+<section id="build-verification">
+<h3>5.2 Build verification<a class="headerlink" href="#build-verification" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>[ ] Linux x86-64: build with <code class="docutils literal notranslate"><span class="pre">-DSIGNALHOUND_SDK_DIR=…</span></code> straight from the SDK folder
+(versioned <code class="docutils literal notranslate"><span class="pre">.so</span></code> only) and with the library installed in <code class="docutils literal notranslate"><span class="pre">/usr/local/lib</span></code>.</p></li>
+<li><p>[ ] Linux aarch64 (e.g. Raspberry Pi 5 / Jetson): confirm the glob picks the ARM library.</p></li>
+<li><p>[ ] <code class="docutils literal notranslate"><span class="pre">WVT_WITH_BB=ON</span></code> without the SDK: CMake fails with the expected message.</p></li>
+<li><p>[ ] <code class="docutils literal notranslate"><span class="pre">WVT_WITH_BB=AUTO</span></code> without the SDK (incl. macOS): builds, <code class="docutils literal notranslate"><span class="pre">--device</span> <span class="pre">bb</span></code> gives
+“built without bb support”.</p></li>
+</ul>
+</section>
+<section id="hardware-test-matrix-bb60d-then-bb60c-if-available">
+<h3>5.3 Hardware test matrix (BB60D, then BB60C if available)<a class="headerlink" href="#hardware-test-matrix-bb60d-then-bb60c-if-available" title="Link to this heading">¶</a></h3>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>#</p></th>
+<th class="head"><p>Test</p></th>
+<th class="head"><p>Pass criterion</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>1</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">wvt</span> <span class="pre">--list-devices</span></code></p></td>
+<td><p>BB60 listed with type and serial</p></td>
+</tr>
+<tr class="row-odd"><td><p>2</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">--device</span> <span class="pre">bb</span></code> and <code class="docutils literal notranslate"><span class="pre">--device</span> <span class="pre">bb:SERIAL</span></code></p></td>
+<td><p>Opens; title shows “Signal Hound BB60D serial …”</p></td>
+</tr>
+<tr class="row-even"><td><p>3</p></td>
+<td><p>Every rate in the combo, 40 MS/s → 4.883 kS/s</p></td>
+<td><p>Streams; status rate matches; no sustained loss ≤ 10 MS/s</p></td>
+</tr>
+<tr class="row-odd"><td><p>4</p></td>
+<td><p>40 MS/s and 20 MS/s</p></td>
+<td><p>Note CPU load and loss events; warning shown</p></td>
+</tr>
+<tr class="row-even"><td><p>5</p></td>
+<td><p>Known CW from a generator at several ref levels</p></td>
+<td><p>Correct frequency; “ADC overload” appears when ref level is too low</p></td>
+</tr>
+<tr class="row-odd"><td><p>6</p></td>
+<td><p>Atten / Amp manual vs auto</p></td>
+<td><p>Noise floor and level change as expected</p></td>
+</tr>
+<tr class="row-even"><td><p>7</p></td>
+<td><p>Bandwidth 0 and explicit values, incl. above max</p></td>
+<td><p>Clamped with a note; no open failure</p></td>
+</tr>
+<tr class="row-odd"><td><p>8</p></td>
+<td><p>Retune while streaming and while recording SigMF</p></td>
+<td><p>New capture segment per retune; no stale samples in the waterfall</p></td>
+</tr>
+<tr class="row-even"><td><p>9</p></td>
+<td><p>Raw recording</p></td>
+<td><p>Tuning locked; file opens in wvt with right rate / fc</p></td>
+</tr>
+<tr class="row-odd"><td><p>10</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">--record</span> <span class="pre">…</span> <span class="pre">--no-gui</span> <span class="pre">--record-duration</span> <span class="pre">30</span></code></p></td>
+<td><p>File complete, length ≈ 30 s × rate</p></td>
+</tr>
+<tr class="row-even"><td><p>11</p></td>
+<td><p>Ext ref with and without a 10 MHz source</p></td>
+<td><p>Locks / clear error</p></td>
+</tr>
+<tr class="row-odd"><td><p>12</p></td>
+<td><p>Unplug while streaming</p></td>
+<td><p>“BB60 stopped streaming (unplugged?)”, no crash</p></td>
+</tr>
+<tr class="row-even"><td><p>13</p></td>
+<td><p>Spike open at the same time</p></td>
+<td><p>Clear “in use” error</p></td>
+</tr>
+<tr class="row-odd"><td><p>14</p></td>
+<td><p>Device re-scan while streaming (finding 2)</p></td>
+<td><p>Selection does not change</p></td>
+</tr>
+<tr class="row-even"><td><p>15</p></td>
+<td><p>Switch driver BB60 ↔ RTL-SDR / sim</p></td>
+<td><p>Gain / ref level reset to sensible defaults</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="merge">
+<h3>5.4 Merge<a class="headerlink" href="#merge" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>[ ] Update README with the hardware-test result (tested models, known limits).</p></li>
+<li><p>[ ] Squash or tidy commits; open a PR from <code class="docutils literal notranslate"><span class="pre">wvt-sh-dev</span></code> to <code class="docutils literal notranslate"><span class="pre">main</span></code>.</p></li>
+</ul>
+</section>
+</section>
+<section id="files-touched">
+<h2>6. Files touched<a class="headerlink" href="#files-touched" title="Link to this heading">¶</a></h2>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>File</p></th>
+<th class="head"><p>Change</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">CMakeLists.txt</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">WVT_WITH_BB</span></code>, SDK discovery, imported target</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/device/sdr_bb60.cpp</span></code></p></td>
+<td><p>New backend (≈ 320 lines)</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/device/sdr_device.h/.cpp</span></code></p></td>
+<td><p>Config fields, <code class="docutils literal notranslate"><span class="pre">GainRange</span></code> label/unit, rate list + snap, dispatch</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/app/main.cpp</span></code></p></td>
+<td><p>CLI options and defaults</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/app/app_live.cpp</span></code></p></td>
+<td><p>Rate combo, ref-level slider, BB60 option row</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">README.md</span></code></p></td>
+<td><p>Build, setup, usage, device table</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="second-pass-2026-10-20">
+<h2>7. Second pass (2026-10-20)<a class="headerlink" href="#second-pass-2026-10-20" title="Link to this heading">¶</a></h2>
+<p>The first version (<code class="docutils literal notranslate"><span class="pre">72f9d8a</span></code>) was ported to the current <code class="docutils literal notranslate"><span class="pre">main</span></code> and checked against the SDK of
+2026-10-05 (bb_api 5.0.12 for Linux ARM64, 5.0.11 for macOS ARM, 5.0.9 for Linux x86-64).</p>
+<section id="review-findings-outcome">
+<h3>7.1 Review findings: outcome<a class="headerlink" href="#review-findings-outcome" title="Link to this heading">¶</a></h3>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>#</p></th>
+<th class="head"><p>Finding</p></th>
+<th class="head"><p>Outcome</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>1</p></td>
+<td><p>Platform support</p></td>
+<td><p>The SDK now has a macOS ARM library (5.0.11). CMake finds the <code class="docutils literal notranslate"><span class="pre">.dylib</span></code>, copies it to <code class="docutils literal notranslate"><span class="pre">build/bb_api/</span></code> with an <code class="docutils literal notranslate"><span class="pre">&#64;rpath</span></code> install name, and refuses an x86-64 macOS build with a clear reason. The macOS library decimates by 128 at most, so the rate list on macOS stops at 312.5 kS/s. It needs libusb from the ARM Homebrew at run time</p></td>
+</tr>
+<tr class="row-odd"><td><p>2</p></td>
+<td><p>Rescan while streaming</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">scanDevices</span></code> no longer changes the selection while a device streams. The device box shows the description of the streaming device, because an open BB60 is not listed</p></td>
+</tr>
+<tr class="row-even"><td><p>3</p></td>
+<td><p>Bandwidth table</p></td>
+<td><p>Replaced with the manual’s table (<code class="docutils literal notranslate"><span class="pre">bbMaxBandwidth</span></code>): 27, 17.8, 8, 3.75, 2, 1 MHz, 500, 250, 140, 65, 30, 15, 8, 4 kHz</p></td>
+</tr>
+<tr class="row-odd"><td><p>4</p></td>
+<td><p>Retune marker timing</p></td>
+<td><p>Fixed: <code class="docutils literal notranslate"><span class="pre">SdrDevice::setRetuneMark</span></code> / <code class="docutils literal notranslate"><span class="pre">usesRetuneMark</span></code>. The BB60 calls the mark after its thread stopped and before the new stream starts, so the capture segment starts at the first new sample. <code class="docutils literal notranslate"><span class="pre">bb_check</span></code> verifies it on both sides of each boundary</p></td>
+</tr>
+<tr class="row-even"><td><p>5</p></td>
+<td><p>UI stall on retune</p></td>
+<td><p>The restart time is logged (DEBUG <code class="docutils literal notranslate"><span class="pre">retune</span> <span class="pre">applied</span> <span class="pre">in</span> <span class="pre">N</span> <span class="pre">ms</span></code>). To measure on hardware</p></td>
+</tr>
+<tr class="row-odd"><td><p>6</p></td>
+<td><p>Ext ref on the BB60A</p></td>
+<td><p>The BB60A and BB60C share the port 1 constants (header documentation); kept</p></td>
+</tr>
+<tr class="row-even"><td><p>7</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">setGain</span></code> lock</p></td>
+<td><p>Fixed</p></td>
+</tr>
+<tr class="row-odd"><td><p>8</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">--ext-ref</span></code> style</p></td>
+<td><p>Fixed</p></td>
+</tr>
+<tr class="row-even"><td><p>9</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">--gain</span> <span class="pre">auto</span></code> with the BB60</p></td>
+<td><p>Refused: “the BB60 has no automatic gain: use –ref-level DBM”</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="other-changes">
+<h3>7.2 Other changes<a class="headerlink" href="#other-changes" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>Linux x86-64: the SDK has a folder for each distribution. CMake takes the newest version 5
+library and skips Ubuntu 14.04 (the old version 3 API). It copies <code class="docutils literal notranslate"><span class="pre">libftd2xx.so</span></code> next to it and
+links it, so the loader finds it through wvt’s rpath. It makes the <code class="docutils literal notranslate"><span class="pre">libbb_api.so.5</span></code> and
+<code class="docutils literal notranslate"><span class="pre">libbb_api.so</span></code> links that the loader needs.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">file(COPY_FILE)</span></code> (CMake 3.21) is not used, because the minimum is CMake 3.16.</p></li>
+<li><p>Open-time notes (a snapped rate, a limited bandwidth) show before the stream starts.</p></li>
+<li><p>Logging: <code class="docutils literal notranslate"><span class="pre">[bb]</span></code> component (open, configure, stream start time, restart time, errors).</p></li>
+</ul>
+</section>
+<section id="simulated-bb60">
+<h3>7.3 Simulated BB60<a class="headerlink" href="#simulated-bb60" title="Link to this heading">¶</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">tools/bb_sim/</span></code> has a header with the part of <code class="docutils literal notranslate"><span class="pre">bb_api.h</span></code> that wvt uses (the same declarations
+and values as 5.0.x) and a simulated BB60D (serial 12345678). It checks the arguments as the
+manual documents them (power-of-2 decimation, the bandwidth table, frequency range), streams in
+real time, and makes a 100.2 MHz, −30 dBm tone with noise. It returns <code class="docutils literal notranslate"><span class="pre">bbADCOverflow</span></code> when the
+tone is above the reference level. <code class="docutils literal notranslate"><span class="pre">WVT_BB_SIM_NONE=1</span></code> hides the device and <code class="docutils literal notranslate"><span class="pre">WVT_BB_SIM_UNPLUG=S</span></code>
+disconnects it after S seconds. <code class="docutils literal notranslate"><span class="pre">-DWVT_BB_SIM=ON</span></code> builds wvt and <code class="docutils literal notranslate"><span class="pre">bb_check</span></code> with it; the Linux CI
+job uses it.</p>
+</section>
+<section id="verification">
+<h3>7.4 Verification<a class="headerlink" href="#verification" title="Link to this heading">¶</a></h3>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Check</p></th>
+<th class="head"><p>State</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">bb_check</span></code> with the simulator (39 checks): rules, open errors, streaming rate, tone frequency, overload note, unplug, capture segments across two retunes</p></td>
+<td><p>Done (macOS x86-64)</p></td>
+</tr>
+<tr class="row-odd"><td><p>The window with the simulator: device list, rate list, reference level, options popup, status bar</p></td>
+<td><p>Done (Xvfb)</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--record</span> <span class="pre">...</span> <span class="pre">--no-gui</span></code> with the simulator: SigMF with <code class="docutils literal notranslate"><span class="pre">core:hw</span></code></p></td>
+<td><p>Done</p></td>
+</tr>
+<tr class="row-odd"><td><p>macOS ARM build against the real SDK, with the ARM Homebrew (RTL-SDR, UHD, BB60, Metal together)</p></td>
+<td><p>Done: builds without warnings, all self-checks pass, <code class="docutils literal notranslate"><span class="pre">--list-devices</span></code> loads bb_api and shows “Signal Hound BB60 (none detected)”, the window runs</p></td>
+</tr>
+<tr class="row-even"><td><p>Linux x86-64 and ARM64 builds against the real SDK</p></td>
+<td><p>To do</p></td>
+</tr>
+<tr class="row-odd"><td><p>The hardware test matrix of section 5.3</p></td>
+<td><p>To do (needs a BB60)</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+</section>
+</section>
+
+        </article>
+      </div>
+      <footer>
+        
+        <div class="related-pages">
+          <a class="next-page" href="sidekiq-integration-plan.html">
+              <div class="page-info">
+                <div class="context">
+                  <span>Next</span>
+                </div>
+                <div class="title">Plan: Epiq Solutions Sidekiq as a wvt live device</div>
+              </div>
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+            </a>
+          <a class="prev-page" href="usrp-models-plan.html">
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+              <div class="page-info">
+                <div class="context">
+                  <span>Previous</span>
+                </div>
+                
+                <div class="title">Plan: support other Ettus USRPs (issue #11)</div>
+                
+              </div>
+            </a>
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                Copyright &#169; 2026, Brian Collette
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+            
+          </div>
+          <div class="right-details">
+            
+          </div>
+        </div>
+        
+      </footer>
+    </div>
+    <aside class="toc-drawer">
+      
+      
+      <div class="toc-sticky toc-scroll">
+        <div class="toc-title-container">
+          <span class="toc-title">
+            On this page
+          </span>
+        </div>
+        <div class="toc-tree-container">
+          <div class="toc-tree">
+            <ul>
+<li><a class="reference internal" href="#">Plan: Signal Hound BB60 as a wvt live device</a><ul>
+<li><a class="reference internal" href="#goal">1. Goal</a></li>
+<li><a class="reference internal" href="#design-decisions">2. Design decisions</a></li>
+<li><a class="reference internal" href="#work-breakdown-as-implemented">3. Work breakdown (as implemented)</a><ul>
+<li><a class="reference internal" href="#phase-1-build-system-cmakelists-txt">Phase 1 — Build system (<code class="docutils literal notranslate"><span class="pre">CMakeLists.txt</span></code>)</a></li>
+<li><a class="reference internal" href="#phase-2-device-abstraction-src-device-sdr-device-h-cpp">Phase 2 — Device abstraction (<code class="docutils literal notranslate"><span class="pre">src/device/sdr_device.h/.cpp</span></code>)</a></li>
+<li><a class="reference internal" href="#phase-3-backend-src-device-sdr-bb60-cpp-new">Phase 3 — Backend (<code class="docutils literal notranslate"><span class="pre">src/device/sdr_bb60.cpp</span></code>, new)</a></li>
+<li><a class="reference internal" href="#phase-4-cli-src-app-main-cpp">Phase 4 — CLI (<code class="docutils literal notranslate"><span class="pre">src/app/main.cpp</span></code>)</a></li>
+<li><a class="reference internal" href="#phase-5-gui-src-app-app-live-cpp">Phase 5 — GUI (<code class="docutils literal notranslate"><span class="pre">src/app/app_live.cpp</span></code>)</a></li>
+<li><a class="reference internal" href="#phase-6-docs-readme-md">Phase 6 — Docs (<code class="docutils literal notranslate"><span class="pre">README.md</span></code>)</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#review-findings-to-fix-or-verify">4. Review findings (to fix or verify)</a></li>
+<li><a class="reference internal" href="#remaining-work">5. Remaining work</a><ul>
+<li><a class="reference internal" href="#code">5.1 Code</a></li>
+<li><a class="reference internal" href="#build-verification">5.2 Build verification</a></li>
+<li><a class="reference internal" href="#hardware-test-matrix-bb60d-then-bb60c-if-available">5.3 Hardware test matrix (BB60D, then BB60C if available)</a></li>
+<li><a class="reference internal" href="#merge">5.4 Merge</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#files-touched">6. Files touched</a></li>
+<li><a class="reference internal" href="#second-pass-2026-10-20">7. Second pass (2026-10-20)</a><ul>
+<li><a class="reference internal" href="#review-findings-outcome">7.1 Review findings: outcome</a></li>
+<li><a class="reference internal" href="#other-changes">7.2 Other changes</a></li>
+<li><a class="reference internal" href="#simulated-bb60">7.3 Simulated BB60</a></li>
+<li><a class="reference internal" href="#verification">7.4 Verification</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+          </div>
+        </div>
+      </div>
+      
+      
+    </aside>
+  </div>
+</div><script src="../_static/documentation_options.js?v=5929fcd5"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/scripts/furo.js?v=46bd48cc"></script>
+    </body>
+</html>

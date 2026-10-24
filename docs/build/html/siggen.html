@@ -1,0 +1,888 @@
+<!doctype html>
+<html class="no-js" lang="en" data-content_root="./">
+  <head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="index" title="Index" href="genindex.html"><link rel="search" title="Search" href="search.html"><link rel="next" title="Audio" href="audio.html"><link rel="prev" title="Live devices" href="live.html">
+
+    <!-- Generated with Sphinx 8.2.3 and Furo 2025.12.19 -->
+        <title>Signal generator - wvt</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=d111a655" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/furo.css?v=7bdb33bb" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/furo-extensions.css?v=8dab3a3b" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f2f2f2;
+  --color-code-foreground: #1e1e1e;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-with-moon" viewBox="0 0 24 24">
+    <title>Auto light/dark, in light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path style="opacity: 50%" d="M 5.411 14.504 C 5.471 14.504 5.532 14.504 5.591 14.504 C 3.639 16.319 4.383 19.569 6.931 20.352 C 7.693 20.586 8.512 20.551 9.25 20.252 C 8.023 23.207 4.056 23.725 2.11 21.184 C 0.166 18.642 1.702 14.949 4.874 14.536 C 5.051 14.512 5.231 14.5 5.411 14.5 L 5.411 14.504 Z"/>
+      <line x1="14.5" y1="3.25" x2="14.5" y2="1.25"/>
+      <line x1="14.5" y1="15.85" x2="14.5" y2="17.85"/>
+      <line x1="10.044" y1="5.094" x2="8.63" y2="3.68"/>
+      <line x1="19" y1="14.05" x2="20.414" y2="15.464"/>
+      <line x1="8.2" y1="9.55" x2="6.2" y2="9.55"/>
+      <line x1="20.8" y1="9.55" x2="22.8" y2="9.55"/>
+      <line x1="10.044" y1="14.006" x2="8.63" y2="15.42"/>
+      <line x1="19" y1="5.05" x2="20.414" y2="3.636"/>
+      <circle cx="14.5" cy="9.55" r="3.6"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon-with-sun" viewBox="0 0 24 24">
+    <title>Auto light/dark, in dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path d="M 8.282 7.007 C 8.385 7.007 8.494 7.007 8.595 7.007 C 5.18 10.184 6.481 15.869 10.942 17.24 C 12.275 17.648 13.706 17.589 15 17.066 C 12.851 22.236 5.91 23.143 2.505 18.696 C -0.897 14.249 1.791 7.786 7.342 7.063 C 7.652 7.021 7.965 7 8.282 7 L 8.282 7.007 Z"/>
+      <line style="opacity: 50%" x1="18" y1="3.705" x2="18" y2="2.5"/>
+      <line style="opacity: 50%" x1="18" y1="11.295" x2="18" y2="12.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="4.816" x2="14.464" y2="3.964"/>
+      <line style="opacity: 50%" x1="20.711" y1="10.212" x2="21.563" y2="11.063"/>
+      <line style="opacity: 50%" x1="14.205" y1="7.5" x2="13.001" y2="7.5"/>
+      <line style="opacity: 50%" x1="21.795" y1="7.5" x2="23" y2="7.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="10.184" x2="14.464" y2="11.036"/>
+      <line style="opacity: 50%" x1="20.711" y1="4.789" x2="21.563" y2="3.937"/>
+      <circle style="opacity: 50%" cx="18" cy="7.5" r="2.169"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-pencil" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-pencil-code">
+      <path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" />
+      <path d="M13.5 6.5l4 4" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+  <symbol id="svg-eye" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-eye-code">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" />
+      <path
+        d="M11.11 17.958c-3.209 -.307 -5.91 -2.293 -8.11 -5.958c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6c-.21 .352 -.427 .688 -.647 1.008" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle site navigation sidebar">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc" aria-label="Toggle table of contents sidebar">
+<label class="overlay sidebar-overlay" for="__navigation"></label>
+<label class="overlay toc-overlay" for="__toc"></label>
+
+<a class="skip-to-content muted-link" href="#furo-main-content">Skip to content</a>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <span class="icon"><svg><use href="#svg-menu"></use></svg></span>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="index.html"><div class="brand">wvt</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+          <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+          <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon" for="__toc">
+        <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand" href="index.html">
+  
+  <span class="sidebar-brand-text">wvt</span>
+  
+</a><form class="sidebar-search-container" method="get" action="search.html" role="search">
+  <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <p class="caption" role="heading"><span class="caption-text">User guide</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="getting-started.html">Getting started</a></li>
+<li class="toctree-l1"><a class="reference internal" href="viewer.html">The file viewer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="segments.html">Load a segment</a></li>
+<li class="toctree-l1"><a class="reference internal" href="export.html">Export a region</a></li>
+<li class="toctree-l1"><a class="reference internal" href="snapshots.html">Plot snapshots</a></li>
+<li class="toctree-l1"><a class="reference internal" href="sessions.html">File sessions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="live.html">Live devices</a></li>
+<li class="toctree-l1 current current-page"><a class="current reference internal" href="#">Signal generator</a></li>
+<li class="toctree-l1"><a class="reference internal" href="audio.html">Audio</a></li>
+<li class="toctree-l1"><a class="reference internal" href="gpu.html">GPU processing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="logging.html">Logging</a></li>
+<li class="toctree-l1"><a class="reference internal" href="controls.html">Mouse and keyboard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cli.html">Command-line reference</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="build.html">Build reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="signal-processing.html">Signal processing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="self-checks.html">Self-checks and test signals</a></li>
+<li class="toctree-l1"><a class="reference internal" href="source-layout.html">Source layout</a></li>
+<li class="toctree-l1"><a class="reference internal" href="writing-docs.html">Writing the documentation</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Design records</span></p>
+<ul>
+<li class="toctree-l1 has-children"><a class="reference internal" href="design/index.html">Design records</a><input aria-label="Toggle navigation of Design records" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l2"><a class="reference internal" href="design/audio-demod-plan.html">Plan: Audio demodulation and playback</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/verbose-logging-plan.html">Plan: Verbose console logging and a timestamped log file</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/time-segment-plan.html">Plan: open a time segment of a file (issue #16)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/cuda-gpu-plan.html">Plan: CUDA GPU acceleration (issue #3)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/region-export-plan.html">Plan: export a region of a file (issue #18)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/apple-gpu-plan.html">Plan: Apple GPU support (issue #21)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/ui-cleanup-plan.html">Plan: labels outside the plots and a tidier UI (issues #12 and #19)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/siggen-sweep-plan.html">Signal generator: frequency and amplitude sweep (issue #28)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/siggen-chain-plan.html">Signal generator: chain playback (issue #27)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/plot-snapshot-plan.html">Plan: snapshot button for all graphs (issue #13)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/usrp-models-plan.html">Plan: support other Ettus USRPs (issue #11)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/bb60-integration-plan.html">Plan: Signal Hound BB60 as a wvt live device</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/sidekiq-integration-plan.html">Plan: Epiq Solutions Sidekiq as a wvt live device</a></li>
+<li class="toctree-l2"><a class="reference internal" href="design/point-measurement-plan.html">Plan: point-to-point measurements on the plots (issue #80)</a></li>
+</ul>
+</li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="view-this-page">
+  <a class="muted-link" href="_sources/siggen.md.txt" title="View this page">
+    <svg><use href="#svg-eye"></use></svg>
+    <span class="visually-hidden">View this page</span>
+  </a>
+</div>
+<div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+              <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+              <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon" for="__toc">
+            <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+          </label>
+        </div>
+        <article role="main" id="furo-main-content">
+          <section id="signal-generator">
+<h1>Signal generator<a class="headerlink" href="#signal-generator" title="Link to this heading">¶</a></h1>
+<p>The signal generator makes CW and pulsed waveforms: chirps, Barker codes, staggered or jittered
+PRIs, bursts, sweeps and impairments. It also plays back recordings as canned waveforms, one at a
+time or as a chain. The generator writes its waveforms to files, shows them in the live view
+(loopback), or transmits them with a USRP.</p>
+<section id="open-the-generator">
+<h2>Open the generator<a class="headerlink" href="#open-the-generator" title="Link to this heading">¶</a></h2>
+<p>Do one of these steps:</p>
+<ul class="simple">
+<li><p>Select <strong>Tools → Signal generator</strong>.</p></li>
+<li><p>Press <strong>Ctrl+G</strong>.</p></li>
+<li><p>Start wvt with <code class="docutils literal notranslate"><span class="pre">--siggen</span></code> or <code class="docutils literal notranslate"><span class="pre">--gen</span> <span class="pre">MODE</span></code>.</p></li>
+</ul>
+<p>The window floats over the main window. It works in File mode and in Device mode.</p>
+</section>
+<section id="modes-and-settings">
+<h2>Modes and settings<a class="headerlink" href="#modes-and-settings" title="Link to this heading">¶</a></h2>
+<p>Select the mode at the top of the window: <strong>CW</strong>, <strong>Pulsed</strong>, <strong>Playback</strong> or <strong>Chain</strong>.</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Setting</p></th>
+<th class="head"><p>Function</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Carrier</p></td>
+<td><p>The sample rate, the center frequency, the offset from the center, the peak amplitude (dBFS) and the start phase</p></td>
+</tr>
+<tr class="row-odd"><td><p>CW</p></td>
+<td><p>A steady tone, with an optional drift (Hz/s). When you tune to a new frequency, the phase stays continuous</p></td>
+</tr>
+<tr class="row-even"><td><p>Sweeps</p></td>
+<td><p>CW and pulsed. Refer to <a class="reference internal" href="#sweeps">Sweeps</a></p></td>
+</tr>
+<tr class="row-odd"><td><p>Pulsed</p></td>
+<td><p>The PRI or the PRF, and the pulse width or the duty cycle. The width includes the edges</p></td>
+</tr>
+<tr class="row-even"><td><p>Edges</p></td>
+<td><p>Rectangular, linear, raised cosine or Gaussian, with separate rise and fall times</p></td>
+</tr>
+<tr class="row-odd"><td><p>PRI pattern</p></td>
+<td><p>Fixed, stagger (a list of PRIs in turn), or jitter (± %, repeatable with a seed)</p></td>
+</tr>
+<tr class="row-even"><td><p>Bursts</p></td>
+<td><p>N pulses, then more dead time. A start delay before the first pulse</p></td>
+</tr>
+<tr class="row-odd"><td><p>In-pulse modulation</p></td>
+<td><p>An LFM chirp (up, down or triangle) with a set bandwidth, or a Barker code (2 to 13)</p></td>
+</tr>
+<tr class="row-even"><td><p>Playback</p></td>
+<td><p>A SigMF or raw IQ recording as a canned waveform. Refer to <a class="reference internal" href="#playback">Playback</a></p></td>
+</tr>
+<tr class="row-odd"><td><p>Chain</p></td>
+<td><p>Many recordings in turn. Refer to <a class="reference internal" href="#chain">Chain</a></p></td>
+</tr>
+<tr class="row-even"><td><p>Impairments</p></td>
+<td><p>White noise (SNR), DC offset, IQ gain and phase imbalance, carrier phase noise (linewidth)</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The pulses are slices of one continuous carrier. Thus the pulses are phase-coherent.</p>
+<p>wvt checks the settings while you type. A setting with a problem shows in red, and wvt does not
+apply it. These are examples of problems:</p>
+<ul class="simple">
+<li><p>A pulse that is wider than the PRI.</p></li>
+<li><p>A Barker chip that is shorter than one sample.</p></li>
+<li><p>An offset outside the band.</p></li>
+</ul>
+<p>The <strong>preview</strong> shows one pulse or the pulse train in time, and the averaged spectrum. For a sweep,
+it shows the frequency and the level over one period, and a max-hold spectrum of the swept band.</p>
+</section>
+<section id="sweeps">
+<h2>Sweeps<a class="headerlink" href="#sweeps" title="Link to this heading">¶</a></h2>
+<p>A sweep changes the frequency, the level, or the two, over one period. The sweep repeats until the
+output stops.</p>
+<ul class="simple">
+<li><p><strong>Frequency sweep:</strong> ramp up, ramp down, triangle, or stepped (a step size and a dwell time). The
+sweep goes between two offsets from the center.</p></li>
+<li><p><strong>Level sweep:</strong> ramp up, ramp down or triangle, linear in dB, between two dBFS levels.</p></li>
+<li><p>The frequency sweep and the level sweep have one period.</p></li>
+</ul>
+<p>While the frequency sweeps, the sweep replaces the <strong>Offset</strong> and the <strong>Drift</strong>. While the level
+sweeps, the sweep replaces the <strong>Amplitude</strong>.</p>
+<p>In <strong>CW</strong> mode, the tone follows the sweep continuously. Its phase stays continuous through the
+wraps and the steps.</p>
+<p>In <strong>Pulsed</strong> mode, use the <strong>Sweep</strong> section under <strong>Pulse</strong>. Each pulse takes the frequency and
+the level of the sweep at the start of the pulse. The pulse keeps them for its full length. Use this
+for pulse-to-pulse frequency agility, stepped-frequency trains, or a scan-like amplitude pattern. A
+chirp or a Barker code has its center on the swept frequency.</p>
+<ul class="simple">
+<li><p>If you change a sweep setting while an output runs, the period starts again.</p></li>
+<li><p>The noise (SNR) refers to the peak of the level sweep.</p></li>
+</ul>
+</section>
+<section id="playback">
+<h2>Playback<a class="headerlink" href="#playback" title="Link to this heading">¶</a></h2>
+<p>Playback plays a recording. The recording can be a file from the generator, a wvt recording, or
+any SigMF or raw IQ capture.</p>
+<ol class="arabic simple">
+<li><p>Type the path of the recording, or use a shortcut:</p>
+<ul class="simple">
+<li><p><strong>Last generated</strong> loads the last file from the generator.</p></li>
+<li><p><strong>Viewer’s file</strong> loads the file that is open in the viewer, with the format settings of the
+viewer.</p></li>
+<li><p><strong>Viewer’s markers</strong> plays only the part between the time markers of the viewer.</p></li>
+</ul>
+</li>
+<li><p>Click <strong>Load</strong>. wvt reads the format, the rate and the frequency from the SigMF metadata or the
+file name. It then sets the generator to the same values. Thus the recording plays at its
+original rate and frequency.</p></li>
+</ol>
+<section id="rules">
+<h3>Rules<a class="headerlink" href="#rules" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>The 0 Hz point of the recording goes to the center plus the offset.</p></li>
+<li><p>The peak of the recording plays at the set amplitude. <strong>Keep its level</strong> sets the amplitude to
+the recorded peak. The recording then plays without a change of level.</p></li>
+<li><p>If the recording has a different rate, wvt resamples it.</p></li>
+<li><p>wvt can play up to 32 Mi samples (2^25) at a time, at the recording rate or at the generator
+rate.</p></li>
+<li><p>The impairments apply on top of the recording.</p></li>
+<li><p>With <strong>Loop</strong> off, a file output has the start delay and one play.</p></li>
+<li><p>Changes apply immediately. A different recording starts again from its beginning.</p></li>
+</ul>
+</section>
+<section id="how-resampling-works">
+<h3>How resampling works<a class="headerlink" href="#how-resampling-works" title="Link to this heading">¶</a></h3>
+<p>wvt uses a windowed-sinc resampler with a stopband of approximately 80 dB. It changes the rate by
+up to 64 times in each direction. When wvt lowers the rate, a filter removes all content outside
+the new band. Thus this content does not alias.</p>
+</section>
+</section>
+<section id="chain">
+<h2>Chain<a class="headerlink" href="#chain" title="Link to this heading">¶</a></h2>
+<p>A chain plays a list of canned signals in order. A signal can be a file from the generator, a
+region that you exported from the viewer, or any SigMF or raw IQ recording.</p>
+<section id="make-a-chain">
+<h3>Make a chain<a class="headerlink" href="#make-a-chain" title="Link to this heading">¶</a></h3>
+<ol class="arabic simple">
+<li><p>Select the <strong>Chain</strong> mode.</p></li>
+<li><p>Add recordings. Type a path and click <strong>Add</strong>, or use the <strong>Last generated</strong>, <strong>Viewer’s file</strong>
+and <strong>Viewer’s markers</strong> shortcuts.</p></li>
+<li><p>Click a row to edit its item.</p></li>
+<li><p>Use the <strong>^</strong>, <strong>v</strong> and <strong>x</strong> buttons on a row to move the item up, move it down, or remove
+it.</p></li>
+</ol>
+<p>Each item has its own format, file rate, segment, <strong>offset</strong>, <strong>level</strong>, number of <strong>plays</strong> and
+<strong>gap after</strong> each play.</p>
+<ul class="simple">
+<li><p>When you add a recording, wvt reads its metadata.</p></li>
+<li><p>The offset puts the recording at its recorded frequency, if that frequency is in the band.</p></li>
+<li><p>The first recording also sets the rate and the center frequency of the generator.</p></li>
+<li><p>The default level is <strong>As recorded</strong>: the samples play without a change. If you clear this
+checkbox, the peak of the recording plays at the set dBFS value.</p></li>
+</ul>
+</section>
+<section id="loop">
+<h3>Loop<a class="headerlink" href="#loop" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><em>Forever</em> plays the chain until the output stops.</p></li>
+<li><p><em>Times</em> plays the chain N times. After the last pass, the output is silent. A file ends there,
+the loopback tells you, and a USRP stops the transmission.</p></li>
+</ul>
+</section>
+<section id="changes-while-the-chain-plays">
+<h3>Changes while the chain plays<a class="headerlink" href="#changes-while-the-chain-plays" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>Offset and level changes apply immediately.</p></li>
+<li><p>If you add, remove or move an item, or change a segment, the chain starts again from the first
+item. This occurs after the current item ends.</p></li>
+</ul>
+</section>
+<section id="limits">
+<h3>Limits<a class="headerlink" href="#limits" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>wvt loads all the items before the chain starts.</p></li>
+<li><p>All the items together can have up to 128 Mi samples (1 GiB as <code class="docutils literal notranslate"><span class="pre">cf32</span></code>). Each item can have up
+to 32 Mi samples.</p></li>
+<li><p>The noise (SNR) refers to the loudest item.</p></li>
+</ul>
+</section>
+<section id="chain-files">
+<h3>Chain files<a class="headerlink" href="#chain-files" title="Link to this heading">¶</a></h3>
+<p><strong>Save</strong> writes the chain to a <code class="docutils literal notranslate"><span class="pre">.wvtchain.json</span></code> file. The file has the items, the loop count, the
+start delay, and the rate and the center frequency of the generator. Recordings in the folder of
+the chain file, or below it, have paths relative to that folder. Thus you can move the folder.</p>
+<p><strong>Load</strong> reads a chain file. <code class="docutils literal notranslate"><span class="pre">--chain</span> <span class="pre">FILE</span></code> also reads a chain file.</p>
+<p>The preview shows one pass. Each item has a shaded area and a number. The preview also shows the
+average spectrum.</p>
+</section>
+</section>
+<section id="outputs">
+<h2>Outputs<a class="headerlink" href="#outputs" title="Link to this heading">¶</a></h2>
+<p>Select one output with <em>Output</em> at the top of the window: <strong>File (SigMF / raw)</strong>, <strong>Loopback
+(live view)</strong> or <strong>USRP transmit</strong>.</p>
+<section id="file">
+<h3>File<a class="headerlink" href="#file" title="Link to this heading">¶</a></h3>
+<p>The generator writes SigMF or raw files in <code class="docutils literal notranslate"><span class="pre">cf32</span></code>, <code class="docutils literal notranslate"><span class="pre">ci16</span></code>, <code class="docutils literal notranslate"><span class="pre">ci8</span></code> or <code class="docutils literal notranslate"><span class="pre">cu8</span></code>. The file names have the
+same pattern as recordings.</p>
+<ul class="simple">
+<li><p>The length is a duration. In pulsed mode, the length can also be a number of PRIs. With a sweep,
+it can be a number of sweep periods. With a chain, it can be a number of passes.</p></li>
+<li><p>The SigMF metadata has all the generator settings (<code class="docutils literal notranslate"><span class="pre">wvt:siggen</span></code>).</p></li>
+<li><p>As an option, the metadata has one annotation for each pulse, play, sweep or chain item.</p></li>
+<li><p><strong>Generate file</strong> writes the file. <strong>Open in viewer</strong> opens the result.</p></li>
+</ul>
+</section>
+<section id="loopback">
+<h3>Loopback<a class="headerlink" href="#loopback" title="Link to this heading">¶</a></h3>
+<p>The loopback streams the waveform into the live spectrum and waterfall.</p>
+<ol class="arabic simple">
+<li><p>Select the <strong>Loopback (live view)</strong> output.</p></li>
+<li><p>Click <strong>Start loopback</strong>. wvt starts the device <em>Signal generator loopback</em> in the main window,
+at the rate and the center frequency of the generator.</p></li>
+<li><p>To stop, click <strong>Stop loopback</strong>.</p></li>
+</ol>
+<p>You can also select the device <em>Signal generator loopback</em> in the <strong>Device</strong> mode of the main
+window, or start wvt with <code class="docutils literal notranslate"><span class="pre">--device</span> <span class="pre">siggen</span></code>.</p>
+<p>The live view shows the waveform as a receiver tuned to the center frequency shows it. Changes
+apply while you make them. The main window can record the loopback stream.</p>
+</section>
+<section id="usrp-transmit">
+<h3>USRP transmit<a class="headerlink" href="#usrp-transmit" title="Link to this heading">¶</a></h3>
+<p>The generator transmits the waveform from a USRP, tuned to the center frequency. You can change
+the frequency, the gain and all waveform settings while the USRP transmits.</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Setting</p></th>
+<th class="head"><p>Function</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Device args</p></td>
+<td><p>The UHD device arguments, for example <code class="docutils literal notranslate"><span class="pre">serial=31A2B3C</span></code> or <code class="docutils literal notranslate"><span class="pre">addr=192.168.40.2</span></code>. Empty: the first USRP that UHD finds</p></td>
+</tr>
+<tr class="row-odd"><td><p>Antenna</p></td>
+<td><p>The transmit port. Empty: the first transmit port of the channel (<code class="docutils literal notranslate"><span class="pre">TX/RX</span></code> on the B2xx and N3xx, <code class="docutils literal notranslate"><span class="pre">TX/RX0</span></code> on the X410)</p></td>
+</tr>
+<tr class="row-even"><td><p>Channel</p></td>
+<td><p>The transmit channel</p></td>
+</tr>
+<tr class="row-odd"><td><p>Reference</p></td>
+<td><p>The clock and time reference (<em>internal</em>, <em>external</em> or <em>gpsdo</em>). It applies to the full device</p></td>
+</tr>
+<tr class="row-even"><td><p>Bandwidth</p></td>
+<td><p>The analog filter bandwidth. 0 sets it automatically</p></td>
+</tr>
+<tr class="row-odd"><td><p>TX gain</p></td>
+<td><p>The transmit gain. While the USRP transmits, the slider shows the range of the device</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>If the live view receives from the same USRP, the receiver and the transmitter share it.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Transmit only into a dummy load or an attenuated cable, or where you have a license.</p>
+</div>
+<p>wvt transmits only after you do these steps:</p>
+<ol class="arabic simple">
+<li><p>Tick <strong>Arm transmitter</strong>.</p></li>
+<li><p>Click <strong>Transmit…</strong>.</p></li>
+<li><p>In the dialog, examine the frequency, the rate and the gain.</p></li>
+<li><p>Click <strong>Transmit</strong>.</p></li>
+</ol>
+<p>The arm setting resets after each transmission.</p>
+<p>Safety and limits:</p>
+<ul class="simple">
+<li><p>The TX gain starts at 0 dB.</p></li>
+<li><p>While wvt transmits, the window title, the menu bar (<strong>TX ON</strong>) and a large <strong>STOP
+TRANSMITTING</strong> button show it.</p></li>
+<li><p>If you close the generator window or stop wvt, the transmission stops.</p></li>
+<li><p>If you change the center frequency during a transmission and the USRP cannot tune to it, the
+transmitter stays on the last good frequency and the field shows that frequency. If the USRP
+cannot go back to that frequency, the transmission stops.</p></li>
+<li><p>If a transmission stops because of an error (for example, the USRP is disconnected), wvt sends
+an end-of-burst to the USRP before it stops. This tells the USRP to stop transmitting.</p></li>
+<li><p>To monitor your own signal on a receiver, put a minimum of 30 dB of attenuation between the
+ports.</p></li>
+<li><p>On one USRP, wvt can receive and transmit at the same time (full duplex). On a B2xx, the two
+directions must use the same sample rate, because the B2xx uses one clock for the two. A network
+USRP can use a different rate for each direction.</p></li>
+<li><p>Between pulses, the USRP transmits zeros. Thus a small LO leakage stays at the center frequency.
+A non-zero offset keeps the signal away from this leakage.</p></li>
+</ul>
+</section>
+<section id="transmit-limits">
+<h3>Transmit limits<a class="headerlink" href="#transmit-limits" title="Link to this heading">¶</a></h3>
+<p>For a lab, you can set limits that wvt cannot go past. The command line and the window both obey
+them.</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Limit</p></th>
+<th class="head"><p>Option</p></th>
+<th class="head"><p>Environment variable</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>The maximum TX gain, in dB</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">--tx-max-gain</span> <span class="pre">DB</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">WVT_TX_MAX_GAIN</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>The frequency bands where wvt can transmit</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">--tx-allow</span> <span class="pre">LO:HI[,LO:HI...]</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">WVT_TX_ALLOW</span></code></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<ul class="simple">
+<li><p>An option replaces the value of its environment variable.</p></li>
+<li><p>The full transmit band (the center frequency ± half the sample rate) must be in one allowed
+band, because the generator can put a signal anywhere in that band.</p></li>
+<li><p>wvt does not start a transmission, change the gain or change the frequency past a limit. The
+TX gain slider stops at the maximum gain. The <strong>Transmit</strong> dialog shows the limits, and why it
+cannot transmit.</p></li>
+<li><p>If the value of an environment variable is not correct, wvt does not start.</p></li>
+</ul>
+<p>For example, put this in your shell profile:</p>
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span><span class="nb">export</span><span class="w"> </span><span class="nv">WVT_TX_MAX_GAIN</span><span class="o">=</span><span class="m">30</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">WVT_TX_ALLOW</span><span class="o">=</span>902M:928M,2.4G:2.4835G
+</pre></div>
+</div>
+</section>
+</section>
+<section id="command-line">
+<h2>Command line<a class="headerlink" href="#command-line" title="Link to this heading">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">-c</span></code> sets the center frequency and <code class="docutils literal notranslate"><span class="pre">-r</span></code> sets the sample rate.</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Option</p></th>
+<th class="head"><p>Function</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--siggen</span></code></p></td>
+<td><p>Open the signal generator window</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--gen</span> <span class="pre">cw|pulsed|playback</span></code></p></td>
+<td><p>The mode. This option also opens the window</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--offset</span> <span class="pre">HZ</span></code></p></td>
+<td><p>The carrier offset from the center (default 100 kHz)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--amp</span> <span class="pre">DBFS</span></code></p></td>
+<td><p>The peak amplitude (default −6 dBFS)</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--drift</span> <span class="pre">HZ</span></code></p></td>
+<td><p>The CW frequency drift per second</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--sweep</span> <span class="pre">FROM:TO</span></code></p></td>
+<td><p>A frequency sweep between two offsets, for example <code class="docutils literal notranslate"><span class="pre">-400k:400k</span></code>. CW, or pulse to pulse with <code class="docutils literal notranslate"><span class="pre">--gen</span> <span class="pre">pulsed</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--sweep-shape</span> <span class="pre">up|down|tri</span></code></p></td>
+<td><p>The sweep shape</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--sweep-step</span> <span class="pre">HZ:DWELL</span></code></p></td>
+<td><p>A stepped sweep</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--sweep-time</span> <span class="pre">S</span></code></p></td>
+<td><p>The sweep period</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--level-sweep</span> <span class="pre">FROM:TO</span></code></p></td>
+<td><p>A level sweep in dBFS over the same period</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--level-shape</span> <span class="pre">up|down|tri</span></code></p></td>
+<td><p>The level sweep shape</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--pri</span> <span class="pre">S</span></code> or <code class="docutils literal notranslate"><span class="pre">--prf</span> <span class="pre">HZ</span></code></p></td>
+<td><p>The pulse repetition interval or frequency</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--pw</span> <span class="pre">S</span></code></p></td>
+<td><p>The pulse width, with the edges</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--edge</span> <span class="pre">rect|linear|cos|gauss</span></code></p></td>
+<td><p>The edge shape. <code class="docutils literal notranslate"><span class="pre">--rise</span> <span class="pre">S</span></code> and <code class="docutils literal notranslate"><span class="pre">--fall</span> <span class="pre">S</span></code> set the edge times</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--stagger</span> <span class="pre">S,S,..</span></code></p></td>
+<td><p>PRIs in turn</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--jitter</span> <span class="pre">PCT</span></code></p></td>
+<td><p>PRI jitter. <code class="docutils literal notranslate"><span class="pre">--seed</span> <span class="pre">N</span></code> makes it repeatable</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--burst</span> <span class="pre">N[:GAP]</span></code></p></td>
+<td><p>N pulses for each burst, and <code class="docutils literal notranslate"><span class="pre">GAP</span></code> seconds of silence after each burst</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--delay</span> <span class="pre">S</span></code></p></td>
+<td><p>Silence before the first pulse</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--lfm</span> <span class="pre">up|down|tri:BW</span></code></p></td>
+<td><p>A chirp in each pulse, for example <code class="docutils literal notranslate"><span class="pre">--lfm</span> <span class="pre">up:2M</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--barker</span> <span class="pre">N</span></code></p></td>
+<td><p>A Barker phase code (2, 3, 4, 5, 7, 11 or 13)</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--play</span> <span class="pre">FILE</span></code></p></td>
+<td><p>Play a SigMF or raw IQ recording. Its rate and frequency become <code class="docutils literal notranslate"><span class="pre">-r</span></code> and <code class="docutils literal notranslate"><span class="pre">-c</span></code>, if you do not give them</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--play-rate</span> <span class="pre">HZ</span></code></p></td>
+<td><p>The rate of the recording</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--play-segment</span> <span class="pre">START:LEN</span></code></p></td>
+<td><p>Play a part of the recording. <code class="docutils literal notranslate"><span class="pre">LEN</span></code> 0 plays to the end</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--play-gap</span> <span class="pre">S</span></code></p></td>
+<td><p>Silence between the plays</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--play-once</span></code></p></td>
+<td><p>Do not repeat</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--chain</span> <span class="pre">FILE</span></code></p></td>
+<td><p>Play a chain file (<code class="docutils literal notranslate"><span class="pre">.wvtchain.json</span></code>)</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--chain-add</span> <span class="pre">PATH[&#64;OFFSET][:N]</span></code></p></td>
+<td><p>Add a recording to the chain, played N times. You can use this option more than one time. The first recording sets <code class="docutils literal notranslate"><span class="pre">-r</span></code> and <code class="docutils literal notranslate"><span class="pre">-c</span></code>, if you do not give them</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--chain-loops</span> <span class="pre">N</span></code></p></td>
+<td><p>The number of passes through the chain. 0 (default) plays until you stop it</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--snr</span> <span class="pre">DB</span></code>, <code class="docutils literal notranslate"><span class="pre">--dc</span> <span class="pre">I:Q</span></code>, <code class="docutils literal notranslate"><span class="pre">--iq</span> <span class="pre">GAIN_DB:PHASE_DEG</span></code>, <code class="docutils literal notranslate"><span class="pre">--linewidth</span> <span class="pre">HZ</span></code></p></td>
+<td><p>Impairments</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--gen-out</span> <span class="pre">PREFIX</span></code></p></td>
+<td><p>Write to a file, then stop. <code class="docutils literal notranslate"><span class="pre">--record-format</span></code> sets the file type</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--gen-sample</span> <span class="pre">cf32|ci16|ci8|cu8</span></code></p></td>
+<td><p>The file sample format (default <code class="docutils literal notranslate"><span class="pre">cf32</span></code>)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--gen-duration</span> <span class="pre">T</span></code> or <code class="docutils literal notranslate"><span class="pre">--gen-pulses</span> <span class="pre">N</span></code></p></td>
+<td><p>The file length (default 1 s). N counts pulses, plays, sweeps or chain passes</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--gen-annotate</span></code></p></td>
+<td><p>SigMF: one annotation for each pulse, play, sweep or chain item</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--tx</span></code></p></td>
+<td><p>Transmit with a USRP until Ctrl+C, or for <code class="docutils literal notranslate"><span class="pre">--gen-duration</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--tx-gain</span> <span class="pre">DB</span></code></p></td>
+<td><p>The transmit gain (default 0 dB)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--tx-args</span> <span class="pre">ARGS</span></code></p></td>
+<td><p>The UHD device arguments. The default is the first USRP found</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--tx-antenna</span> <span class="pre">NAME</span></code></p></td>
+<td><p>The transmit port. The default is the first transmit port of the channel</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--tx-dry-run</span></code></p></td>
+<td><p>Show what <code class="docutils literal notranslate"><span class="pre">--tx</span></code> transmits, check the limits, then stop. wvt does not open the USRP</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--tx-confirm</span></code></p></td>
+<td><p>Transmit, and do not ask first. Use this in a script</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--tx-max-gain</span> <span class="pre">DB</span></code></p></td>
+<td><p>The maximum TX gain (see <a class="reference internal" href="#transmit-limits">Transmit limits</a>)</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--tx-allow</span> <span class="pre">LO:HI[,LO:HI...]</span></code></p></td>
+<td><p>The bands where wvt can transmit (see <a class="reference internal" href="#transmit-limits">Transmit limits</a>)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--usrp-channel</span> <span class="pre">N</span></code>, <code class="docutils literal notranslate"><span class="pre">--ref</span> <span class="pre">SRC</span></code></p></td>
+<td><p>The USRP channel and reference, as for the receiver</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Before <code class="docutils literal notranslate"><span class="pre">--tx</span></code> transmits, wvt shows the signal, the frequency, the rate, the gain, the device, the
+duration and the limits. Then it asks you to type <code class="docutils literal notranslate"><span class="pre">yes</span></code>. If the input is not a terminal (for
+example, in a script), wvt cannot ask: it stops, unless you give <code class="docutils literal notranslate"><span class="pre">--tx-confirm</span></code>.</p>
+<section id="examples">
+<h3>Examples<a class="headerlink" href="#examples" title="Link to this heading">¶</a></h3>
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span>wvt<span class="w"> </span>--gen<span class="w"> </span>pulsed<span class="w"> </span>--pri<span class="w"> </span>1m<span class="w"> </span>--pw<span class="w"> </span>20u<span class="w"> </span>--lfm<span class="w"> </span>up:2M<span class="w"> </span>-r<span class="w"> </span>10M<span class="w"> </span>-c<span class="w"> </span>915M<span class="w">                     </span><span class="c1"># open the window</span>
+wvt<span class="w"> </span>--gen<span class="w"> </span>pulsed<span class="w"> </span>--pri<span class="w"> </span>1m<span class="w"> </span>--pw<span class="w"> </span>20u<span class="w"> </span>--barker<span class="w"> </span><span class="m">13</span><span class="w"> </span>-r<span class="w"> </span>2M<span class="w"> </span>--gen-out<span class="w"> </span>~/caps/b13<span class="w"> </span>--gen-pulses<span class="w"> </span><span class="m">100</span><span class="w"> </span>--gen-annotate
+wvt<span class="w"> </span>--device<span class="w"> </span>siggen<span class="w"> </span>--gen<span class="w"> </span>cw<span class="w"> </span>--offset<span class="w"> </span>250k<span class="w"> </span>-c<span class="w"> </span>915M<span class="w"> </span>-r<span class="w"> </span>2M<span class="w">                          </span><span class="c1"># loopback view</span>
+wvt<span class="w"> </span>--device<span class="w"> </span>siggen<span class="w"> </span>--sweep<span class="w"> </span>-400k:400k<span class="w"> </span>--sweep-shape<span class="w"> </span>tri<span class="w"> </span>--sweep-time<span class="w"> </span><span class="m">2</span><span class="w"> </span>-c<span class="w"> </span>915M<span class="w"> </span>-r<span class="w"> </span>2M<span class="w">  </span><span class="c1"># sweep, loopback</span>
+wvt<span class="w"> </span>--sweep<span class="w"> </span>-1M:1M<span class="w"> </span>--sweep-time<span class="w"> </span>10m<span class="w"> </span>--level-sweep<span class="w"> </span>-40:-6<span class="w"> </span>-r<span class="w"> </span>5M<span class="w"> </span>-c<span class="w"> </span>915M<span class="w"> </span>--gen-out<span class="w"> </span>~/caps/sw<span class="w"> </span>--gen-pulses<span class="w"> </span><span class="m">20</span>
+wvt<span class="w"> </span>--sweep<span class="w"> </span>-200k:200k<span class="w"> </span>--sweep-step<span class="w"> </span>25k:5m<span class="w"> </span>-r<span class="w"> </span>1M<span class="w"> </span>-c<span class="w"> </span>915M<span class="w"> </span>--tx<span class="w"> </span>--tx-gain<span class="w"> </span><span class="m">10</span><span class="w">        </span><span class="c1"># stepped, transmit</span>
+wvt<span class="w"> </span>--gen<span class="w"> </span>pulsed<span class="w"> </span>--pri<span class="w"> </span>1m<span class="w"> </span>--pw<span class="w"> </span>20u<span class="w"> </span>--sweep<span class="w"> </span>-2M:2M<span class="w"> </span>--sweep-step<span class="w"> </span>500k:10m<span class="w"> </span>--level-sweep<span class="w"> </span>-30:-6<span class="w"> </span>-r<span class="w"> </span>10M<span class="w"> </span>-c<span class="w"> </span>915M
+wvt<span class="w"> </span>--gen<span class="w"> </span>cw<span class="w"> </span>--offset<span class="w"> </span>100k<span class="w"> </span>-c<span class="w"> </span>915M<span class="w"> </span>-r<span class="w"> </span>1M<span class="w"> </span>--tx<span class="w"> </span>--tx-gain<span class="w"> </span><span class="m">10</span><span class="w"> </span>--gen-duration<span class="w"> </span><span class="m">5</span><span class="w">         </span><span class="c1"># transmit 5 s</span>
+wvt<span class="w"> </span>--gen<span class="w"> </span>cw<span class="w"> </span>--offset<span class="w"> </span>100k<span class="w"> </span>-c<span class="w"> </span>915M<span class="w"> </span>-r<span class="w"> </span>1M<span class="w"> </span>--tx-gain<span class="w"> </span><span class="m">10</span><span class="w"> </span>--tx-dry-run<span class="w">                   </span><span class="c1"># only show the plan</span>
+wvt<span class="w"> </span>--gen<span class="w"> </span>cw<span class="w"> </span>-c<span class="w"> </span>915M<span class="w"> </span>-r<span class="w"> </span>1M<span class="w"> </span>--tx<span class="w"> </span>--tx-confirm<span class="w"> </span>--tx-max-gain<span class="w"> </span><span class="m">20</span><span class="w"> </span>--gen-duration<span class="w"> </span><span class="m">5</span><span class="w">      </span><span class="c1"># from a script</span>
+wvt<span class="w"> </span>--play<span class="w"> </span>~/caps/b13_*.sigmf-meta<span class="w"> </span>--play-gap<span class="w"> </span>5m<span class="w"> </span>--gen-out<span class="w"> </span>~/caps/b13x10<span class="w"> </span>--gen-pulses<span class="w"> </span><span class="m">10</span><span class="w">  </span><span class="c1"># 10 plays</span>
+wvt<span class="w"> </span>--play<span class="w"> </span>capture.cs16<span class="w"> </span>--play-rate<span class="w"> </span><span class="m">2</span>.4M<span class="w"> </span>-r<span class="w"> </span>10M<span class="w"> </span>-c<span class="w"> </span>915M<span class="w"> </span>--play-segment<span class="w"> </span><span class="m">1</span>.5:0.2<span class="w"> </span>--tx<span class="w">    </span><span class="c1"># replay a burst</span>
+wvt<span class="w"> </span>--chain-add<span class="w"> </span>~/caps/b13.sigmf-meta:3<span class="w"> </span>--chain-add<span class="w"> </span>~/caps/lfm.sigmf-meta@250k<span class="w"> </span>--chain-loops<span class="w"> </span><span class="m">5</span><span class="w"> </span>--tx
+wvt<span class="w"> </span>--chain<span class="w"> </span>~/caps/demo.wvtchain.json<span class="w"> </span>--gen-out<span class="w"> </span>~/caps/demo<span class="w"> </span>--gen-pulses<span class="w"> </span><span class="m">10</span><span class="w"> </span>--gen-annotate
+</pre></div>
+</div>
+</section>
+</section>
+<section id="how-it-works">
+<h2>How it works<a class="headerlink" href="#how-it-works" title="Link to this heading">¶</a></h2>
+<ul class="simple">
+<li><p><strong>Parameter changes:</strong> the window sends a full copy of the settings to the generator. The
+generator applies the copy at the next block. In pulsed mode, it applies a change after the
+current pulse ends. Thus a change does not cut a pulse.</p></li>
+<li><p><strong>Sweeps:</strong> a CW sweep uses a piecewise-linear phase rotator. Its step also rotates, so the phase
+is exactly quadratic. The rotator starts again at the end of each period, at the turn of a
+triangle, and at each step. The period is a whole number of samples.</p></li>
+<li><p><strong>Playback and chains:</strong> wvt loads each recording once, resamples it, and keeps it in a cache.
+The cache keeps up to 128 Mi samples. When the cache is full, wvt removes the recordings that
+are not in use.</p></li>
+<li><p><strong>Outputs:</strong> the file output, the loopback and the transmitter use the same generator. Thus the
+three outputs give the same samples.</p></li>
+</ul>
+<p>The self-check <code class="docutils literal notranslate"><span class="pre">build/siggen_check</span></code> tests the generator without hardware. For the designs, refer to
+<a class="reference internal" href="design/siggen-sweep-plan.html"><span class="std std-doc">the sweep design record</span></a> and
+<a class="reference internal" href="design/siggen-chain-plan.html"><span class="std std-doc">the chain design record</span></a>.</p>
+</section>
+</section>
+
+        </article>
+      </div>
+      <footer>
+        
+        <div class="related-pages">
+          <a class="next-page" href="audio.html">
+              <div class="page-info">
+                <div class="context">
+                  <span>Next</span>
+                </div>
+                <div class="title">Audio</div>
+              </div>
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+            </a>
+          <a class="prev-page" href="live.html">
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+              <div class="page-info">
+                <div class="context">
+                  <span>Previous</span>
+                </div>
+                
+                <div class="title">Live devices</div>
+                
+              </div>
+            </a>
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                Copyright &#169; 2026, Brian Collette
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+            
+          </div>
+          <div class="right-details">
+            
+          </div>
+        </div>
+        
+      </footer>
+    </div>
+    <aside class="toc-drawer">
+      
+      
+      <div class="toc-sticky toc-scroll">
+        <div class="toc-title-container">
+          <span class="toc-title">
+            On this page
+          </span>
+        </div>
+        <div class="toc-tree-container">
+          <div class="toc-tree">
+            <ul>
+<li><a class="reference internal" href="#">Signal generator</a><ul>
+<li><a class="reference internal" href="#open-the-generator">Open the generator</a></li>
+<li><a class="reference internal" href="#modes-and-settings">Modes and settings</a></li>
+<li><a class="reference internal" href="#sweeps">Sweeps</a></li>
+<li><a class="reference internal" href="#playback">Playback</a><ul>
+<li><a class="reference internal" href="#rules">Rules</a></li>
+<li><a class="reference internal" href="#how-resampling-works">How resampling works</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#chain">Chain</a><ul>
+<li><a class="reference internal" href="#make-a-chain">Make a chain</a></li>
+<li><a class="reference internal" href="#loop">Loop</a></li>
+<li><a class="reference internal" href="#changes-while-the-chain-plays">Changes while the chain plays</a></li>
+<li><a class="reference internal" href="#limits">Limits</a></li>
+<li><a class="reference internal" href="#chain-files">Chain files</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#outputs">Outputs</a><ul>
+<li><a class="reference internal" href="#file">File</a></li>
+<li><a class="reference internal" href="#loopback">Loopback</a></li>
+<li><a class="reference internal" href="#usrp-transmit">USRP transmit</a></li>
+<li><a class="reference internal" href="#transmit-limits">Transmit limits</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#command-line">Command line</a><ul>
+<li><a class="reference internal" href="#examples">Examples</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#how-it-works">How it works</a></li>
+</ul>
+</li>
+</ul>
+
+          </div>
+        </div>
+      </div>
+      
+      
+    </aside>
+  </div>
+</div><script src="_static/documentation_options.js?v=5929fcd5"></script>
+    <script src="_static/doctools.js?v=9bcbadda"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/scripts/furo.js?v=46bd48cc"></script>
+    </body>
+</html>

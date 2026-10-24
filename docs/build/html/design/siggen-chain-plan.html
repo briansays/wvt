@@ -1,0 +1,765 @@
+<!doctype html>
+<html class="no-js" lang="en" data-content_root="../">
+  <head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html"><link rel="next" title="Plan: snapshot button for all graphs (issue #13)" href="plot-snapshot-plan.html"><link rel="prev" title="Signal generator: frequency and amplitude sweep (issue #28)" href="siggen-sweep-plan.html">
+
+    <!-- Generated with Sphinx 8.2.3 and Furo 2025.12.19 -->
+        <title>Signal generator: chain playback (issue #27) - wvt</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d111a655" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=7bdb33bb" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?v=8dab3a3b" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f2f2f2;
+  --color-code-foreground: #1e1e1e;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-with-moon" viewBox="0 0 24 24">
+    <title>Auto light/dark, in light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path style="opacity: 50%" d="M 5.411 14.504 C 5.471 14.504 5.532 14.504 5.591 14.504 C 3.639 16.319 4.383 19.569 6.931 20.352 C 7.693 20.586 8.512 20.551 9.25 20.252 C 8.023 23.207 4.056 23.725 2.11 21.184 C 0.166 18.642 1.702 14.949 4.874 14.536 C 5.051 14.512 5.231 14.5 5.411 14.5 L 5.411 14.504 Z"/>
+      <line x1="14.5" y1="3.25" x2="14.5" y2="1.25"/>
+      <line x1="14.5" y1="15.85" x2="14.5" y2="17.85"/>
+      <line x1="10.044" y1="5.094" x2="8.63" y2="3.68"/>
+      <line x1="19" y1="14.05" x2="20.414" y2="15.464"/>
+      <line x1="8.2" y1="9.55" x2="6.2" y2="9.55"/>
+      <line x1="20.8" y1="9.55" x2="22.8" y2="9.55"/>
+      <line x1="10.044" y1="14.006" x2="8.63" y2="15.42"/>
+      <line x1="19" y1="5.05" x2="20.414" y2="3.636"/>
+      <circle cx="14.5" cy="9.55" r="3.6"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon-with-sun" viewBox="0 0 24 24">
+    <title>Auto light/dark, in dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path d="M 8.282 7.007 C 8.385 7.007 8.494 7.007 8.595 7.007 C 5.18 10.184 6.481 15.869 10.942 17.24 C 12.275 17.648 13.706 17.589 15 17.066 C 12.851 22.236 5.91 23.143 2.505 18.696 C -0.897 14.249 1.791 7.786 7.342 7.063 C 7.652 7.021 7.965 7 8.282 7 L 8.282 7.007 Z"/>
+      <line style="opacity: 50%" x1="18" y1="3.705" x2="18" y2="2.5"/>
+      <line style="opacity: 50%" x1="18" y1="11.295" x2="18" y2="12.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="4.816" x2="14.464" y2="3.964"/>
+      <line style="opacity: 50%" x1="20.711" y1="10.212" x2="21.563" y2="11.063"/>
+      <line style="opacity: 50%" x1="14.205" y1="7.5" x2="13.001" y2="7.5"/>
+      <line style="opacity: 50%" x1="21.795" y1="7.5" x2="23" y2="7.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="10.184" x2="14.464" y2="11.036"/>
+      <line style="opacity: 50%" x1="20.711" y1="4.789" x2="21.563" y2="3.937"/>
+      <circle style="opacity: 50%" cx="18" cy="7.5" r="2.169"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-pencil" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-pencil-code">
+      <path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" />
+      <path d="M13.5 6.5l4 4" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+  <symbol id="svg-eye" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-eye-code">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" />
+      <path
+        d="M11.11 17.958c-3.209 -.307 -5.91 -2.293 -8.11 -5.958c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6c-.21 .352 -.427 .688 -.647 1.008" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle site navigation sidebar">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc" aria-label="Toggle table of contents sidebar">
+<label class="overlay sidebar-overlay" for="__navigation"></label>
+<label class="overlay toc-overlay" for="__toc"></label>
+
+<a class="skip-to-content muted-link" href="#furo-main-content">Skip to content</a>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <span class="icon"><svg><use href="#svg-menu"></use></svg></span>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="../index.html"><div class="brand">wvt</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+          <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+          <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon" for="__toc">
+        <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand" href="../index.html">
+  
+  <span class="sidebar-brand-text">wvt</span>
+  
+</a><form class="sidebar-search-container" method="get" action="../search.html" role="search">
+  <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <p class="caption" role="heading"><span class="caption-text">User guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../getting-started.html">Getting started</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../viewer.html">The file viewer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../segments.html">Load a segment</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../export.html">Export a region</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../snapshots.html">Plot snapshots</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../sessions.html">File sessions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../live.html">Live devices</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../siggen.html">Signal generator</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../audio.html">Audio</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../gpu.html">GPU processing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../logging.html">Logging</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../controls.html">Mouse and keyboard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../cli.html">Command-line reference</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../build.html">Build reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../signal-processing.html">Signal processing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../self-checks.html">Self-checks and test signals</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../source-layout.html">Source layout</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../writing-docs.html">Writing the documentation</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Design records</span></p>
+<ul class="current">
+<li class="toctree-l1 current has-children"><a class="reference internal" href="index.html">Design records</a><input aria-label="Toggle navigation of Design records" checked="" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="audio-demod-plan.html">Plan: Audio demodulation and playback</a></li>
+<li class="toctree-l2"><a class="reference internal" href="verbose-logging-plan.html">Plan: Verbose console logging and a timestamped log file</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-segment-plan.html">Plan: open a time segment of a file (issue #16)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cuda-gpu-plan.html">Plan: CUDA GPU acceleration (issue #3)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="region-export-plan.html">Plan: export a region of a file (issue #18)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="apple-gpu-plan.html">Plan: Apple GPU support (issue #21)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ui-cleanup-plan.html">Plan: labels outside the plots and a tidier UI (issues #12 and #19)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="siggen-sweep-plan.html">Signal generator: frequency and amplitude sweep (issue #28)</a></li>
+<li class="toctree-l2 current current-page"><a class="current reference internal" href="#">Signal generator: chain playback (issue #27)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="plot-snapshot-plan.html">Plan: snapshot button for all graphs (issue #13)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="usrp-models-plan.html">Plan: support other Ettus USRPs (issue #11)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="bb60-integration-plan.html">Plan: Signal Hound BB60 as a wvt live device</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sidekiq-integration-plan.html">Plan: Epiq Solutions Sidekiq as a wvt live device</a></li>
+<li class="toctree-l2"><a class="reference internal" href="point-measurement-plan.html">Plan: point-to-point measurements on the plots (issue #80)</a></li>
+</ul>
+</li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="view-this-page">
+  <a class="muted-link" href="../_sources/design/siggen-chain-plan.md.txt" title="View this page">
+    <svg><use href="#svg-eye"></use></svg>
+    <span class="visually-hidden">View this page</span>
+  </a>
+</div>
+<div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+              <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+              <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon" for="__toc">
+            <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+          </label>
+        </div>
+        <article role="main" id="furo-main-content">
+          <section id="signal-generator-chain-playback-issue-27">
+<h1>Signal generator: chain playback (issue #27)<a class="headerlink" href="#signal-generator-chain-playback-issue-27" title="Link to this heading">¶</a></h1>
+<p>Status: implemented (2026-10-20) on <code class="docutils literal notranslate"><span class="pre">27-siggen-chain</span></code>; decisions in §7, notes in §8.</p>
+<section id="goal">
+<h2>1. Goal<a class="headerlink" href="#goal" title="Link to this heading">¶</a></h2>
+<p>The issue asks to play a chain of canned signals: files made by the generator’s File output,
+regions exported from the viewer (issue #18), or any SigMF or raw recording. The chain plays its
+items in order and then starts again from the beginning. It loops until the user stops it, or for a
+set number of loops.</p>
+</section>
+<section id="starting-point">
+<h2>2. Starting point<a class="headerlink" href="#starting-point" title="Link to this heading">¶</a></h2>
+<ul class="simple">
+<li><p><strong>Playback mode</strong> plays one recording.</p>
+<ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">loadPlayback()</span></code> reads a segment, resamples it to the output rate and caches it.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">SigGen</span></code> uses the result as its template, with the rate, offset and level of <code class="docutils literal notranslate"><span class="pre">WaveformParams</span></code>.</p></li>
+<li><p>A play repeats with a gap, or plays once after the start delay.</p></li>
+</ul>
+</li>
+<li><p><strong>The cache holds a single waveform</strong> (<code class="docutils literal notranslate"><span class="pre">gWave</span></code>). The preview, loopback, transmitter and file
+output share it.</p>
+<ul>
+<li><p>The window marks the generator ready only once the cache has the recording (<code class="docutils literal notranslate"><span class="pre">sgReady_</span></code>).</p></li>
+<li><p>That way the streaming threads never load a file themselves.</p></li>
+</ul>
+</li>
+<li><p><strong>Limits.</strong></p>
+<ul>
+<li><p>A play is limited to 32 Mi samples (<code class="docutils literal notranslate"><span class="pre">kMaxPlaySamples</span></code>, 256 MB as cf32).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">lastPulses()</span></code> reports each play. The file output uses that to count plays and annotate them.</p></li>
+</ul>
+</li>
+<li><p><strong>Formats.</strong></p>
+<ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">iq_file</span></code> reads the SigMF fields wvt needs: datatype, rate, frequency and datetime. It does
+this with a small key lookup (<code class="docutils literal notranslate"><span class="pre">jsonValue</span></code>), not a JSON parser.</p></li>
+<li><p>Generator files also carry <code class="docutils literal notranslate"><span class="pre">wvt:siggen</span></code>.</p></li>
+</ul>
+</li>
+</ul>
+</section>
+<section id="design">
+<h2>3. Design<a class="headerlink" href="#design" title="Link to this heading">¶</a></h2>
+<section id="a-new-mode-chain">
+<h3>3.1 A new mode: <strong>Chain</strong><a class="headerlink" href="#a-new-mode-chain" title="Link to this heading">¶</a></h3>
+<p>Playback keeps its simple one-file form. Chain is a fourth radio button, next to CW, Pulsed and
+Playback, and has its own section:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>Chain                                                       [Load…] [Save…]
+ #  Recording            Length   Offset     Level        Repeats  Gap after
+ 1  b13_20261020.sigmf   12.0 ms  +0 Hz      as recorded  1        5 ms      [↑][↓][✕]
+ 2  lfm_burst.sigmf      40.0 ms  +250 kHz   -10 dBFS     3        0         [↑][↓][✕]
+ 3  region_0001.sigmf    1.20 s   -1.1 MHz   as recorded  1        100 ms    [↑][↓][✕]
+ [ path…                                   ] [Add]  Last generated  Viewer&#39;s file/markers
+ Loop      (•) Forever  ( ) [ 5 ] times   Start delay [ 0 s ]
+ Total     1.37 s per pass, 312 MB loaded
+</pre></div>
+</div>
+<ul class="simple">
+<li><p>Selecting a row opens its details below the table: format, file rate and segment, as in
+Playback today, plus offset, level, repeats and gap. Each row also has a tooltip with the full
+path.</p></li>
+<li><p><strong>Adding an item</strong> reads its metadata, as <strong>Load</strong> does now.</p>
+<ul>
+<li><p><strong>Offset</strong> defaults to <code class="docutils literal notranslate"><span class="pre">(item's</span> <span class="pre">recorded</span> <span class="pre">fc)</span> <span class="pre">−</span> <span class="pre">(generator</span> <span class="pre">fc)</span></code>, so each signal plays at its
+original RF frequency.</p></li>
+<li><p>If that frequency is outside the band, the offset is 0 and a warning says so.</p></li>
+<li><p>The first item can set the generator’s rate and fc from its metadata. This uses the same
+rule as Load.</p></li>
+</ul>
+</li>
+<li><p><strong>Level</strong> is per item.</p>
+<ul>
+<li><p>“As recorded” (the default) keeps the file’s own samples.</p></li>
+<li><p>A dBFS value scales the item’s peak to it.</p></li>
+<li><p>Generator files and exports were made at a deliberate level, so “as recorded” is the right
+default.</p></li>
+<li><p>The section has no single amplitude field. Impairments still apply on top of the whole chain.</p></li>
+</ul>
+</li>
+</ul>
+</section>
+<section id="parameters">
+<h3>3.2 Parameters<a class="headerlink" href="#parameters" title="Link to this heading">¶</a></h3>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="k">struct</span><span class="w"> </span><span class="nc">ChainItem</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="w"> </span><span class="n">path</span><span class="p">;</span>
+<span class="w">    </span><span class="n">FormatParams</span><span class="w"> </span><span class="n">fp</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">double</span><span class="w"> </span><span class="n">fileRate</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">             </span><span class="c1">// 0 = output rate</span>
+<span class="w">    </span><span class="kt">double</span><span class="w"> </span><span class="n">start</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">       </span><span class="c1">// segment, s</span>
+<span class="w">    </span><span class="kt">double</span><span class="w"> </span><span class="n">offset</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">               </span><span class="c1">// Hz from fc</span>
+<span class="w">    </span><span class="kt">bool</span><span class="w"> </span><span class="n">keepLevel</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span><span class="w">           </span><span class="c1">// else peak at ampDb</span>
+<span class="w">    </span><span class="kt">double</span><span class="w"> </span><span class="n">ampDb</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">-6</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">repeats</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">double</span><span class="w"> </span><span class="n">gapAfter</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">             </span><span class="c1">// s, after each repeat</span>
+<span class="w">    </span><span class="kt">bool</span><span class="w"> </span><span class="k">operator</span><span class="o">==</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">ChainItem</span><span class="o">&amp;</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">default</span><span class="p">;</span>
+<span class="p">};</span>
+<span class="c1">// in WaveformParams:</span>
+<span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">ChainItem</span><span class="o">&gt;</span><span class="w"> </span><span class="n">chain</span><span class="p">;</span>
+<span class="kt">int</span><span class="w"> </span><span class="n">chainLoops</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">                  </span><span class="c1">// 0 = forever</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">startDelay</span></code> is reused before the first pass.</p>
+</section>
+<section id="loading-and-memory">
+<h3>3.3 Loading and memory<a class="headerlink" href="#loading-and-memory" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><strong>The cache becomes a map</strong>, keyed by <code class="docutils literal notranslate"><span class="pre">WaveKey</span></code>, with a total budget of 1 GiB of cf32
+(128 Mi samples).</p>
+<ul>
+<li><p>It evicts the least recently used waveforms that no generator holds (shared_ptr
+<code class="docutils literal notranslate"><span class="pre">use_count()</span> <span class="pre">==</span> <span class="pre">1</span></code>).</p></li>
+<li><p>Playback keeps working through the same calls.</p></li>
+</ul>
+</li>
+<li><p><strong>Loading.</strong></p>
+<ul>
+<li><p>The preview worker loads every item, cancellably, in the same way it loads the recording for
+Playback.</p></li>
+<li><p>The generator is ready when all items are in the cache. The window shows “loading 2 / 5” until
+then.</p></li>
+<li><p>The streaming threads still never read files.</p></li>
+</ul>
+</li>
+<li><p><strong>Errors.</strong></p>
+<ul>
+<li><p>An item that can’t be loaded marks its row red with the reason, and the chain is not ready.</p></li>
+<li><p>A chain over the budget is an error that names the total.</p></li>
+<li><p>The 32 Mi samples per item limit stays.</p></li>
+</ul>
+</li>
+<li><p><strong>Streaming instead of preloading</strong> would remove the size limits. It needs a streaming resampler
+and read-ahead on the transmit thread, so it is a follow-up if large chains turn out to matter.</p></li>
+</ul>
+</section>
+<section id="generation">
+<h3>3.4 Generation<a class="headerlink" href="#generation" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">SigGen</span></code> keeps the position in the chain: item, repeat and pass.</p></li>
+<li><p><strong>Within a pass:</strong></p>
+<ul>
+<li><p>an item plays as a template, like Playback;</p></li>
+<li><p>its own offset and gain go into the carrier while it plays;</p></li>
+<li><p>then the gap; then the next repeat or item.</p></li>
+</ul>
+</li>
+<li><p>The carrier and the phase run continuously across items, as between pulses now.</p></li>
+<li><p><strong>Timing.</strong></p>
+<ul>
+<li><p>The schedule keeps fractional sample positions (<code class="docutils literal notranslate"><span class="pre">lastStartF_</span></code>), as Pulsed does, so the gaps
+are exact.</p></li>
+<li><p>An item at a different file rate was already resampled at load time, so every item runs at the
+output rate.</p></li>
+</ul>
+</li>
+<li><p><strong>Events.</strong> Each item start goes into <code class="docutils literal notranslate"><span class="pre">lastPulses()</span></code> with its item index.</p>
+<ul>
+<li><p>The file output can write “1: b13_20261020” annotations.</p></li>
+<li><p>The file length can be a number of <strong>passes</strong> (“Pulses” → “Passes”), an exact count.</p></li>
+</ul>
+</li>
+<li><p><strong>End of the loops.</strong> After the last pass the output is silent, and <code class="docutils literal notranslate"><span class="pre">SigGen::finished()</span></code> becomes
+true.</p>
+<ul>
+<li><p><strong>File:</strong> the file ends there.</p></li>
+<li><p><strong>Loopback:</strong> stays silent and says “chain finished”.</p></li>
+<li><p><strong>USRP transmit:</strong> stops by itself when the generator finishes (<code class="docutils literal notranslate"><span class="pre">TxEngine</span></code> checks
+<code class="docutils literal notranslate"><span class="pre">finished()</span></code>), with the reason “chain finished after N passes”. This stops the zeros and the
+LO leakage.</p></li>
+</ul>
+</li>
+<li><p><strong>Changes while running.</strong></p>
+<ul>
+<li><p>Editing an item’s offset or level applies at once.</p></li>
+<li><p>Adding, removing or reordering items, or changing a segment, restarts the chain from item 1
+after the current item ends. Pulsed uses the same rule.</p></li>
+<li><p>Changing the loop count applies at once. If the current pass is already past the new count,
+the chain finishes when the pass ends.</p></li>
+</ul>
+</li>
+</ul>
+</section>
+<section id="saving-a-chain">
+<h3>3.5 Saving a chain<a class="headerlink" href="#saving-a-chain" title="Link to this heading">¶</a></h3>
+<ul>
+<li><p><strong>Save… / Load…</strong> write and read a small JSON file (<code class="docutils literal notranslate"><span class="pre">*.wvtchain.json</span></code>):</p>
+<ul class="simple">
+<li><p>the items, the loops and the start delay;</p></li>
+<li><p>paths relative to the chain file when they sit beside it or below it, so a folder of canned
+signals can be moved as a whole.</p></li>
+</ul>
+</li>
+<li><p><strong>Reading it back</strong> needs a JSON reader. <code class="docutils literal notranslate"><span class="pre">iq_file</span></code>’s key lookup can’t read arrays, so the plan
+adds a minimal parser to <code class="docutils literal notranslate"><span class="pre">src/common/json.*</span></code>:</p>
+<ul class="simple">
+<li><p>about 200 lines, for objects, arrays, strings, numbers and booleans;</p></li>
+<li><p>it can later replace <code class="docutils literal notranslate"><span class="pre">jsonValue</span></code> too.</p></li>
+</ul>
+</li>
+<li><p><strong>CLI:</strong></p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">--</span><span class="n">chain</span> <span class="n">FILE</span><span class="o">.</span><span class="n">wvtchain</span><span class="o">.</span><span class="n">json</span>       <span class="nb">open</span> <span class="n">the</span> <span class="n">chain</span> <span class="p">(</span><span class="n">implies</span> <span class="n">Chain</span> <span class="n">mode</span><span class="p">)</span>
+<span class="o">--</span><span class="n">chain</span><span class="o">-</span><span class="n">add</span> <span class="n">PATH</span><span class="p">[</span><span class="nd">@OFFSET</span><span class="p">][:</span><span class="n">N</span><span class="p">]</span>    <span class="n">add</span> <span class="n">an</span> <span class="n">item</span> <span class="p">(</span><span class="n">repeatable</span><span class="p">),</span> <span class="n">e</span><span class="o">.</span><span class="n">g</span><span class="o">.</span> <span class="n">b13</span><span class="o">.</span><span class="n">sigmf</span><span class="o">-</span><span class="n">meta</span><span class="o">@</span><span class="mi">250</span><span class="n">k</span><span class="p">:</span><span class="mi">3</span>
+<span class="o">--</span><span class="n">chain</span><span class="o">-</span><span class="n">loops</span> <span class="n">N</span>                  <span class="mi">0</span> <span class="o">=</span> <span class="n">forever</span> <span class="p">(</span><span class="n">default</span><span class="p">)</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p>This works with <code class="docutils literal notranslate"><span class="pre">--gen-out</span></code> (with <code class="docutils literal notranslate"><span class="pre">--gen-pulses</span> <span class="pre">N</span></code> for N passes), with <code class="docutils literal notranslate"><span class="pre">--tx</span></code> and with the
+loopback device.</p></li>
+</ul>
+</li>
+</ul>
+</section>
+<section id="preview">
+<h3>3.6 Preview<a class="headerlink" href="#preview" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><strong>Time plot:</strong> one pass, shown as the envelope.</p>
+<ul>
+<li><p>The item boundaries are shaded, with their numbers.</p></li>
+<li><p>A long pass is decimated with max-hold, as Playback does now.</p></li>
+</ul>
+</li>
+<li><p><strong>Spectrum:</strong> an average over the pass.</p></li>
+</ul>
+</section>
+</section>
+<section id="steps">
+<h2>4. Steps<a class="headerlink" href="#steps" title="Link to this heading">¶</a></h2>
+<ol class="arabic simple">
+<li><p><strong>Cache.</strong></p>
+<ul class="simple">
+<li><p>Turn the waveform cache into a map with a budget.</p></li>
+<li><p>Playback must behave the same (existing tests).</p></li>
+</ul>
+</li>
+<li><p><strong>Parameters.</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">ChainItem</span></code>, <code class="docutils literal notranslate"><span class="pre">GenMode::Chain</span></code> and the <code class="docutils literal notranslate"><span class="pre">checkParams</span></code> rules: an empty chain, repeats ≥ 1,
+gaps ≥ 0, offsets in band, and a level ≤ 0 dBFS.</p></li>
+<li><p>Update <code class="docutils literal notranslate"><span class="pre">describeParams</span></code> (“chain of 3, 5 passes”) and <code class="docutils literal notranslate"><span class="pre">paramsJson</span></code> (the items).</p></li>
+</ul>
+</li>
+<li><p><strong>Generator.</strong></p>
+<ul class="simple">
+<li><p>The chain schedule, per-item offset and gain, events, <code class="docutils literal notranslate"><span class="pre">finished()</span></code>, and the rules for changes
+while running.</p></li>
+</ul>
+</li>
+<li><p><strong>Outputs.</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">FileGenJob</span></code> “Passes” length and item annotations.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">TxEngine</span></code> stops when the generator finishes.</p></li>
+<li><p>Loopback says the chain finished.</p></li>
+</ul>
+</li>
+<li><p><strong>JSON reader and chain files:</strong> <code class="docutils literal notranslate"><span class="pre">src/common/json.*</span></code>, save and load.</p></li>
+<li><p><strong>Window:</strong></p>
+<ul class="simple">
+<li><p>the Chain section, the table and its row editor, the add shortcuts and loading progress;</p></li>
+<li><p>the preview with the item boundaries.</p></li>
+</ul>
+</li>
+<li><p><strong>CLI and <code class="docutils literal notranslate"><span class="pre">--help</span></code>.</strong></p></li>
+<li><p><strong>Self-test</strong> (<code class="docutils literal notranslate"><span class="pre">tools/siggen_check.cpp</span></code>), using three short generated files with distinct tones:</p>
+<ul class="simple">
+<li><p>order and repeats: the tone sequence matches;</p></li>
+<li><p>the gaps are exact to the sample;</p></li>
+<li><p>“as recorded” keeps the samples bit-exact at a matching rate;</p></li>
+<li><p>a dBFS level sets the peak;</p></li>
+<li><p>the per-item offset moves the tone;</p></li>
+<li><p>3 loops end with <code class="docutils literal notranslate"><span class="pre">finished()</span></code>, and the file is exactly 3 passes long;</p></li>
+<li><p>forever keeps going;</p></li>
+<li><p>a reorder while running restarts after the current item;</p></li>
+<li><p>the save → load round trip is equal;</p></li>
+<li><p>the cache budget evicts unused waveforms only.</p></li>
+</ul>
+</li>
+<li><p><strong>README</strong> (a Chain part in the Signal generator section) and CLI examples.</p></li>
+<li><p><strong>Screenshots</strong> of the window with a 3-item chain, and a loopback run that shows the items in
+the live waterfall.</p></li>
+</ol>
+</section>
+<section id="questions">
+<h2>5. Questions<a class="headerlink" href="#questions" title="Link to this heading">¶</a></h2>
+<ol class="arabic simple">
+<li><p>Should chain items be files only (recommended)? Any setting can already be made into a file
+with File output. The alternative is to also allow generator settings (CW, pulsed or sweep for
+T seconds) as items, which turns this into a sequencer.</p></li>
+<li><p>Should Chain be a new mode with Playback unchanged (recommended), or should Playback become a
+chain of one?</p></li>
+<li><p>Should the USRP stop transmitting when a finite chain ends (recommended), or keep sending
+silence until Stop?</p></li>
+<li><p>Should chains be savable as <code class="docutils literal notranslate"><span class="pre">.wvtchain.json</span></code> with a small JSON reader (recommended)?</p></li>
+<li><p>Is preloading with a 1 GiB budget fine, with streaming from disk left for later (recommended)?</p></li>
+</ol>
+</section>
+<section id="order-with-issue-28">
+<h2>6. Order with issue #28<a class="headerlink" href="#order-with-issue-28" title="Link to this heading">¶</a></h2>
+<ul class="simple">
+<li><p>I’d do the sweep (#28) first.</p>
+<ul>
+<li><p>It is self-contained: about 4 files, with no new memory or file-format work.</p></li>
+<li><p>Its “N sweeps” event and annotation path is the same mechanism Chain uses for passes.</p></li>
+</ul>
+</li>
+<li><p>The chain (#27) touches the cache, the outputs, a new JSON reader and a larger window section.</p></li>
+<li><p>Two branches, <code class="docutils literal notranslate"><span class="pre">28-siggen-sweep</span></code> and then <code class="docutils literal notranslate"><span class="pre">27-siggen-chain</span></code>, give two PRs that can be tested
+on their own.</p></li>
+</ul>
+</section>
+<section id="decisions-2026-10-20">
+<h2>7. Decisions (2026-10-20)<a class="headerlink" href="#decisions-2026-10-20" title="Link to this heading">¶</a></h2>
+<ol class="arabic simple">
+<li><p>Chain items are files only.</p></li>
+<li><p>Chain is a new mode. Playback stays as it is.</p></li>
+<li><p>The USRP stops transmitting when a finite chain ends.</p></li>
+<li><p>Chains can be saved and loaded as <code class="docutils literal notranslate"><span class="pre">.wvtchain.json</span></code>, with a small JSON reader.</p></li>
+<li><p>Items are preloaded with a 1 GiB budget. Streaming from disk is left for later.</p></li>
+</ol>
+</section>
+<section id="implementation-notes-2026-10-20">
+<h2>8. Implementation notes (2026-10-20)<a class="headerlink" href="#implementation-notes-2026-10-20" title="Link to this heading">¶</a></h2>
+<p>The branch starts from <code class="docutils literal notranslate"><span class="pre">28-siggen-sweep</span></code> (PR #30): both change the generator’s files.</p>
+<p><strong>Files</strong></p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>File</p></th>
+<th class="head"><p>Change</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/siggen/siggen.h/.cpp</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">ChainItem</span></code>, <code class="docutils literal notranslate"><span class="pre">GenMode::Chain</span></code>, the chain fields, checks, description, metadata; <code class="docutils literal notranslate"><span class="pre">chainItemParams</span></code>, <code class="docutils literal notranslate"><span class="pre">makeChainItem</span></code>, <code class="docutils literal notranslate"><span class="pre">saveChain</span></code> / <code class="docutils literal notranslate"><span class="pre">loadChain</span></code>; the generator’s chain schedule, per-item offset and gain, <code class="docutils literal notranslate"><span class="pre">chainPasses</span></code> / <code class="docutils literal notranslate"><span class="pre">endSample</span></code> / <code class="docutils literal notranslate"><span class="pre">finished</span></code>; the cache as a budgeted map (<code class="docutils literal notranslate"><span class="pre">kPlayCacheBudget</span></code>, <code class="docutils literal notranslate"><span class="pre">playbackCacheSamples</span></code>, <code class="docutils literal notranslate"><span class="pre">setPlaybackCacheBudget</span></code>); chain progress on <code class="docutils literal notranslate"><span class="pre">BusSigGen</span></code> and the bus</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/siggen/siggen_out.h/.cpp</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">preload()</span></code> for file and transmit; file length in passes, item annotations, the file ending with a finite chain; <code class="docutils literal notranslate"><span class="pre">TxEngine::Stats::finished</span></code>; the chain preview</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/common/json.h/.cpp</span></code> (new)</p></td>
+<td><p>JSON reader and <code class="docutils literal notranslate"><span class="pre">jsonQuote</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/app/app_chain.cpp</span></code> (new), <code class="docutils literal notranslate"><span class="pre">src/app/app.h</span></code></p></td>
+<td><p>the Chain section: table, row editor, add shortcuts, loop, chain file, totals; the preview with shaded items</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/app/app_siggen.cpp</span></code></p></td>
+<td><p>Chain mode, readiness and loading progress, Passes / Mark each item, chain status for loopback and transmit, the transmitter stopping at the end</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/app/main.cpp</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">--chain</span></code>, <code class="docutils literal notranslate"><span class="pre">--chain-add</span></code>, <code class="docutils literal notranslate"><span class="pre">--chain-loops</span></code>; the CLI transmitter stops at the end; the loopback device takes the generator’s rate and center when -r / -c aren’t given</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">tools/siggen_check.cpp</span></code></p></td>
+<td><p>24 chain, cache and JSON checks</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">README.md</span></code></p></td>
+<td><p>Chain row and section, outputs, CLI, file table</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Differences from the plan</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">--chain-add</span></code> takes <code class="docutils literal notranslate"><span class="pre">PATH[&#64;OFFSET][:N]</span></code> (<code class="docutils literal notranslate"><span class="pre">:3</span></code> for 3 plays) rather than <code class="docutils literal notranslate"><span class="pre">xN</span></code>, which ran into the
+file extension.</p></li>
+<li><p>“Repeats” is labelled <strong>Plays</strong> in the window.</p></li>
+<li><p>Changing an item’s plays or gap does not restart the chain; only the recordings themselves
+(adding, removing, reordering, file, format, rate, segment) do. Before anything has played,
+any change starts from the first item, so the start delay holds.</p></li>
+<li><p>A finite chain ends after the last item’s gap, so N loops last exactly N passes, the same as a
+file of N passes.</p></li>
+<li><p>A larger loop count revives a chain that has ended (or is ending), from where it would have
+gone on.</p></li>
+<li><p>The transmitter’s stop at the end of the chain is a normal message (“The chain finished after N
+passes”), not an error.</p></li>
+<li><p>The noise for Playback now refers to the played peak (the amplitude), as for the other modes.
+Before, it referred to the scaled recording, so the SNR was off by the recording’s peak level.</p></li>
+<li><p>With <code class="docutils literal notranslate"><span class="pre">--device</span> <span class="pre">siggen</span></code>, the loopback now listens at the generator’s center and rate unless -c
+and -r are given (this also helps <code class="docutils literal notranslate"><span class="pre">--play</span></code>).</p></li>
+</ul>
+<p><strong>Verification</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">siggen_check</span></code> passes, with the new checks:</p>
+<ul>
+<li><p>order, repeats and gaps to the sample;</p></li>
+<li><p>samples played unchanged “as recorded”;</p></li>
+<li><p>a dBFS level and an offset per item;</p></li>
+<li><p>the parameter checks;</p></li>
+<li><p>3 loops ending after the delay plus 3 passes, then silence;</p></li>
+<li><p>a larger loop count playing on;</p></li>
+<li><p>a reorder taking effect after the current item, and a level change at once;</p></li>
+<li><p>a 2-pass file with 8 item annotations, and a 1-loop file ending by itself;</p></li>
+<li><p>the bus stream reporting the end;</p></li>
+<li><p>the chain file round trip with relative paths, and a missing file;</p></li>
+<li><p>the cache budget dropping only unused waveforms;</p></li>
+<li><p>the JSON reader and quoting.</p></li>
+</ul>
+</li>
+<li><p>The other self-tests pass.</p></li>
+<li><p>From the command line: a 2-loop chain of three generated files (one at 1 MS/s, resampled)
+writes exactly 2 passes with one annotation per play, and a hand-written <code class="docutils literal notranslate"><span class="pre">.wvtchain.json</span></code> plays.</p></li>
+<li><p>Screenshots under Xvfb: the window at 1600 and 1100 px with a 3-item chain, a selected row’s
+details, and the loopback live view showing a tone, a sweep and a tone looping at their offsets.</p></li>
+</ul>
+</section>
+</section>
+
+        </article>
+      </div>
+      <footer>
+        
+        <div class="related-pages">
+          <a class="next-page" href="plot-snapshot-plan.html">
+              <div class="page-info">
+                <div class="context">
+                  <span>Next</span>
+                </div>
+                <div class="title">Plan: snapshot button for all graphs (issue #13)</div>
+              </div>
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+            </a>
+          <a class="prev-page" href="siggen-sweep-plan.html">
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+              <div class="page-info">
+                <div class="context">
+                  <span>Previous</span>
+                </div>
+                
+                <div class="title">Signal generator: frequency and amplitude sweep (issue #28)</div>
+                
+              </div>
+            </a>
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                Copyright &#169; 2026, Brian Collette
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+            
+          </div>
+          <div class="right-details">
+            
+          </div>
+        </div>
+        
+      </footer>
+    </div>
+    <aside class="toc-drawer">
+      
+      
+      <div class="toc-sticky toc-scroll">
+        <div class="toc-title-container">
+          <span class="toc-title">
+            On this page
+          </span>
+        </div>
+        <div class="toc-tree-container">
+          <div class="toc-tree">
+            <ul>
+<li><a class="reference internal" href="#">Signal generator: chain playback (issue #27)</a><ul>
+<li><a class="reference internal" href="#goal">1. Goal</a></li>
+<li><a class="reference internal" href="#starting-point">2. Starting point</a></li>
+<li><a class="reference internal" href="#design">3. Design</a><ul>
+<li><a class="reference internal" href="#a-new-mode-chain">3.1 A new mode: <strong>Chain</strong></a></li>
+<li><a class="reference internal" href="#parameters">3.2 Parameters</a></li>
+<li><a class="reference internal" href="#loading-and-memory">3.3 Loading and memory</a></li>
+<li><a class="reference internal" href="#generation">3.4 Generation</a></li>
+<li><a class="reference internal" href="#saving-a-chain">3.5 Saving a chain</a></li>
+<li><a class="reference internal" href="#preview">3.6 Preview</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#steps">4. Steps</a></li>
+<li><a class="reference internal" href="#questions">5. Questions</a></li>
+<li><a class="reference internal" href="#order-with-issue-28">6. Order with issue #28</a></li>
+<li><a class="reference internal" href="#decisions-2026-10-20">7. Decisions (2026-10-20)</a></li>
+<li><a class="reference internal" href="#implementation-notes-2026-10-20">8. Implementation notes (2026-10-20)</a></li>
+</ul>
+</li>
+</ul>
+
+          </div>
+        </div>
+      </div>
+      
+      
+    </aside>
+  </div>
+</div><script src="../_static/documentation_options.js?v=5929fcd5"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/scripts/furo.js?v=46bd48cc"></script>
+    </body>
+</html>

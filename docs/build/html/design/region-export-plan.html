@@ -1,0 +1,775 @@
+<!doctype html>
+<html class="no-js" lang="en" data-content_root="../">
+  <head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html"><link rel="next" title="Plan: Apple GPU support (issue #21)" href="apple-gpu-plan.html"><link rel="prev" title="Plan: CUDA GPU acceleration (issue #3)" href="cuda-gpu-plan.html">
+
+    <!-- Generated with Sphinx 8.2.3 and Furo 2025.12.19 -->
+        <title>Plan: export a region of a file (issue #18) - wvt</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d111a655" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=7bdb33bb" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?v=8dab3a3b" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f2f2f2;
+  --color-code-foreground: #1e1e1e;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-with-moon" viewBox="0 0 24 24">
+    <title>Auto light/dark, in light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path style="opacity: 50%" d="M 5.411 14.504 C 5.471 14.504 5.532 14.504 5.591 14.504 C 3.639 16.319 4.383 19.569 6.931 20.352 C 7.693 20.586 8.512 20.551 9.25 20.252 C 8.023 23.207 4.056 23.725 2.11 21.184 C 0.166 18.642 1.702 14.949 4.874 14.536 C 5.051 14.512 5.231 14.5 5.411 14.5 L 5.411 14.504 Z"/>
+      <line x1="14.5" y1="3.25" x2="14.5" y2="1.25"/>
+      <line x1="14.5" y1="15.85" x2="14.5" y2="17.85"/>
+      <line x1="10.044" y1="5.094" x2="8.63" y2="3.68"/>
+      <line x1="19" y1="14.05" x2="20.414" y2="15.464"/>
+      <line x1="8.2" y1="9.55" x2="6.2" y2="9.55"/>
+      <line x1="20.8" y1="9.55" x2="22.8" y2="9.55"/>
+      <line x1="10.044" y1="14.006" x2="8.63" y2="15.42"/>
+      <line x1="19" y1="5.05" x2="20.414" y2="3.636"/>
+      <circle cx="14.5" cy="9.55" r="3.6"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon-with-sun" viewBox="0 0 24 24">
+    <title>Auto light/dark, in dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path d="M 8.282 7.007 C 8.385 7.007 8.494 7.007 8.595 7.007 C 5.18 10.184 6.481 15.869 10.942 17.24 C 12.275 17.648 13.706 17.589 15 17.066 C 12.851 22.236 5.91 23.143 2.505 18.696 C -0.897 14.249 1.791 7.786 7.342 7.063 C 7.652 7.021 7.965 7 8.282 7 L 8.282 7.007 Z"/>
+      <line style="opacity: 50%" x1="18" y1="3.705" x2="18" y2="2.5"/>
+      <line style="opacity: 50%" x1="18" y1="11.295" x2="18" y2="12.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="4.816" x2="14.464" y2="3.964"/>
+      <line style="opacity: 50%" x1="20.711" y1="10.212" x2="21.563" y2="11.063"/>
+      <line style="opacity: 50%" x1="14.205" y1="7.5" x2="13.001" y2="7.5"/>
+      <line style="opacity: 50%" x1="21.795" y1="7.5" x2="23" y2="7.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="10.184" x2="14.464" y2="11.036"/>
+      <line style="opacity: 50%" x1="20.711" y1="4.789" x2="21.563" y2="3.937"/>
+      <circle style="opacity: 50%" cx="18" cy="7.5" r="2.169"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-pencil" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-pencil-code">
+      <path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" />
+      <path d="M13.5 6.5l4 4" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+  <symbol id="svg-eye" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-eye-code">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" />
+      <path
+        d="M11.11 17.958c-3.209 -.307 -5.91 -2.293 -8.11 -5.958c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6c-.21 .352 -.427 .688 -.647 1.008" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle site navigation sidebar">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc" aria-label="Toggle table of contents sidebar">
+<label class="overlay sidebar-overlay" for="__navigation"></label>
+<label class="overlay toc-overlay" for="__toc"></label>
+
+<a class="skip-to-content muted-link" href="#furo-main-content">Skip to content</a>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <span class="icon"><svg><use href="#svg-menu"></use></svg></span>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="../index.html"><div class="brand">wvt</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+          <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+          <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon" for="__toc">
+        <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand" href="../index.html">
+  
+  <span class="sidebar-brand-text">wvt</span>
+  
+</a><form class="sidebar-search-container" method="get" action="../search.html" role="search">
+  <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <p class="caption" role="heading"><span class="caption-text">User guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../getting-started.html">Getting started</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../viewer.html">The file viewer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../segments.html">Load a segment</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../export.html">Export a region</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../snapshots.html">Plot snapshots</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../sessions.html">File sessions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../live.html">Live devices</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../siggen.html">Signal generator</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../audio.html">Audio</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../gpu.html">GPU processing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../logging.html">Logging</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../controls.html">Mouse and keyboard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../cli.html">Command-line reference</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../build.html">Build reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../signal-processing.html">Signal processing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../self-checks.html">Self-checks and test signals</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../source-layout.html">Source layout</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../writing-docs.html">Writing the documentation</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Design records</span></p>
+<ul class="current">
+<li class="toctree-l1 current has-children"><a class="reference internal" href="index.html">Design records</a><input aria-label="Toggle navigation of Design records" checked="" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="audio-demod-plan.html">Plan: Audio demodulation and playback</a></li>
+<li class="toctree-l2"><a class="reference internal" href="verbose-logging-plan.html">Plan: Verbose console logging and a timestamped log file</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-segment-plan.html">Plan: open a time segment of a file (issue #16)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cuda-gpu-plan.html">Plan: CUDA GPU acceleration (issue #3)</a></li>
+<li class="toctree-l2 current current-page"><a class="current reference internal" href="#">Plan: export a region of a file (issue #18)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="apple-gpu-plan.html">Plan: Apple GPU support (issue #21)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ui-cleanup-plan.html">Plan: labels outside the plots and a tidier UI (issues #12 and #19)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="siggen-sweep-plan.html">Signal generator: frequency and amplitude sweep (issue #28)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="siggen-chain-plan.html">Signal generator: chain playback (issue #27)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="plot-snapshot-plan.html">Plan: snapshot button for all graphs (issue #13)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="usrp-models-plan.html">Plan: support other Ettus USRPs (issue #11)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="bb60-integration-plan.html">Plan: Signal Hound BB60 as a wvt live device</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sidekiq-integration-plan.html">Plan: Epiq Solutions Sidekiq as a wvt live device</a></li>
+<li class="toctree-l2"><a class="reference internal" href="point-measurement-plan.html">Plan: point-to-point measurements on the plots (issue #80)</a></li>
+</ul>
+</li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="view-this-page">
+  <a class="muted-link" href="../_sources/design/region-export-plan.md.txt" title="View this page">
+    <svg><use href="#svg-eye"></use></svg>
+    <span class="visually-hidden">View this page</span>
+  </a>
+</div>
+<div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+              <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+              <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon" for="__toc">
+            <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+          </label>
+        </div>
+        <article role="main" id="furo-main-content">
+          <section id="plan-export-a-region-of-a-file-issue-18">
+<h1>Plan: export a region of a file (issue #18)<a class="headerlink" href="#plan-export-a-region-of-a-file-issue-18" title="Link to this heading">¶</a></h1>
+<p>Branch: <code class="docutils literal notranslate"><span class="pre">18-region-export</span></code>, from <code class="docutils literal notranslate"><span class="pre">main</span></code> at <code class="docutils literal notranslate"><span class="pre">8896568</span></code>, rebased on <code class="docutils literal notranslate"><span class="pre">2c3c7cd</span></code> (after the GPU
+merge, PR #20).
+Status: <strong>steps 1–9 implemented</strong> (2026-10-20), PR #22. The user tested the GUI on screen
+(2026-10-20).</p>
+<section id="goal">
+<h2>1. Goal<a class="headerlink" href="#goal" title="Link to this heading">¶</a></h2>
+<p>Issue #18 asks for these items:</p>
+<ol class="arabic simple">
+<li><p>Export a smaller part of a data file to a new file.</p></li>
+<li><p>A new <strong>panel</strong> (window) where the user sets the time (or sample) range and the
+frequency range of the export.</p></li>
+<li><p>Two ways to fill the panel:</p>
+<ul class="simple">
+<li><p>from the current <strong>channel</strong> setup;</p></li>
+<li><p>from a <strong>selection on the waterfall</strong>: right-click the waterfall, choose an export
+mode, and drag a box with a crosshair cursor.</p></li>
+</ul>
+</li>
+<li><p>The values go into the panel, and the user checks them before the file is written.</p></li>
+</ol>
+</section>
+<section id="starting-point-main">
+<h2>2. Starting point (<code class="docutils literal notranslate"><span class="pre">main</span></code>)<a class="headerlink" href="#starting-point-main" title="Link to this heading">¶</a></h2>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Piece</p></th>
+<th class="head"><p>Where</p></th>
+<th class="head"><p>Use for the export</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Channel filter</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">processRange</span></code>, <code class="docutils literal notranslate"><span class="pre">src/dsp/engine.cpp</span></code></p></td>
+<td><p>Mix down with the phase from the absolute sample index, Blackman windowed-sinc FIR, compute only the kept (decimated) outputs. Same method for the export, but streamed in chunks over a range of any length.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Channel settings</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">demod_.chanEnable</span></code>, <code class="docutils literal notranslate"><span class="pre">chanOffset</span></code>, <code class="docutils literal notranslate"><span class="pre">chanBw</span></code> (<code class="docutils literal notranslate"><span class="pre">src/app/app.cpp</span></code>)</p></td>
+<td><p>“From channel”.</p></td>
+</tr>
+<tr class="row-even"><td><p>Time and frequency markers</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">tm1_</span></code>, <code class="docutils literal notranslate"><span class="pre">tm2_</span></code>, <code class="docutils literal notranslate"><span class="pre">fm1_</span></code>, <code class="docutils literal notranslate"><span class="pre">fm2_</span></code></p></td>
+<td><p>“From markers”.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Time segment (#16)</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">tBegin()</span></code>, <code class="docutils literal notranslate"><span class="pre">tEnd()</span></code>, <code class="docutils literal notranslate"><span class="pre">segS0_</span></code>, <code class="docutils literal notranslate"><span class="pre">segS1_</span></code></p></td>
+<td><p>The export stays inside the loaded segment.</p></td>
+</tr>
+<tr class="row-even"><td><p>SigMF writer</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">Recorder</span></code> (<code class="docutils literal notranslate"><span class="pre">src/io/recorder.*</span></code>): the stream comes through a <code class="docutils literal notranslate"><span class="pre">SampleRing</span></code>; the name is <code class="docutils literal notranslate"><span class="pre">PREFIX_&lt;date&gt;_&lt;time&gt;_&lt;fc&gt;_&lt;rate&gt;</span></code>; <code class="docutils literal notranslate"><span class="pre">core:datetime</span></code>, captures and annotations</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">FileGenJob</span></code> (<code class="docutils literal notranslate"><span class="pre">src/siggen/siggen_out.cpp</span></code>) already uses it to write a file from a background job, with progress and cancel.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Background job with progress</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">FileGenJob</span></code>, <code class="docutils literal notranslate"><span class="pre">WavExportJob</span></code></p></td>
+<td><p>The same pattern: thread, progress, cancel, status.</p></td>
+</tr>
+<tr class="row-even"><td><p>Headless export</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">--audio-out</span></code> (<code class="docutils literal notranslate"><span class="pre">runAudioExport</span></code>, <code class="docutils literal notranslate"><span class="pre">src/app/main.cpp</span></code>)</p></td>
+<td><p>The same pattern for a test without a display.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Draggable rectangle</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">ImPlot::DragRect</span></code> (overview strip, <code class="docutils literal notranslate"><span class="pre">src/app/app.cpp</span></code>)</p></td>
+<td><p>The selection box on the waterfall.</p></td>
+</tr>
+<tr class="row-even"><td><p>Right mouse on the waterfall</p></td>
+<td><p>ImPlot defaults: <strong>right-drag = box zoom</strong> (in the README), right-click = ImPlot’s own context menu</p></td>
+<td><p>The new menu must not break the box zoom.</p></td>
+</tr>
+<tr class="row-odd"><td><p>SigMF reader</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">guessMeta</span></code> (<code class="docutils literal notranslate"><span class="pre">src/io/iq_file.cpp</span></code>)</p></td>
+<td><p>Reads only format, rate and frequency. No <code class="docutils literal notranslate"><span class="pre">core:datetime</span></code>, no annotations.</p></td>
+</tr>
+<tr class="row-even"><td><p>Separate windows</p></td>
+<td><p>Audio (<code class="docutils literal notranslate"><span class="pre">auOpen_</span></code>, Ctrl+D), signal generator (Ctrl+G)</p></td>
+<td><p>The export window works the same way.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="design-decisions">
+<h2>3. Design decisions<a class="headerlink" href="#design-decisions" title="Link to this heading">¶</a></h2>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Topic</p></th>
+<th class="head"><p>Decision</p></th>
+<th class="head"><p>Reason</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>What is exported</p></td>
+<td><p>A time range <code class="docutils literal notranslate"><span class="pre">[t0,</span> <span class="pre">t1)</span></code> and, optionally, a frequency band <code class="docutils literal notranslate"><span class="pre">[f_lo,</span> <span class="pre">f_hi]</span></code>.</p></td>
+<td><p>The issue asks for time / sample and frequency.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Full band (no frequency selection)</p></td>
+<td><p>Copy the raw bytes of the sample range unchanged: same sample format, same rate, same center frequency. The header is not copied.</p></td>
+<td><p>Lossless and fast. This is the common “cut a piece out of a big file” case.</p></td>
+</tr>
+<tr class="row-even"><td><p>Frequency band selected</p></td>
+<td><p>Mix the band center down to 0 Hz, low-pass filter, and decimate. The output center frequency is <code class="docutils literal notranslate"><span class="pre">fc</span> <span class="pre">+</span> <span class="pre">band</span> <span class="pre">center</span></code>. The output rate is <code class="docutils literal notranslate"><span class="pre">fs</span> <span class="pre">/</span> <span class="pre">D</span></code>.</p></td>
+<td><p>A smaller file at a lower rate. This is what “frequency range” means for IQ data.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Filter for the export</p></td>
+<td><p>The band is the <strong>passband</strong>. A transition band of 25 % of the bandwidth on each side. <code class="docutils literal notranslate"><span class="pre">D</span> <span class="pre">=</span> <span class="pre">max(1,</span> <span class="pre">⌊fs</span> <span class="pre">/</span> <span class="pre">(1.25</span> <span class="pre">·</span> <span class="pre">BW)⌋)</span></code>, so the transition band does not alias into the passband. Blackman windowed sinc with <code class="docutils literal notranslate"><span class="pre">N</span> <span class="pre">≈</span> <span class="pre">5.5</span> <span class="pre">·</span> <span class="pre">fs</span> <span class="pre">/</span> <span class="pre">(0.25</span> <span class="pre">·</span> <span class="pre">BW)</span></code> taps (cutoff in the middle of the transition band).</p></td>
+<td><p>The demod filter (<code class="docutils literal notranslate"><span class="pre">taps</span> <span class="pre">≈</span> <span class="pre">12</span> <span class="pre">·</span> <span class="pre">fs</span> <span class="pre">/</span> <span class="pre">BW</span></code>, cutoff at BW / 2) attenuates the band edges by 6 dB. An export must keep the whole selected band. The Blackman window gives about 74 dB of stopband.</p></td>
+</tr>
+<tr class="row-even"><td><p>Cost of narrow bands</p></td>
+<td><p>No limit on the number of taps. The FIR computes only the kept outputs, so the work per input sample is <code class="docutils literal notranslate"><span class="pre">N</span> <span class="pre">/</span> <span class="pre">D</span> <span class="pre">≈</span> <span class="pre">27</span></code> multiply-adds for any bandwidth.</p></td>
+<td><p>A narrow band in a wide file (20 MS/s to 10 kHz: <code class="docutils literal notranslate"><span class="pre">D</span> <span class="pre">=</span> <span class="pre">1600</span></code>, <code class="docutils literal notranslate"><span class="pre">N</span> <span class="pre">≈</span> <span class="pre">44</span> <span class="pre">000</span></code>) costs the same per input sample as a wide band.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Output rate</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">fs</span> <span class="pre">/</span> <span class="pre">D</span></code>, an integer decimation. The window shows the exact rate.</p></td>
+<td><p>A rational resampler to a chosen rate is more work. It can come later if needed.</p></td>
+</tr>
+<tr class="row-even"><td><p>Output format</p></td>
+<td><p>Full band: the source format. Band selected: <code class="docutils literal notranslate"><span class="pre">cf32</span></code> (default) or <code class="docutils literal notranslate"><span class="pre">ci16</span></code>. With <code class="docutils literal notranslate"><span class="pre">ci16</span></code> the export scales by 32768 and counts clipped samples (WARN).</p></td>
+<td><p>The filter output is float. <code class="docutils literal notranslate"><span class="pre">ci16</span></code> halves the size.</p></td>
+</tr>
+<tr class="row-odd"><td><p>File type</p></td>
+<td><p>SigMF (default) or raw, as for recordings. A raw name carries the rate and frequency, so wvt can open it with no options.</p></td>
+<td><p>Same as the recorder.</p></td>
+</tr>
+<tr class="row-even"><td><p>Metadata (SigMF)</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">core:sample_rate</span></code>, <code class="docutils literal notranslate"><span class="pre">core:datatype</span></code>, <code class="docutils literal notranslate"><span class="pre">core:frequency</span></code> (in the capture), <code class="docutils literal notranslate"><span class="pre">core:datetime</span></code> = the source start time + t0 when the source SigMF has one, <code class="docutils literal notranslate"><span class="pre">core:description</span></code>. A <code class="docutils literal notranslate"><span class="pre">wvt:extract</span></code> object with the source file name, sample range, band, D, taps and filter.</p></td>
+<td><p>The export can be traced back to its source.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Source annotations</p></td>
+<td><p>Not copied (the reader does not parse them).</p></td>
+<td><p>Can come later with the SigMF reader work.</p></td>
+</tr>
+<tr class="row-even"><td><p>Writer</p></td>
+<td><p>Reuse <code class="docutils literal notranslate"><span class="pre">Recorder</span></code> through a <code class="docutils literal notranslate"><span class="pre">SampleRing</span></code>, as <code class="docutils literal notranslate"><span class="pre">FileGenJob</span></code> does. Add <code class="docutils literal notranslate"><span class="pre">RecordConfig::exactPath</span></code>: the user’s file name instead of <code class="docutils literal notranslate"><span class="pre">PREFIX_&lt;date&gt;_…</span></code>.</p></td>
+<td><p>One SigMF writer. <code class="docutils literal notranslate"><span class="pre">exactPath</span></code> keeps the user’s name.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Range limits</p></td>
+<td><p>Time inside the loaded segment (#16). Band inside <code class="docutils literal notranslate"><span class="pre">fc</span> <span class="pre">±</span> <span class="pre">fs</span> <span class="pre">/</span> <span class="pre">2</span></code>. BW at least <code class="docutils literal notranslate"><span class="pre">fs</span> <span class="pre">/</span> <span class="pre">100</span> <span class="pre">000</span></code> (D at most 80 000).</p></td>
+<td><p>Same limits as the rest of the view.</p></td>
+</tr>
+<tr class="row-even"><td><p>Background job</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">ExtractJob</span></code> (<code class="docutils literal notranslate"><span class="pre">src/dsp/extract.*</span></code>): its own thread, chunks of about 4 M input samples, progress, cancel. Cancel <strong>deletes</strong> the partial files. An existing file is not overwritten unless the user confirms.</p></td>
+<td><p>A cancelled export is not a usable file.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Disk space</p></td>
+<td><p>Before starting, check the free space (<code class="docutils literal notranslate"><span class="pre">statvfs</span></code>) against the size estimate. Too little: an error, nothing is written.</p></td>
+<td><p>Large exports can fill a disk.</p></td>
+</tr>
+<tr class="row-even"><td><p>GPU (#3, PR #20)</p></td>
+<td><p>The export filter is CPU code in <code class="docutils literal notranslate"><span class="pre">src/dsp/extract.cpp</span></code>. When #20 is merged, it can use <code class="docutils literal notranslate"><span class="pre">ChanJob</span></code> / <code class="docutils literal notranslate"><span class="pre">gpuChannelize</span></code>.</p></td>
+<td><p>#20 is not merged yet; #18 must not wait for it.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Logging (#14)</p></td>
+<td><p>INFO at start (source, range, band, D, taps, output) and at the end (file, size, time). WARN for clipping and for clamped values. ERROR for failures, once, by the code that shows them.</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">docs/design/verbose-logging-plan.md</span></code>.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<section id="the-export-window">
+<h3>The export window<a class="headerlink" href="#the-export-window" title="Link to this heading">¶</a></h3>
+<p>Opened from a new <strong>Export</strong> button in toolbar row 1 (next to <strong>Audio</strong>), with <strong>Ctrl+E</strong>, or
+from the waterfall menu.</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Row</p></th>
+<th class="head"><p>Contents</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Time</p></td>
+<td><p><strong>Start</strong> / <strong>End</strong> in seconds, or in samples (switch). The length and the sample count.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Band</p></td>
+<td><p><strong>Full band</strong> checkbox. When off: <strong>Low</strong> / <strong>High</strong>, or <strong>Center</strong> / <strong>BW</strong> (switch). Absolute frequency, or relative to fc with <strong>Rel. freq</strong>.</p></td>
+</tr>
+<tr class="row-even"><td><p>Fill from</p></td>
+<td><p><strong>View</strong> · <strong>Channel</strong> (offset and BW; time = the view) · <strong>Markers</strong> (T1 / T2, F1 / F2) · <strong>Select on waterfall</strong></p></td>
+</tr>
+<tr class="row-odd"><td><p>Output</p></td>
+<td><p>Format (<code class="docutils literal notranslate"><span class="pre">source</span></code> / <code class="docutils literal notranslate"><span class="pre">cf32</span></code> / <code class="docutils literal notranslate"><span class="pre">ci16</span></code>), SigMF / raw, path, as a text field (default: next to the source file, <code class="docutils literal notranslate"><span class="pre">&lt;name&gt;_&lt;t0&gt;s_&lt;fc&gt;_&lt;rate&gt;</span></code>).</p></td>
+</tr>
+<tr class="row-even"><td><p>Result</p></td>
+<td><p>Output rate, D, taps, number of samples, file size, estimated time. Errors in red (for example “the band is outside the capture”).</p></td>
+</tr>
+<tr class="row-odd"><td><p>Actions</p></td>
+<td><p><strong>Export</strong>, then a progress bar, <strong>Cancel</strong>, and the result line with the path.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="the-selection-on-the-waterfall">
+<h3>The selection on the waterfall<a class="headerlink" href="#the-selection-on-the-waterfall" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><strong>Right-click</strong> (press and release without moving) on the waterfall opens a wvt menu:</p>
+<ul>
+<li><p><strong>Select a region to export…</strong>: crosshair mode;</p></li>
+<li><p><strong>Export this view</strong>: fill the window with the view (time and full band);</p></li>
+<li><p><strong>Export the channel</strong>: fill it from the channel.</p></li>
+</ul>
+</li>
+<li><p><strong>Right-drag</strong> keeps the box zoom. The waterfall gets <code class="docutils literal notranslate"><span class="pre">ImPlotFlags_NoMenus</span></code>. ImPlot’s own
+menu then no longer opens on the waterfall: it has only axis settings, which the toolbar and
+double-click already give.</p></li>
+<li><p><strong>Crosshair mode</strong>: the cursor is a crosshair. A left-drag draws the box, and panning is off
+until the mouse is released. Esc cancels. The box fills Start / End / Low / High and opens
+the export window.</p></li>
+<li><p>While the export window is open, the region shows as a <strong>draggable rectangle</strong>
+(<code class="docutils literal notranslate"><span class="pre">ImPlot::DragRect</span></code>) on the waterfall. Its edges and the panel values stay in step. The
+time range also shows as a shaded band on the I/Q, AM, FM and PM plots.</p></li>
+</ul>
+</section>
+<section id="command-line">
+<h3>Command line<a class="headerlink" href="#command-line" title="Link to this heading">¶</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">--extract-out</span> <span class="pre">PATH</span> <span class="pre">--extract</span> <span class="pre">T0:T1</span> <span class="pre">[--extract-band</span> <span class="pre">LO:HI]</span> <span class="pre">[--extract-format</span> <span class="pre">cf32|ci16]</span> <span class="pre">[--record-format</span> <span class="pre">sigmf|raw]</span></code>. Headless, with exit status 0 on success. <code class="docutils literal notranslate"><span class="pre">--segment</span></code> limits it
+the same way as in the window. It is for tests and scripts.</p>
+</section>
+</section>
+<section id="implementation-steps">
+<h2>4. Implementation steps<a class="headerlink" href="#implementation-steps" title="Link to this heading">¶</a></h2>
+<ol class="arabic simple">
+<li><p><strong>Extraction core</strong> (<code class="docutils literal notranslate"><span class="pre">src/dsp/extract.h</span></code>, <code class="docutils literal notranslate"><span class="pre">src/dsp/extract.cpp</span></code>).</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">ExtractConfig</span></code> (source, sample range, band, format, file type, path) and
+<code class="docutils literal notranslate"><span class="pre">ExtractPlan</span></code> (D, taps, cutoff, output rate, sample count, bytes, or the error).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">planExtract(cfg)</span></code>: all the checks of §3, and no I/O, so the window can call it every
+frame.</p></li>
+<li><p>Full band: chunked byte copy. Band: chunked mix + FIR + decimate with the phase from
+the absolute index (each chunk reads its own input with the filter overlap, as
+<code class="docutils literal notranslate"><span class="pre">processRange</span></code> does).</p></li>
+<li><p>Output through <code class="docutils literal notranslate"><span class="pre">Recorder</span></code> with <code class="docutils literal notranslate"><span class="pre">exactPath</span></code>. <code class="docutils literal notranslate"><span class="pre">wvt:extract</span></code> metadata.</p></li>
+</ul>
+</li>
+<li><p><strong>Recorder</strong> (<code class="docutils literal notranslate"><span class="pre">src/io/recorder.*</span></code>): <code class="docutils literal notranslate"><span class="pre">RecordConfig::exactPath</span></code> and the start datetime from the
+source.</p></li>
+<li><p><strong>Background job</strong>: <code class="docutils literal notranslate"><span class="pre">ExtractJob</span></code> (progress, cancel deletes the files, status) and the
+disk-space check.</p></li>
+<li><p><strong>Command line</strong>: <code class="docutils literal notranslate"><span class="pre">--extract-out</span></code>, <code class="docutils literal notranslate"><span class="pre">--extract</span></code>, <code class="docutils literal notranslate"><span class="pre">--extract-band</span></code>, <code class="docutils literal notranslate"><span class="pre">--extract-format</span></code>, and
+the usage text.</p></li>
+<li><p><strong>Self-test</strong> <code class="docutils literal notranslate"><span class="pre">tools/extract_check.cpp</span></code> (§5).</p></li>
+<li><p><strong>Export window</strong> (<code class="docutils literal notranslate"><span class="pre">src/app/app_export.cpp</span></code>): the window of §3, <strong>Export</strong> button, Ctrl+E, the
+“Fill from” buttons, progress, the result.</p></li>
+<li><p><strong>Waterfall</strong>: <code class="docutils literal notranslate"><span class="pre">NoMenus</span></code>, the right-click menu, crosshair mode, the <code class="docutils literal notranslate"><span class="pre">DragRect</span></code> and the time
+bands on the right-hand plots.</p></li>
+<li><p><strong>Source start time</strong>: <code class="docutils literal notranslate"><span class="pre">guessMeta</span></code> also reads <code class="docutils literal notranslate"><span class="pre">core:datetime</span></code> of the first capture, for the
+exported <code class="docutils literal notranslate"><span class="pre">core:datetime</span></code>.</p></li>
+<li><p><strong>README</strong>: the window, the waterfall menu, the options, the file table.</p></li>
+</ol>
+</section>
+<section id="testing">
+<h2>5. Testing<a class="headerlink" href="#testing" title="Link to this heading">¶</a></h2>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Test</p></th>
+<th class="head"><p>Check</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">extract_check</span></code>: full band</p></td>
+<td><p>A cf32 / ci16 / cu8 file with a header: the output bytes are exactly the source bytes of the range. The SigMF metadata has the same rate, format and frequency.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">extract_check</span></code>: band</p></td>
+<td><p>Two tones, one inside and one outside the band. Out: the inside tone at <code class="docutils literal notranslate"><span class="pre">f</span> <span class="pre">-</span> <span class="pre">band</span> <span class="pre">center</span></code>, level within 0.1 dB. The outside tone at least 70 dB down. Rate <code class="docutils literal notranslate"><span class="pre">fs</span> <span class="pre">/</span> <span class="pre">D</span></code>.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">extract_check</span></code>: edges of the band</p></td>
+<td><p>Tones at 0 %, 50 % and 100 % of the band: all within 0.1 dB.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">extract_check</span></code>: chunks</p></td>
+<td><p>One export in one chunk and in many chunks: the same samples.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">extract_check</span></code>: checks</p></td>
+<td><p>Band outside the capture, end before start, range outside the segment, too narrow: an error, no file.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">extract_check</span></code>: ci16</p></td>
+<td><p>Scaling and the clip count.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">extract_check</span></code>: cancel</p></td>
+<td><p>The partial files are deleted.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Headless</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">wvt</span> <span class="pre">FILE</span> <span class="pre">--extract</span> <span class="pre">1:2</span> <span class="pre">--extract-band</span> <span class="pre">100.2M:100.4M</span> <span class="pre">--extract-out</span> <span class="pre">x</span></code> writes the file. wvt opens it, and the tone shows at the right frequency.</p></td>
+</tr>
+<tr class="row-even"><td><p>GUI (<strong>you must do this</strong>)</p></td>
+<td><p>The window, each “Fill from” button, the right-click menu, right-drag still zooms, crosshair mode, Esc, the rectangle and its edges, progress and Cancel, the overwrite question, an export of a 7 GB file.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Regression</p></td>
+<td><p>All self-tests pass. Without the new options, the output and the log are the same as <code class="docutils literal notranslate"><span class="pre">main</span></code>.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="decisions-needed">
+<h2>6. Decisions needed<a class="headerlink" href="#decisions-needed" title="Link to this heading">¶</a></h2>
+<ol class="arabic simple">
+<li><p><strong>Full band</strong> exports copy the bytes unchanged. Do you agree, or should the output always
+be one format (for example cf32)?</p></li>
+<li><p><strong>Output rate</strong>: integer decimation only (rate <code class="docutils literal notranslate"><span class="pre">fs</span> <span class="pre">/</span> <span class="pre">D</span></code>), or also an exact rate that you
+type (needs a rational resampler)?</p></li>
+<li><p><strong>Filter</strong>: passband = the selected band and a 25 % transition band (larger file, flat
+band). Or the demod filter (smaller file, edges 6 dB down)?</p></li>
+<li><p><strong>Right-click on the waterfall</strong>: replace ImPlot’s own menu there with the wvt menu, and
+keep right-drag for the box zoom?</p></li>
+<li><p><strong>Cancel</strong> deletes the partial file. Agreed?</p></li>
+<li><p><strong>GPU</strong>: CPU first, and the GPU after #20 is merged?</p></li>
+<li><p><strong>Range</strong>: inside the loaded segment only, or anywhere in the file?</p></li>
+</ol>
+</section>
+<section id="decisions-2026-10-20">
+<h2>7. Decisions (2026-10-20)<a class="headerlink" href="#decisions-2026-10-20" title="Link to this heading">¶</a></h2>
+<p>The user said to go with the recommendations:</p>
+<ol class="arabic simple">
+<li><p><strong>Full band:</strong> the bytes are copied unchanged.</p></li>
+<li><p><strong>Output rate:</strong> integer decimation only (<code class="docutils literal notranslate"><span class="pre">fs</span> <span class="pre">/</span> <span class="pre">D</span></code>).</p></li>
+<li><p><strong>Filter:</strong> the band is the passband, with a 25 % transition band.</p></li>
+<li><p><strong>Right-click on the waterfall:</strong> wvt’s menu replaces ImPlot’s; right-drag keeps the box
+zoom.</p></li>
+<li><p><strong>Cancel</strong> deletes the partial file.</p></li>
+<li><p><strong>GPU:</strong> #20 is merged, so the export uses <code class="docutils literal notranslate"><span class="pre">ChanJob</span></code> / <code class="docutils literal notranslate"><span class="pre">gpuChannelize</span></code> from the start, with
+<code class="docutils literal notranslate"><span class="pre">channelizeCpu</span></code> as the fallback.</p></li>
+<li><p><strong>Range:</strong> inside the loaded segment only.</p></li>
+</ol>
+</section>
+<section id="implementation-notes">
+<h2>8. Implementation notes<a class="headerlink" href="#implementation-notes" title="Link to this heading">¶</a></h2>
+<section id="files">
+<h3>Files<a class="headerlink" href="#files" title="Link to this heading">¶</a></h3>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>File</p></th>
+<th class="head"><p>Change</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/dsp/extract.h</span></code>, <code class="docutils literal notranslate"><span class="pre">src/dsp/extract.cpp</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">ExtractConfig</span></code>, <code class="docutils literal notranslate"><span class="pre">ExtractPlan</span></code>, <code class="docutils literal notranslate"><span class="pre">planExtract</span></code>, <code class="docutils literal notranslate"><span class="pre">defaultExtractPath</span></code>, <code class="docutils literal notranslate"><span class="pre">ExtractJob</span></code>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/app/app_export.cpp</span></code></p></td>
+<td><p>The export window, the fill buttons, the waterfall menu, the crosshair selection, the region on the plots.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/app/app.h</span></code>, <code class="docutils literal notranslate"><span class="pre">src/app/app.cpp</span></code></p></td>
+<td><p>Export state, the <strong>Export</strong> button, Ctrl+E, <code class="docutils literal notranslate"><span class="pre">NoMenus</span></code> and the axis lock on the waterfall, the region in the time plots, <code class="docutils literal notranslate"><span class="pre">fileStart_</span></code>, <code class="docutils literal notranslate"><span class="pre">busy()</span></code> includes the export.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/io/recorder.h</span></code>, <code class="docutils literal notranslate"><span class="pre">src/io/recorder.cpp</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">RecordConfig::exactPath</span></code>, <code class="docutils literal notranslate"><span class="pre">RecordConfig::startTime</span></code> (negative: no <code class="docutils literal notranslate"><span class="pre">core:datetime</span></code>), <code class="docutils literal notranslate"><span class="pre">rawFileExt</span></code>.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/io/iq_file.h</span></code>, <code class="docutils literal notranslate"><span class="pre">src/io/iq_file.cpp</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">FileMetaGuess::startTime</span></code> from <code class="docutils literal notranslate"><span class="pre">core:datetime</span></code>; <code class="docutils literal notranslate"><span class="pre">parseIsoTime</span></code>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/app/main.cpp</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">--extract-out</span></code>, <code class="docutils literal notranslate"><span class="pre">--extract</span></code>, <code class="docutils literal notranslate"><span class="pre">--extract-band</span></code>, <code class="docutils literal notranslate"><span class="pre">--extract-format</span></code>, <code class="docutils literal notranslate"><span class="pre">--extract-overwrite</span></code>, <code class="docutils literal notranslate"><span class="pre">--export-window</span></code>; usage text.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">tools/extract_check.cpp</span></code></p></td>
+<td><p>Self-test (§5).</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">README.md</span></code></p></td>
+<td><p>“Export a region to a new file”, the options, the layout and key tables, the file table.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="differences-from-the-plan">
+<h3>Differences from the plan<a class="headerlink" href="#differences-from-the-plan" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><strong>Filter length:</strong> <code class="docutils literal notranslate"><span class="pre">N</span> <span class="pre">=</span> <span class="pre">⌈5.5</span> <span class="pre">·</span> <span class="pre">fs</span> <span class="pre">/</span> <span class="pre">(0.25</span> <span class="pre">·</span> <span class="pre">BW)⌉</span> <span class="pre">|</span> <span class="pre">1</span></code> and cutoff <code class="docutils literal notranslate"><span class="pre">0.625</span> <span class="pre">·</span> <span class="pre">BW</span> <span class="pre">/</span> <span class="pre">fs</span></code>, as planned.
+In the test, the band edges are 0.002 dB down and a tone outside the band is 92.8 dB down.</p></li>
+<li><p><strong>Full band, big-endian or swapped I/Q:</strong> the copy puts the bytes in the standard order
+(byte and I/Q swaps only), because the SigMF and raw names describe little-endian data in
+I/Q order.</p></li>
+<li><p><strong>No source start time:</strong> the export leaves out <code class="docutils literal notranslate"><span class="pre">core:datetime</span></code> instead of writing the time of
+the export.</p></li>
+<li><p><strong>Crosshair:</strong> the X11 layer does not change the system cursor, so selection mode draws a
+crosshair and a hint inside the waterfall.</p></li>
+<li><p><strong>The region box:</strong> ImPlot’s <code class="docutils literal notranslate"><span class="pre">DragRect</span></code> moves the whole box when you drag inside it, so the
+view does not pan inside the box while the export window is open. Pan outside it.</p></li>
+<li><p><strong><code class="docutils literal notranslate"><span class="pre">--export-window</span></code>:</strong> opens the window at start (the <code class="docutils literal notranslate"><span class="pre">--chan</span></code> band, or the view). It is used
+for the screenshots below.</p></li>
+<li><p><strong>Default name:</strong> <code class="docutils literal notranslate"><span class="pre">&lt;source</span> <span class="pre">name&gt;_&lt;t0&gt;s_&lt;fc&gt;MHz_&lt;rate&gt;Sps</span></code>. The rate and frequency already in
+the source name are removed, because <code class="docutils literal notranslate"><span class="pre">guessMeta</span></code> takes the first match.</p></li>
+<li><p><strong>Window position:</strong> on the right, left of the audio window when that is open.</p></li>
+</ul>
+</section>
+<section id="verification-macos">
+<h3>Verification (macOS)<a class="headerlink" href="#verification-macos" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>The build has no warnings. <code class="docutils literal notranslate"><span class="pre">extract_check</span></code> (36 checks), <code class="docutils literal notranslate"><span class="pre">gpu_check</span></code>, <code class="docutils literal notranslate"><span class="pre">segment_check</span></code>,
+<code class="docutils literal notranslate"><span class="pre">siggen_check</span></code>, <code class="docutils literal notranslate"><span class="pre">audio_check</span></code> and <code class="docutils literal notranslate"><span class="pre">log_check</span></code> pass.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">--help</span></code> differs from <code class="docutils literal notranslate"><span class="pre">main</span></code> only by the new lines. A signal-generator file (<code class="docutils literal notranslate"><span class="pre">--gen-out</span></code>)
+has the same data as <code class="docutils literal notranslate"><span class="pre">main</span></code>, and the same metadata apart from <code class="docutils literal notranslate"><span class="pre">core:datetime</span></code>.</p></li>
+<li><p>Headless: <code class="docutils literal notranslate"><span class="pre">iqgen</span></code> capture, <code class="docutils literal notranslate"><span class="pre">--extract</span> <span class="pre">0.5:1.5</span> <span class="pre">--extract-band</span> <span class="pre">100.25M:100.35M</span></code> gives 125 000
+samples at 125 kS/s, 100.3 MHz; an NFM WAV export of that file plays the tone. A second
+export to the same name fails with status 2.</p></li>
+<li><p>Screenshots (Xvfb in a container, <code class="docutils literal notranslate"><span class="pre">--export-window</span></code>): the window with the view (full band,
+the two time lines on the waterfall) and with <code class="docutils literal notranslate"><span class="pre">--chan</span> <span class="pre">300k:150k</span></code> (band 100.225–100.375 MHz,
+200 kS/s, 295 taps, decimation 10, the box on the waterfall).</p></li>
+</ul>
+</section>
+<section id="gui">
+<h3>GUI<a class="headerlink" href="#gui" title="Link to this heading">¶</a></h3>
+<p>The user tested the GUI on screen (2026-10-20).</p>
+</section>
+</section>
+</section>
+
+        </article>
+      </div>
+      <footer>
+        
+        <div class="related-pages">
+          <a class="next-page" href="apple-gpu-plan.html">
+              <div class="page-info">
+                <div class="context">
+                  <span>Next</span>
+                </div>
+                <div class="title">Plan: Apple GPU support (issue #21)</div>
+              </div>
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+            </a>
+          <a class="prev-page" href="cuda-gpu-plan.html">
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+              <div class="page-info">
+                <div class="context">
+                  <span>Previous</span>
+                </div>
+                
+                <div class="title">Plan: CUDA GPU acceleration (issue #3)</div>
+                
+              </div>
+            </a>
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                Copyright &#169; 2026, Brian Collette
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+            
+          </div>
+          <div class="right-details">
+            
+          </div>
+        </div>
+        
+      </footer>
+    </div>
+    <aside class="toc-drawer">
+      
+      
+      <div class="toc-sticky toc-scroll">
+        <div class="toc-title-container">
+          <span class="toc-title">
+            On this page
+          </span>
+        </div>
+        <div class="toc-tree-container">
+          <div class="toc-tree">
+            <ul>
+<li><a class="reference internal" href="#">Plan: export a region of a file (issue #18)</a><ul>
+<li><a class="reference internal" href="#goal">1. Goal</a></li>
+<li><a class="reference internal" href="#starting-point-main">2. Starting point (<code class="docutils literal notranslate"><span class="pre">main</span></code>)</a></li>
+<li><a class="reference internal" href="#design-decisions">3. Design decisions</a><ul>
+<li><a class="reference internal" href="#the-export-window">The export window</a></li>
+<li><a class="reference internal" href="#the-selection-on-the-waterfall">The selection on the waterfall</a></li>
+<li><a class="reference internal" href="#command-line">Command line</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#implementation-steps">4. Implementation steps</a></li>
+<li><a class="reference internal" href="#testing">5. Testing</a></li>
+<li><a class="reference internal" href="#decisions-needed">6. Decisions needed</a></li>
+<li><a class="reference internal" href="#decisions-2026-10-20">7. Decisions (2026-10-20)</a></li>
+<li><a class="reference internal" href="#implementation-notes">8. Implementation notes</a><ul>
+<li><a class="reference internal" href="#files">Files</a></li>
+<li><a class="reference internal" href="#differences-from-the-plan">Differences from the plan</a></li>
+<li><a class="reference internal" href="#verification-macos">Verification (macOS)</a></li>
+<li><a class="reference internal" href="#gui">GUI</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+          </div>
+        </div>
+      </div>
+      
+      
+    </aside>
+  </div>
+</div><script src="../_static/documentation_options.js?v=5929fcd5"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/scripts/furo.js?v=46bd48cc"></script>
+    </body>
+</html>
