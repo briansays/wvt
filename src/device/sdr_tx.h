@@ -21,7 +21,8 @@ struct TxBand {
 struct TxLimits {
     double maxGain = NAN;       // dB; NaN = no limit but the device's range
     std::vector<TxBand> allow;  // empty = any frequency the device can tune
-    bool any() const { return !std::isnan(maxGain) || !allow.empty(); }
+    bool none = false;          // the allowed bands of two sources do not overlap: no frequency is allowed
+    bool any() const { return !std::isnan(maxGain) || !allow.empty() || none; }
 };
 
 struct TxConfig {

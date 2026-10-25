@@ -225,64 +225,139 @@ bool parseValue(const Spec& spec, const std::string& text, Value& v, std::string
 
 constexpr double kBig = 1e300;
 const char* const kWindows = "rect|hann|hamming|blackman|blackman-harris|flat-top";
+const char* const kWindowNames[] = {"rect", "hann", "hamming", "blackman", "blackman-harris", "flat-top"};
+
+// A number as the file writes it: base units, scientific notation with an
+// exponent that is a multiple of 3 from 1e4 up ("61.44e6", "1024", "-20").
+std::string fmtValue(double v) {
+    char b[48];
+    const double a = std::fabs(v);
+    if (a < 1e4 || !std::isfinite(v)) {
+        snprintf(b, sizeof b, "%.12g", v);
+        return b;
+    }
+    const int e = (int)std::floor(std::log10(a) / 3) * 3;
+    snprintf(b, sizeof b, "%.12ge%d", v / std::pow(10.0, e), e);
+    return b;
+}
+
+std::string onOff(bool b) { return b ? "on" : "off"; }
 
 struct Key {
     const char* name;
     Spec spec;
+    const char* help;  // the comment after the value in --write-config
     std::function<void(WvtConfig&, const Value&)> set;
+    // The value as text, or "" when the key is not set (then --write-config
+    // writes "# name = example" and --show-config writes `meaning`).
+    std::function<std::string(const WvtConfig&)> get;
+    const char* example = nullptr;
+    const char* meaning = nullptr;
+    const char* section = nullptr;  // a heading before this key in --write-config
 };
 
 const std::vector<Key>& keys() {
     static const std::vector<Key> k = {
         // folders
-        {"recording.folder", {Kind::Folder}, [](WvtConfig& c, const Value& v) { c.recordingFolder = v.text; }},
-        {"recording.name", {Kind::Name}, [](WvtConfig& c, const Value& v) { c.recordingName = v.text; }},
-        {"snapshot.folder", {Kind::Folder}, [](WvtConfig& c, const Value& v) { c.snapshotFolder = v.text; }},
-        {"siggen.folder", {Kind::Folder}, [](WvtConfig& c, const Value& v) { c.siggenFolder = v.text; }},
-        {"siggen.name", {Kind::Name}, [](WvtConfig& c, const Value& v) { c.siggenName = v.text; }},
-        {"audio.folder", {Kind::Folder}, [](WvtConfig& c, const Value& v) { c.audioFolder = v.text; }},
+        {"recording.folder", {Kind::Folder}, "", [](WvtConfig& c, const Value& v) { c.recordingFolder = v.text; },
+         [](const WvtConfig& c) { return c.recordingFolder; }, nullptr, nullptr, "folders"},
+        {"recording.name", {Kind::Name}, "file names: <name>_<date>_<time>_<fc>_<rate>",
+         [](WvtConfig& c, const Value& v) { c.recordingName = v.text; }, [](const WvtConfig& c) { return c.recordingName; }},
+        {"snapshot.folder", {Kind::Folder}, "", [](WvtConfig& c, const Value& v) { c.snapshotFolder = v.text; },
+         [](const WvtConfig& c) { return c.snapshotFolder; }},
+        {"siggen.folder", {Kind::Folder}, "", [](WvtConfig& c, const Value& v) { c.siggenFolder = v.text; },
+         [](const WvtConfig& c) { return c.siggenFolder; }},
+        {"siggen.name", {Kind::Name}, "", [](WvtConfig& c, const Value& v) { c.siggenName = v.text; },
+         [](const WvtConfig& c) { return c.siggenName; }},
+        {"audio.folder", {Kind::Folder}, "", [](WvtConfig& c, const Value& v) { c.audioFolder = v.text; },
+         [](const WvtConfig& c) { return c.audioFolder; }},
         // file formats
-        {"recording.format", {Kind::Choice, 0, 0, "sigmf|raw"}, [](WvtConfig& c, const Value& v) { c.recordingSigmf = v.choice == 0; }},
-        {"recording.sample", {Kind::Choice, 0, 0, "native|cf32"}, [](WvtConfig& c, const Value& v) { c.recordingCf32 = v.choice == 1; }},
-        {"recording.max_seconds", {Kind::Number, 0, kBig}, [](WvtConfig& c, const Value& v) { c.recordingMaxSeconds = v.num; }},
-        {"siggen.format", {Kind::Choice, 0, 0, "sigmf|raw"}, [](WvtConfig& c, const Value& v) { c.siggenSigmf = v.choice == 0; }},
-        {"siggen.sample", {Kind::Choice, 0, 0, "cf32|ci16|ci8|cu8"},
+        {"recording.format", {Kind::Choice, 0, 0, "sigmf|raw"}, "sigmf | raw",
+         [](WvtConfig& c, const Value& v) { c.recordingSigmf = v.choice == 0; },
+         [](const WvtConfig& c) { return std::string(c.recordingSigmf ? "sigmf" : "raw"); }, nullptr, nullptr, "file formats"},
+        {"recording.sample", {Kind::Choice, 0, 0, "native|cf32"}, "native (cu8 RTL-SDR, ci16 USRP/BB60/Sidekiq) | cf32",
+         [](WvtConfig& c, const Value& v) { c.recordingCf32 = v.choice == 1; },
+         [](const WvtConfig& c) { return std::string(c.recordingCf32 ? "cf32" : "native"); }},
+        {"recording.max_seconds", {Kind::Number, 0, kBig}, "0 = no limit",
+         [](WvtConfig& c, const Value& v) { c.recordingMaxSeconds = v.num; },
+         [](const WvtConfig& c) { return fmtValue(c.recordingMaxSeconds); }},
+        {"siggen.format", {Kind::Choice, 0, 0, "sigmf|raw"}, "sigmf | raw",
+         [](WvtConfig& c, const Value& v) { c.siggenSigmf = v.choice == 0; },
+         [](const WvtConfig& c) { return std::string(c.siggenSigmf ? "sigmf" : "raw"); }},
+        {"siggen.sample", {Kind::Choice, 0, 0, "cf32|ci16|ci8|cu8"}, "cf32 | ci16 | ci8 | cu8",
          [](WvtConfig& c, const Value& v) {
              const SampleFormat f[] = {SampleFormat::CF32, SampleFormat::CI16, SampleFormat::CI8, SampleFormat::CU8};
              c.siggenSample = f[v.choice];
+         },
+         [](const WvtConfig& c) {
+             return std::string(c.siggenSample == SampleFormat::CI16 ? "ci16"
+                                : c.siggenSample == SampleFormat::CI8 ? "ci8"
+                                : c.siggenSample == SampleFormat::CU8 ? "cu8"
+                                                                       : "cf32");
          }},
-        {"export.band_sample", {Kind::Choice, 0, 0, "cf32|ci16"}, [](WvtConfig& c, const Value& v) { c.exportBandCi16 = v.choice == 1; }},
+        {"export.band_sample", {Kind::Choice, 0, 0, "cf32|ci16"}, "region export with a band filter: cf32 | ci16",
+         [](WvtConfig& c, const Value& v) { c.exportBandCi16 = v.choice == 1; },
+         [](const WvtConfig& c) { return std::string(c.exportBandCi16 ? "ci16" : "cf32"); }},
         // file waterfall
-        {"fft.size", {Kind::Whole, 64, 65536}, [](WvtConfig& c, const Value& v) { c.fftSize = (int)v.whole; }},
-        {"fft.window", {Kind::Choice, 0, 0, kWindows}, [](WvtConfig& c, const Value& v) { c.fftWindow = (WindowType)v.choice; }},
-        {"fft.overlap_pct", {Kind::Number, 0, 95}, [](WvtConfig& c, const Value& v) { c.fftOverlapPct = v.num; }},
-        {"display.colormap", {Kind::Text}, [](WvtConfig& c, const Value& v) { c.colormap = lower(v.text); }},
-        {"display.db_min", {Kind::Number, -400, 400, nullptr, true},
-         [](WvtConfig& c, const Value& v) { c.dbMin = v.isAuto ? NAN : v.num; }},
-        {"display.db_max", {Kind::Number, -400, 400, nullptr, true},
-         [](WvtConfig& c, const Value& v) { c.dbMax = v.isAuto ? NAN : v.num; }},
+        {"fft.size", {Kind::Whole, 64, 65536}, "power of two, 64 to 65536", [](WvtConfig& c, const Value& v) { c.fftSize = (int)v.whole; },
+         [](const WvtConfig& c) { return std::to_string(c.fftSize); }, nullptr, nullptr, "file waterfall FFT"},
+        {"fft.window", {Kind::Choice, 0, 0, kWindows}, "rect | hann | hamming | blackman | blackman-harris | flat-top",
+         [](WvtConfig& c, const Value& v) { c.fftWindow = (WindowType)v.choice; },
+         [](const WvtConfig& c) { return std::string(kWindowNames[(int)c.fftWindow]); }},
+        {"fft.overlap_pct", {Kind::Number, 0, 95}, "0 to 95", [](WvtConfig& c, const Value& v) { c.fftOverlapPct = v.num; },
+         [](const WvtConfig& c) { return fmtValue(c.fftOverlapPct); }},
+        {"display.colormap", {Kind::Text}, "an ImPlot colormap: viridis | plasma | hot | cool | jet | twilight | greys ...",
+         [](WvtConfig& c, const Value& v) { c.colormap = lower(v.text); }, [](const WvtConfig& c) { return c.colormap; }},
+        {"display.db_min", {Kind::Number, -400, 400, nullptr, true}, "", [](WvtConfig& c, const Value& v) { c.dbMin = v.isAuto ? NAN : v.num; },
+         [](const WvtConfig& c) { return std::isnan(c.dbMin) ? std::string() : fmtValue(c.dbMin); }, "auto", "auto"},
+        {"display.db_max", {Kind::Number, -400, 400, nullptr, true}, "", [](WvtConfig& c, const Value& v) { c.dbMax = v.isAuto ? NAN : v.num; },
+         [](const WvtConfig& c) { return std::isnan(c.dbMax) ? std::string() : fmtValue(c.dbMax); }, "auto", "auto"},
         // live spectrum
-        {"live.fft_size", {Kind::Whole, 64, 65536}, [](WvtConfig& c, const Value& v) { c.liveFftSize = (int)v.whole; }},
-        {"live.window", {Kind::Choice, 0, 0, kWindows}, [](WvtConfig& c, const Value& v) { c.liveWindow = (WindowType)v.choice; }},
-        {"live.avg", {Kind::Whole, 1, 64, nullptr, true}, [](WvtConfig& c, const Value& v) { c.liveAvg = v.isAuto ? 0 : (int)v.whole; }},
-        {"live.rows_per_sec", {Kind::Number, 1, 100}, [](WvtConfig& c, const Value& v) { c.liveRowsPerSec = v.num; }},
-        {"live.max_columns", {Kind::Whole, 64, 8192}, [](WvtConfig& c, const Value& v) { c.liveMaxColumns = (int)v.whole; }},
-        {"live.history_rows", {Kind::Whole, 64, 4096}, [](WvtConfig& c, const Value& v) { c.liveHistoryRows = (int)v.whole; }},
+        {"live.fft_size", {Kind::Whole, 64, 65536}, "power of two, 64 to 65536",
+         [](WvtConfig& c, const Value& v) { c.liveFftSize = (int)v.whole; }, [](const WvtConfig& c) { return std::to_string(c.liveFftSize); },
+         nullptr, nullptr, "live spectrum"},
+        {"live.window", {Kind::Choice, 0, 0, kWindows}, "", [](WvtConfig& c, const Value& v) { c.liveWindow = (WindowType)v.choice; },
+         [](const WvtConfig& c) { return std::string(kWindowNames[(int)c.liveWindow]); }},
+        {"live.avg", {Kind::Whole, 1, 64, nullptr, true}, "auto (all new samples) | 1 to 64",
+         [](WvtConfig& c, const Value& v) { c.liveAvg = v.isAuto ? 0 : (int)v.whole; },
+         [](const WvtConfig& c) { return c.liveAvg > 0 ? std::to_string(c.liveAvg) : std::string("auto"); }},
+        {"live.rows_per_sec", {Kind::Number, 1, 100}, "1 to 100", [](WvtConfig& c, const Value& v) { c.liveRowsPerSec = v.num; },
+         [](const WvtConfig& c) { return fmtValue(c.liveRowsPerSec); }},
+        {"live.max_columns", {Kind::Whole, 64, 8192}, "64 to 8192; more bins are max-pooled",
+         [](WvtConfig& c, const Value& v) { c.liveMaxColumns = (int)v.whole; },
+         [](const WvtConfig& c) { return std::to_string(c.liveMaxColumns); }},
+        {"live.history_rows", {Kind::Whole, 64, 4096}, "64 to 4096", [](WvtConfig& c, const Value& v) { c.liveHistoryRows = (int)v.whole; },
+         [](const WvtConfig& c) { return std::to_string(c.liveHistoryRows); }},
         // general
-        {"gpu", {Kind::Choice, 0, 0, "auto|on|off"}, [](WvtConfig& c, const Value& v) { c.gpu = v.text; }},
-        {"gpu.device", {Kind::Whole, 0, 63}, [](WvtConfig& c, const Value& v) { c.gpuDevice = (int)v.whole; }},
-        {"ui.scale", {Kind::Number, 0.5, 4}, [](WvtConfig& c, const Value& v) { c.uiScale = v.num; }},
-        {"ui.geometry", {Kind::Size, 100, 16384},
+        {"gpu", {Kind::Choice, 0, 0, "auto|on|off"}, "auto | on | off   (env WVT_GPU)", [](WvtConfig& c, const Value& v) { c.gpu = v.text; },
+         [](const WvtConfig& c) { return c.gpu; }, nullptr, nullptr, "general"},
+        {"gpu.device", {Kind::Whole, 0, 63}, "", [](WvtConfig& c, const Value& v) { c.gpuDevice = (int)v.whole; },
+         [](const WvtConfig& c) { return c.gpuDevice < 0 ? std::string() : std::to_string(c.gpuDevice); }, "0", "the best GPU"},
+        {"ui.scale", {Kind::Number, 0.5, 4}, "0.5 to 4         (env WVT_SCALE)", [](WvtConfig& c, const Value& v) { c.uiScale = v.num; },
+         [](const WvtConfig& c) { return fmtValue(c.uiScale); }},
+        {"ui.geometry", {Kind::Size, 100, 16384}, "window size WxH",
          [](WvtConfig& c, const Value& v) {
              c.uiWidth = v.w;
              c.uiHeight = v.h;
-         }},
-        {"log.folder", {Kind::Folder}, [](WvtConfig& c, const Value& v) { c.logFolder = v.text; }},
+         },
+         [](const WvtConfig& c) { return std::to_string(c.uiWidth) + "x" + std::to_string(c.uiHeight); }},
+        {"log.folder", {Kind::Folder}, "(env WVT_LOG_DIR)", [](WvtConfig& c, const Value& v) { c.logFolder = v.text; },
+         [](const WvtConfig& c) { return c.logFolder; }, "~/wvt/logs/", "$WVT_LOG_DIR, then $TMPDIR, then /tmp"},
         // transmit limits
-        {"tx.max_gain_db", {Kind::Number, -100, 200}, [](WvtConfig& c, const Value& v) { c.txMaxGainDb = v.num; }},
-        {"tx.allow", {Kind::Bands}, [](WvtConfig& c, const Value& v) { c.txAllow = v.bands; }},
+        {"tx.max_gain_db", {Kind::Number, -100, 200}, "", [](WvtConfig& c, const Value& v) { c.txMaxGainDb = v.num; },
+         [](const WvtConfig& c) { return std::isnan(c.txMaxGainDb) ? std::string() : fmtValue(c.txMaxGainDb); }, "60", "no limit",
+         "transmit limits (only stricter than the environment and the options)"},
+        {"tx.allow", {Kind::Bands}, "", [](WvtConfig& c, const Value& v) { c.txAllow = v.bands; },
+         [](const WvtConfig& c) {
+             if (c.txNone) return std::string("(no frequency: the allowed bands do not overlap)");
+             std::string s;
+             for (const auto& [lo, hi] : c.txAllow) s += (s.empty() ? "" : ", ") + fmtValue(lo) + ":" + fmtValue(hi);
+             return s;
+         },
+         "902e6:928e6, 2.4e9:2.5e9", "any frequency"},
         // SDRs
-        {"sdr.default", {Kind::Text}, [](WvtConfig& c, const Value& v) { c.sdrDefault = lower(v.text); }},
+        {"sdr.default", {Kind::Text}, "", [](WvtConfig& c, const Value& v) { c.sdrDefault = lower(v.text); },
+         [](const WvtConfig& c) { return c.sdrDefault; }, "b205", "the first device found", "SDRs"},
     };
     return k;
 }
@@ -294,31 +369,56 @@ struct ProfileKey {
     Spec spec;
     const char* drivers;
     std::function<void(SdrProfile&, const Value&)> set;
+    std::function<std::string(const SdrProfile&)> get;  // "" = not set
+    const char* help = "";
 };
+
+template <class T, class F>
+std::string opt(const std::optional<T>& o, F f) {
+    return o ? f(*o) : std::string();
+}
 
 const std::vector<ProfileKey>& profileKeys() {
     static const std::vector<ProfileKey> k = {
-        {"type", {Kind::Text}, nullptr, [](SdrProfile& p, const Value& v) { p.type = lower(v.text); }},
-        {"serial", {Kind::Text}, nullptr, [](SdrProfile& p, const Value& v) { p.serial = v.text; }},
-        {"args", {Kind::Text}, nullptr, [](SdrProfile& p, const Value& v) { p.args = v.text; }},
-        {"fc", {Kind::Number, 0, 1e12}, nullptr, [](SdrProfile& p, const Value& v) { p.fc = v.num; }},
-        {"rate", {Kind::Number, 1, 1e10}, nullptr, [](SdrProfile& p, const Value& v) { p.rate = v.num; }},
-        {"gain_db", {Kind::Number, -100, 200}, "uhd,skiq,rtlsdr,sim", [](SdrProfile& p, const Value& v) { p.gainDb = v.num; }},
-        {"ref_level_dbm", {Kind::Number, -130, 20}, "bb", [](SdrProfile& p, const Value& v) { p.refLevelDbm = v.num; }},
-        {"agc", {Kind::Bool}, "uhd,skiq,rtlsdr,sim", [](SdrProfile& p, const Value& v) { p.agc = v.flag; }},
-        {"port", {Kind::Text}, "uhd,skiq", [](SdrProfile& p, const Value& v) { p.port = v.text; }},
+        {"type", {Kind::Text}, nullptr, [](SdrProfile& p, const Value& v) { p.type = lower(v.text); },
+         [](const SdrProfile& p) { return p.type; }},
+        {"serial", {Kind::Text}, nullptr, [](SdrProfile& p, const Value& v) { p.serial = v.text; },
+         [](const SdrProfile& p) { return p.serial; }},
+        {"args", {Kind::Text}, nullptr, [](SdrProfile& p, const Value& v) { p.args = v.text; },
+         [](const SdrProfile& p) { return p.args; }},
+        {"fc", {Kind::Number, 0, 1e12}, nullptr, [](SdrProfile& p, const Value& v) { p.fc = v.num; },
+         [](const SdrProfile& p) { return opt(p.fc, fmtValue); }},
+        {"rate", {Kind::Number, 1, 1e10}, nullptr, [](SdrProfile& p, const Value& v) { p.rate = v.num; },
+         [](const SdrProfile& p) { return opt(p.rate, fmtValue); }},
+        {"gain_db", {Kind::Number, -100, 200}, "uhd,skiq,rtlsdr,sim", [](SdrProfile& p, const Value& v) { p.gainDb = v.num; },
+         [](const SdrProfile& p) { return opt(p.gainDb, fmtValue); }},
+        {"ref_level_dbm", {Kind::Number, -130, 20}, "bb", [](SdrProfile& p, const Value& v) { p.refLevelDbm = v.num; },
+         [](const SdrProfile& p) { return opt(p.refLevelDbm, fmtValue); }},
+        {"agc", {Kind::Bool}, "uhd,skiq,rtlsdr,sim", [](SdrProfile& p, const Value& v) { p.agc = v.flag; },
+         [](const SdrProfile& p) { return opt(p.agc, onOff); }},
+        {"port", {Kind::Text}, "uhd,skiq", [](SdrProfile& p, const Value& v) { p.port = v.text; },
+         [](const SdrProfile& p) { return p.port.value_or(""); }},
         {"bandwidth", {Kind::Number, 1, 1e10, nullptr, true}, "uhd,bb,skiq",
-         [](SdrProfile& p, const Value& v) { p.bandwidth = v.isAuto ? 0 : v.num; }},
-        {"ref", {Kind::Choice, 0, 0, "internal|external|gpsdo"}, "uhd", [](SdrProfile& p, const Value& v) { p.ref = v.text; }},
-        {"channel", {Kind::Whole, 0, 63}, "uhd", [](SdrProfile& p, const Value& v) { p.channel = (int)v.whole; }},
-        {"atten", {Kind::Choice, 0, 0, "0|10|20|30", true}, "bb",
-         [](SdrProfile& p, const Value& v) { p.atten = v.isAuto ? -1 : v.choice; }},
-        {"amp", {Kind::Whole, 0, 3, nullptr, true}, "bb", [](SdrProfile& p, const Value& v) { p.amp = v.isAuto ? -1 : (int)v.whole; }},
-        {"ext_ref", {Kind::Bool}, "bb,skiq", [](SdrProfile& p, const Value& v) { p.extRef = v.flag; }},
-        {"direct_sampling", {Kind::Choice, 0, 0, "off|i|q"}, "rtlsdr",
-         [](SdrProfile& p, const Value& v) { p.directSampling = v.choice; }},
-        {"bias_tee", {Kind::Bool}, "rtlsdr", [](SdrProfile& p, const Value& v) { p.biasTee = v.flag; }},
-        {"ppm", {Kind::Whole, -1000, 1000}, "rtlsdr", [](SdrProfile& p, const Value& v) { p.ppm = (int)v.whole; }},
+         [](SdrProfile& p, const Value& v) { p.bandwidth = v.isAuto ? 0 : v.num; },
+         [](const SdrProfile& p) { return opt(p.bandwidth, [](double b) { return b > 0 ? fmtValue(b) : std::string("auto"); }); }},
+        {"ref", {Kind::Choice, 0, 0, "internal|external|gpsdo"}, "uhd", [](SdrProfile& p, const Value& v) { p.ref = v.text; },
+         [](const SdrProfile& p) { return p.ref.value_or(""); }},
+        {"channel", {Kind::Whole, 0, 63}, "uhd", [](SdrProfile& p, const Value& v) { p.channel = (int)v.whole; },
+         [](const SdrProfile& p) { return opt(p.channel, [](int c) { return std::to_string(c); }); }},
+        {"atten", {Kind::Choice, 0, 0, "0|10|20|30", true}, "bb", [](SdrProfile& p, const Value& v) { p.atten = v.isAuto ? -1 : v.choice; },
+         [](const SdrProfile& p) { return opt(p.atten, [](int a) { return a < 0 ? std::string("auto") : std::to_string(a * 10); }); }},
+        {"amp", {Kind::Whole, 0, 3, nullptr, true}, "bb", [](SdrProfile& p, const Value& v) { p.amp = v.isAuto ? -1 : (int)v.whole; },
+         [](const SdrProfile& p) { return opt(p.amp, [](int a) { return a < 0 ? std::string("auto") : std::to_string(a); }); }},
+        {"ext_ref", {Kind::Bool}, "bb,skiq", [](SdrProfile& p, const Value& v) { p.extRef = v.flag; },
+         [](const SdrProfile& p) { return opt(p.extRef, onOff); }},
+        {"direct_sampling", {Kind::Choice, 0, 0, "off|i|q"}, "rtlsdr", [](SdrProfile& p, const Value& v) { p.directSampling = v.choice; },
+         [](const SdrProfile& p) {
+             return opt(p.directSampling, [](int d) { return std::string(d == 1 ? "i" : d == 2 ? "q" : "off"); });
+         }},
+        {"bias_tee", {Kind::Bool}, "rtlsdr", [](SdrProfile& p, const Value& v) { p.biasTee = v.flag; },
+         [](const SdrProfile& p) { return opt(p.biasTee, onOff); }},
+        {"ppm", {Kind::Whole, -1000, 1000}, "rtlsdr", [](SdrProfile& p, const Value& v) { p.ppm = (int)v.whole; },
+         [](const SdrProfile& p) { return opt(p.ppm, [](int n) { return std::to_string(n); }); }},
     };
     return k;
 }
@@ -742,4 +842,101 @@ void configApplyProfile(const SdrProfile& p, StreamConfig& c, const std::vector<
     if (p.biasTee && use("bias_tee")) c.biasTee = *p.biasTee;
     if (p.ppm && use("ppm")) c.ppm = *p.ppm;
     if (p.directSampling && use("direct_sampling")) c.directSampling = *p.directSampling;
+}
+
+namespace {
+// A value as the file writes it: in quotes when it has "#", a quote, a
+// backslash or spaces at an end.
+std::string quoted(const std::string& v) {
+    const bool need = v.find_first_of("#\"\\") != std::string::npos ||
+                      (!v.empty() && (std::isspace((unsigned char)v.front()) || std::isspace((unsigned char)v.back())));
+    if (!need) return v;
+    std::string q = "\"";
+    for (char c : v) {
+        if (c == '"' || c == '\\') q += '\\';
+        q += c;
+    }
+    return q + "\"";
+}
+
+// "name = value", the value from column 21, then "# comment" from column 42.
+std::string fileLine(const std::string& name, const std::string& value, const std::string& comment, bool commented) {
+    std::string s = (commented ? "# " : "") + name;
+    s.resize(std::max<size_t>(s.size() + 1, 20), ' ');
+    s += "= " + value;
+    if (!comment.empty()) {
+        s.resize(std::max<size_t>(s.size() + 1, 41), ' ');
+        s += "# " + comment;
+    }
+    return s + "\n";
+}
+
+std::string sectionLine(const std::string& title) {
+    std::string s = "\n# ---- " + title + " ";
+    s.resize(std::max<size_t>(s.size(), 80), '-');
+    return s + "\n";
+}
+}  // namespace
+
+std::string configFileText(const WvtConfig& cfg) {
+    std::string out =
+        "# wvt configuration file (issue #88)\n"
+        "# One \"key = value\" per line. \"#\" starts a comment (at the line start or after a space).\n"
+        "# Numbers are in base units (Hz, S/s, s, dB), in scientific notation: 61.44e6 = 61.44 MS/s.\n"
+        "# \"~\" is the home folder.\n"
+        "# Order: built-in default < this file < environment variable < command-line option.\n";
+    for (const Key& k : keys()) {
+        if (k.section) out += sectionLine(k.section);
+        if (std::string(k.name) == "sdr.default")
+            out += "# sdr.default: a type (the first profile and the first device of that type)\n"
+                   "# or a profile index. Not set: the first device that the scan finds.\n";
+        const std::string v = k.get(cfg);
+        out += v.empty() ? fileLine(k.name, k.example ? k.example : "", k.help, true) : fileLine(k.name, quoted(v), k.help, false);
+    }
+    std::string types;
+    for (const auto& t : configSdrTypes()) types += (types.empty() ? "" : " ") + std::string(t.first);
+    out += "\n# Profiles: sdr.N.<field>, N from 0 to 99. A device uses the first profile whose type\n"
+           "# fits it and whose serial and args, where set, match it.\n# Types: " + types + ".\n";
+    for (const SdrProfile& p : cfg.sdrs) {
+        out += "\n# Profile " + std::to_string(p.index) + "\n";
+        for (const ProfileKey& f : profileKeys())
+            if (const std::string v = f.get(p); !v.empty())
+                out += fileLine("sdr." + std::to_string(p.index) + "." + f.field, quoted(v), "", false);
+    }
+    if (cfg.sdrs.empty())
+        out += "\n# Profile 0, an example:\n" +
+               fileLine("sdr.0.type", "b205", "", true) + fileLine("sdr.0.serial", "31DDAD7", "only this unit", true) +
+               fileLine("sdr.0.fc", "100e6", "", true) + fileLine("sdr.0.rate", "61.44e6", "", true) +
+               fileLine("sdr.0.gain_db", "0", "BB60: sdr.0.ref_level_dbm", true) + fileLine("sdr.0.agc", "off", "", true) +
+               fileLine("sdr.0.port", "TX/RX", "USRP antenna or Sidekiq RF port", true) +
+               fileLine("sdr.0.bandwidth", "auto", "", true) + fileLine("sdr.0.ref", "internal", "USRP: internal | external | gpsdo", true) +
+               fileLine("sdr.0.channel", "0", "USRP", true) +
+               "# Also: atten, amp (BB60), ext_ref (BB60, Sidekiq), direct_sampling, bias_tee, ppm (RTL-SDR).\n";
+    return out;
+}
+
+std::string configShowText(const WvtConfig& cfg, const std::map<std::string, std::string>& sources) {
+    auto from = [&](const std::string& key) {
+        if (auto it = sources.find(key); it != sources.end()) return it->second;
+        if (auto it = cfg.origin.find(key); it != cfg.origin.end()) return it->second;
+        return std::string("default");
+    };
+    auto line = [](const std::string& key, const std::string& value, const std::string& src) {
+        std::string s = key;
+        s.resize(std::max<size_t>(s.size(), 22), ' ');
+        s += "= " + value;
+        s.resize(std::max<size_t>(s.size() + 2, 56), ' ');
+        return s + src + "\n";
+    };
+    std::string out;
+    for (const Key& k : keys()) {
+        const std::string v = k.get(cfg);
+        out += line(k.name, v.empty() ? std::string("(") + (k.meaning ? k.meaning : "not set") + ")" : v, from(k.name));
+    }
+    for (const SdrProfile& p : cfg.sdrs)
+        for (const ProfileKey& f : profileKeys()) {
+            const std::string key = "sdr." + std::to_string(p.index) + "." + f.field;
+            if (const std::string v = f.get(p); !v.empty()) out += line(key, v, from(key));
+        }
+    return out;
 }

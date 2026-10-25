@@ -10,8 +10,9 @@ these folders that is set:
 
 1. The `--log-dir DIR` option.
 2. The `WVT_LOG_DIR` environment variable.
-3. The `TMPDIR` environment variable.
-4. `/tmp`.
+3. The `log.folder` key of the [configuration file](config.md).
+4. The `TMPDIR` environment variable.
+5. `/tmp`.
 
 The file gets all messages, at all levels, also when you do not use `-v`. To write no file, use
 `--no-log-file`.

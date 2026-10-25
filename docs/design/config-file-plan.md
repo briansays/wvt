@@ -1,8 +1,7 @@
 # Plan: run-time configuration file (issue #88)
 
-Status: stages 1 to 3 of 4 implemented (2026-10-25) on `88-config-file`. wvt reads the file for
-the folders, the formats, the FFT and live values, the GPU, the UI scale and size, the log folder,
-the SDR profiles and `sdr.default`. The transmit limits are parsed but not used yet.
+Status: implemented (2026-10-25) on `88-config-file`, in four stages. The user page is
+[Configuration file](../config.md).
 
 ## 1. Goal
 

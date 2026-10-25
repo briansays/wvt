@@ -372,6 +372,35 @@ int main() {
               "BB60: the reference level is the gain; agc does not apply and is not used");
     }
 
+    printf("--write-config and --show-config\n");
+    {
+        const std::string def = configFileText(WvtConfig{});
+        const Parsed d = parse(def);
+        check(d.warnings.empty() && configFileText(d.cfg) == def, "the defaults: written, read back, the same text" + list(d));
+        check(def.find("\nfft.size            = 1024") != std::string::npos &&
+                  def.find("# display.db_min    = auto") != std::string::npos &&
+                  def.find("# sdr.0.type        = b205") != std::string::npos &&
+                  def.find("recording.max_seconds = 0") != std::string::npos,
+              "keys with values, unset keys and the profile example as comments");
+        const Parsed ex = parse(kExample);
+        const std::string t = configFileText(ex.cfg);
+        const Parsed back = parse(t);
+        check(back.warnings.empty() && configFileText(back.cfg) == t && back.cfg.sdrs.size() == 5 &&
+                  back.cfg.sdrs[0].rate == 61.44e6 && back.cfg.sdrs[1].args == "addr=192.168.40.2" && back.cfg.sdrDefault == "b205",
+              "the example: written, read back, the same" + list(back));
+        check(t.find("sdr.0.rate          = 61.44e6") != std::string::npos && t.find("sdr.1.fc            = 2.45e9") != std::string::npos,
+              "numbers in scientific notation: 61.44e6, 2.45e9");
+        const Parsed q = parse("sdr.0.type = x4\nsdr.0.args = \"#0\"\nrecording.name = \" a\\\"b\"\n");
+        const Parsed q2 = parse(configFileText(q.cfg));
+        check(q2.warnings.empty() && q2.cfg.sdrs[0].args == "#0" && q2.cfg.recordingName == " a\"b",
+              "values with #, a quote or a leading space are written in quotes" + list(q2));
+        const std::string show = configShowText(ex.cfg, {{"gpu", "$WVT_GPU"}});
+        check(show.find("fft.size") != std::string::npos && show.find("t.conf:14") != std::string::npos &&
+                  show.find("$WVT_GPU") != std::string::npos && show.find("(auto)") != std::string::npos &&
+                  show.find("sdr.3.serial") != std::string::npos,
+              "--show-config: values, file lines, sources, unset meanings, profiles");
+    }
+
     printf("options\n");
     {
         std::string a0 = "wvt", a1 = "--config", a2 = "/x.conf", a3 = "file.iq", a4 = "--no-config", a5 = "--config=/y.conf";

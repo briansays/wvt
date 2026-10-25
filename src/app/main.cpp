@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <map>
 #include <string>
 #include <thread>
 #include <unistd.h>
@@ -395,7 +396,7 @@ int main(int argc, char** argv) {
     TxConfig txc;
     bool haveGen = false, openGen = false, haveGenOut = false, haveTx = false, haveOffset = false, haveSweep = false;
     bool txDryRun = false, txConfirm = false;
-    TxLimits cliLimits;  // over WVT_TX_MAX_GAIN / WVT_TX_ALLOW
+    TxLimits cliLimits;  // with WVT_TX_MAX_GAIN / WVT_TX_ALLOW and the configuration file: the strictest applies
     std::string playFile, chainFile;
     std::vector<std::string> chainAdds;
     int chainLoops = -1;
@@ -408,6 +409,7 @@ int main(int argc, char** argv) {
     // The configuration file (issue #88) comes first: it sets the defaults that
     // the environment and the options then change, the log folder among them.
     std::vector<char*> args(argv, argv + argc);
+    const std::vector<std::string> cmdLine(argv, argv + argc);  // before the option parsers take theirs
     WvtConfig cfg;
     std::vector<std::string> cfgWarnings;
     std::string cfgOption, cfgFile, cfgErr;
@@ -573,6 +575,13 @@ int main(int argc, char** argv) {
     cli.note(nullptr, "--no-log-file", nullptr, "don't write wvt_log_<date>_<time>.log");
     cli.note(nullptr, "--config", "FILE", "configuration file (default $WVT_CONFIG, then ~/.config/wvt/wvt.conf)");
     cli.note(nullptr, "--no-config", nullptr, "read no configuration file: the built-in defaults");
+    std::string writeConfig;
+    bool showConfig = false, forceWrite = false;
+    cli.add(nullptr, "--write-config", "FILE", "write a configuration file with every key (- = the terminal) and exit",
+            text(writeConfig));
+    cli.add(nullptr, "--force", nullptr, "with --write-config: replace an existing file", flag(forceWrite));
+    cli.add(nullptr, "--show-config", nullptr, "print each setting, its value and where it came from, and exit",
+            flag(showConfig));
     cli.action("-h", "--help", "show this help", [&](const char*) {
         exitNow = 0;
         showHelp = true;
@@ -967,10 +976,91 @@ int main(int argc, char** argv) {
         LOG_ERROR("main", "%s", err.c_str());
         return 2;
     }
-    if (!std::isnan(cliLimits.maxGain)) txc.limits.maxGain = cliLimits.maxGain;
-    if (!cliLimits.allow.empty()) txc.limits.allow = cliLimits.allow;
+    // The configuration file, the environment and the options each only add limits (issue #88).
+    {
+        TxLimits fileLimits;
+        fileLimits.maxGain = cfg.txMaxGainDb;
+        for (const auto& [lo, hi] : cfg.txAllow) fileLimits.allow.push_back({lo, hi});
+        txc.limits = txLimitsStrictest(txLimitsStrictest(fileLimits, txc.limits), cliLimits);
+    }
     if (!positional.empty()) path = positional.back();
     scale = std::clamp(scale, 0.5f, 4.f);
+    if (!writeConfig.empty()) {
+        // The file's values over the defaults; not the environment or the options.
+        const std::string text = configFileText(cfg);
+        if (writeConfig == "-") {
+            fputs(text.c_str(), stdout);
+            return 0;
+        }
+        const std::string out = expandHome(writeConfig);
+        if (access(out.c_str(), F_OK) == 0 && !forceWrite) {
+            LOG_ERROR("config", "%s exists; add --force to replace it", out.c_str());
+            return 2;
+        }
+        std::string err;
+        if (const size_t slash = out.rfind('/'); slash != std::string::npos && slash > 0 && !makeDirs(out.substr(0, slash), err)) {
+            LOG_ERROR("config", "%s", err.c_str());
+            return 1;
+        }
+        FILE* f = fopen(out.c_str(), "w");
+        bool ok = f && fputs(text.c_str(), f) >= 0;
+        if (f && fclose(f) != 0) ok = false;
+        if (!ok) {
+            LOG_ERROR("config", "cannot write %s", out.c_str());
+            return 1;
+        }
+        logStatus("config", "wrote %s", out.c_str());
+        return 0;
+    }
+    if (showConfig) {
+        // The values in effect, and where each came from: an option, the environment, the file or the default.
+        std::map<std::string, std::string> from;
+        auto given = [&](const char* opt) {
+            const std::string o = opt;
+            return std::any_of(cmdLine.begin() + 1, cmdLine.end(), [&](const std::string& a) { return a == o || a.rfind(o + "=", 0) == 0; });
+        };
+        auto source = [&](const char* key, const char* env, const char* opt) {
+            if (opt && given(opt)) from[key] = opt;
+            else if (const char* e = env ? envVar(env) : nullptr; e && *e) from[key] = std::string("$") + env;
+        };
+        WvtConfig eff = cfg;
+        eff.uiScale = scale;
+        eff.uiWidth = winW;
+        eff.uiHeight = winH;
+        eff.gpu = gpuModeName(gpuMode);
+        eff.gpuDevice = gpuDevice;
+        eff.logFolder = lc.dir;
+        if (const char* e = envVar("WVT_LOG_DIR"); lc.dir.empty() && e && *e) eff.logFolder = e;
+        eff.recordingSigmf = rc.sigmf;
+        eff.recordingCf32 = rc.cf32;
+        eff.recordingMaxSeconds = rc.maxSeconds;
+        if (haveRecordFormat) eff.siggenSigmf = rc.sigmf;
+        eff.siggenSample = gc.fmt;
+        eff.exportBandCi16 = extractCi16;
+        eff.txMaxGainDb = txc.limits.maxGain;
+        eff.txAllow.clear();
+        for (const TxBand& b : txc.limits.allow) eff.txAllow.emplace_back(b.lo, b.hi);
+        eff.txNone = txc.limits.none;
+        source("ui.scale", "WVT_SCALE", "--scale");
+        source("ui.geometry", nullptr, "--geometry");
+        source("gpu", "WVT_GPU", "--gpu");
+        source("gpu.device", nullptr, "--gpu-device");
+        source("log.folder", "WVT_LOG_DIR", "--log-dir");
+        source("recording.format", nullptr, "--record-format");
+        source("recording.sample", nullptr, "--record-sample");
+        source("recording.max_seconds", nullptr, "--record-duration");
+        source("siggen.format", nullptr, "--record-format");
+        source("siggen.sample", nullptr, "--gen-sample");
+        source("export.band_sample", nullptr, "--extract-format");
+        for (const char* k : {"tx.max_gain_db", "tx.allow"}) {
+            const bool tx = std::string(k) == "tx.allow";
+            const bool env = envVar(tx ? "WVT_TX_ALLOW" : "WVT_TX_MAX_GAIN") && *envVar(tx ? "WVT_TX_ALLOW" : "WVT_TX_MAX_GAIN");
+            if (env || given(tx ? "--tx-allow" : "--tx-max-gain")) from[k] = "the strictest of the file, the environment and the options";
+        }
+        printf("# configuration file: %s\n", noConfig ? "none (--no-config)" : cfgFile.empty() ? "none" : cfgFile.c_str());
+        fputs(configShowText(eff, from).c_str(), stdout);
+        return 0;
+    }
     if (ov.haveFc) gp.fc = txc.fc = ov.fc;
     if (ov.haveRate) gp.rate = ov.rate;
     if (haveSweep && gp.mode != GenMode::CW && gp.mode != GenMode::Pulsed) {

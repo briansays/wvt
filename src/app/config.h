@@ -72,6 +72,7 @@ struct WvtConfig {
     // Transmit limits; they only make the other limits stricter
     double txMaxGainDb = NAN;                         // NaN = no limit from the file
     std::vector<std::pair<double, double>> txAllow;  // bands in Hz; empty = no limit from the file
+    bool txNone = false;  // --show-config only: the bands of the sources do not overlap (never read from a file)
 
     // SDRs
     std::string sdrDefault;  // a type (configSdrTypes) or a profile index; empty = the first device found
@@ -141,6 +142,16 @@ std::string configJoin(const std::string& folder, const std::string& name);
 // A number in base units, plain or in scientific notation ("61.44e6", "-20").
 // No SI suffixes: "61.44M" fails, and hint gets "use 61.44e6".
 bool parseConfigNumber(const std::string& s, double& out, std::string& hint);
+
+// The text of a configuration file for cfg (--write-config): every key with
+// its value and a comment, in sections. A key that is not set is a comment
+// line with an example. Parsing the text gives cfg again.
+std::string configFileText(const WvtConfig& cfg);
+
+// One line per key (--show-config): the name, the value in effect and where
+// it came from: sources[key] if there ("$WVT_GPU", "--scale"), else the file
+// line (cfg.origin), else "default".
+std::string configShowText(const WvtConfig& cfg, const std::map<std::string, std::string>& sources);
 
 // All key names, for help and "did you mean" (sdr.N.* as "sdr.N.<field>").
 std::vector<std::string> configKeyNames();

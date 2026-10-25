@@ -730,6 +730,9 @@ set_tests_properties(clipboard_check PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME session_roundtrip COMMAND ${CMAKE_COMMAND} -DWVT=$<TARGET_FILE:wvt> -DIQGEN=$<TARGET_FILE:iqgen>
   -DDIR=${CMAKE_BINARY_DIR}/session_roundtrip -P ${CMAKE_SOURCE_DIR}/tools/session_roundtrip.cmake)
 set_tests_properties(session_roundtrip PROPERTIES SKIP_REGULAR_EXPRESSION "skipped")
+# The configuration file (issue #88): the defaults written and shown without a file.
+add_test(NAME config_write COMMAND wvt --no-log-file --no-config --write-config -)
+add_test(NAME config_show COMMAND wvt --no-log-file --no-config --show-config)
 # The option table: --help fails if an option name is defined twice.
 add_test(NAME cli_help COMMAND wvt --no-log-file --help)
 # --tx-dry-run checks the transmit limits and opens no device (issue #49).
