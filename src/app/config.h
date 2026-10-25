@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "device/sdr_device.h"
 #include "dsp/dsp.h"
 #include "io/iq_file.h"
 
@@ -85,6 +86,34 @@ struct WvtConfig {
 const std::vector<std::pair<const char*, const char*>>& configSdrTypes();
 // The driver of a type, or nullptr for an unknown type. Any case.
 const char* configSdrDriver(const std::string& type);
+
+// True when `type` names this device: the same driver, and the model fits.
+// "b205" fits "B205mini" (USRP models by prefix); a Sidekiq part must be
+// equal ("x4" is not "X40"); "usrp", "bb60", "sidekiq", "rtlsdr" and "sim" fit
+// every device of their driver. An entry without a device ("none detected")
+// fits nothing.
+bool configTypeFits(const std::string& type, const DeviceInfo& d);
+
+// The profile for a device: the first profile whose type fits it and whose
+// serial and args, where set, match it (args: each "k=v" of the profile is in
+// the device's args). nullptr when none does.
+const SdrProfile* configProfileFor(const WvtConfig& cfg, const DeviceInfo& d);
+
+// True when the listed device is the one that --device DRIVER:ARGS names:
+// the same driver, and ARGS empty (the first device), equal to its args, a
+// part of them, or its serial.
+bool configSameDevice(const DeviceInfo& listed, const std::string& driver, const std::string& args);
+
+// The device that sdr.default asks for: the index in `devices` of the first
+// one that profile N matches (sdr.default = N) or that the type fits
+// (sdr.default = b205). -1 when sdr.default is empty or nothing fits.
+int configDefaultDevice(const WvtConfig& cfg, const std::vector<DeviceInfo>& devices);
+
+// Copies the fields that the profile sets into c, except those named in
+// `keep` (fields set on the command line: "fc", "rate", "gain", "agc", "port",
+// "bandwidth", "ref", "channel", "atten", "amp", "ext_ref", "bias_tee", "ppm",
+// "direct_sampling"). For a BB60 the gain is the reference level.
+void configApplyProfile(const SdrProfile& p, StreamConfig& c, const std::vector<std::string>& keep = {});
 
 // Parses the text of a configuration file into cfg. Keys that the text does
 // not set keep their values. `name` goes in the messages ("wvt.conf:12: ...").

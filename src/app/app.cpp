@@ -38,7 +38,7 @@ float dbGroupW() {
 }
 }  // namespace
 
-App::App(X11Window& win, const WvtConfig& cfg) : win_(win) {
+App::App(X11Window& win, const WvtConfig& cfg) : win_(win), cfg_(cfg) {
     auto wake = [this] { win_.wake(); };
     wfWorker_ = std::make_unique<Worker<WaterfallReq, WaterfallRes>>(computeWaterfall, wake, "waterfall");
     dmWorker_ = std::make_unique<Worker<DemodReq, DemodRes>>(computeDemod, wake, "demod");

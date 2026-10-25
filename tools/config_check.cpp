@@ -104,7 +104,7 @@ sdr.2.amp           = auto
 sdr.2.bandwidth     = 27e6
 sdr.2.ext_ref       = off
 sdr.3.type          = x4
-sdr.3.args          = "#0"               # "#" in quotes is not a comment
+sdr.3.serial        = 8N2Y
 sdr.3.fc            = 3.5e9
 sdr.3.rate          = 61.44e6
 sdr.3.gain_db       = 10
@@ -151,7 +151,7 @@ int main() {
                   "X310: serial, quoted args, channel, fc");
             check(bb.refLevelDbm == -20.0 && bb.atten == -1 && bb.amp == -1 && bb.bandwidth == 27e6 && bb.extRef == false,
                   "BB60: ref level, atten and amp auto, bandwidth, ext_ref");
-            check(k.type == "x4" && k.args == "#0", "Sidekiq X4: \"#0\" in quotes is the value");
+            check(k.type == "x4" && k.serial == "8N2Y", "Sidekiq X4: by serial");
             check(r.directSampling == 2 && r.agc == true && r.biasTee == false && r.ppm == 0, "RTL-SDR: direct sampling q");
             check(!b.channel && !b.ppm, "fields that are not set stay unset");
         }
@@ -303,6 +303,73 @@ int main() {
         setenv("HOME", "/home/u", 1);
         check(configPath("", req) == "/home/u/.config/wvt/wvt.conf" && !req, "then ~/.config/wvt/wvt.conf");
         check(configPath("~/c.conf", req) == "/home/u/c.conf", "~ in --config");
+    }
+
+    printf("matching devices\n");
+    {
+        const DeviceInfo b205{"uhd", "serial=31DDAD7", "USRP B205mini (serial 31DDAD7)", "B205mini", "31DDAD7"};
+        const DeviceInfo x310{"uhd", "addr=192.168.40.2", "USRP X310", "X310", "31F4A2C"};
+        const DeviceInfo x310b{"uhd", "addr=192.168.40.3", "USRP X310", "X310", "31F4A2D"};
+        const DeviceInfo x4{"skiq", "8N2Y", "Sidekiq X4 serial 8N2Y", "X4", "8N2Y"};
+        const DeviceInfo x40{"skiq", "9A1B", "Sidekiq X40", "X40", "9A1B"};
+        const DeviceInfo m2{"skiq", "#1", "Sidekiq M.2-2280", "M.2-2280", ""};
+        const DeviceInfo bb{"bb", "12345", "Signal Hound BB60C", "BB60C", "12345"};
+        const DeviceInfo noUhd{"uhd", "", "USRP (none detected)", "", ""};
+        const DeviceInfo sim{"sim", "", "Simulator", "sim", ""};
+        check(configTypeFits("b205", b205) && configTypeFits("usrp", b205) && !configTypeFits("b210", b205) &&
+                  !configTypeFits("x4", b205),
+              "b205 and usrp fit a B205mini; b210 and x4 do not");
+        check(configTypeFits("x4", x4) && !configTypeFits("x4", x40) && configTypeFits("sidekiq", x40) &&
+                  configTypeFits("m2-2280", m2) && !configTypeFits("m2", m2),
+              "Sidekiq parts: equal names only (x4 is not X40, m2 is not M.2-2280)");
+        check(configTypeFits("bb60", bb) && configTypeFits("sim", sim) && !configTypeFits("usrp", noUhd) &&
+                  !configTypeFits("b205", noUhd),
+              "bb60, sim; an entry without a device fits nothing");
+
+        const Parsed p = parse(kExample);
+        const SdrProfile* pb = configProfileFor(p.cfg, b205);
+        const SdrProfile* px = configProfileFor(p.cfg, x310);
+        check(pb && pb->index == 0 && px && px->index == 1, "the example: the B205mini gets sdr.0, the X310 sdr.1");
+        check(!configProfileFor(p.cfg, x310b), "another X310 (other serial and address): no profile");
+        const SdrProfile* pk = configProfileFor(p.cfg, x4);
+        check(pk && pk->index == 3, "the X4 with serial 8N2Y gets sdr.3");
+        const DeviceInfo card0{"skiq", "#0", "Sidekiq card 0", "X4", ""};
+        const Parsed byCard = parse("sdr.0.type = x4\nsdr.0.args = \"#0\"   # quoted: not a comment\n");
+        check(byCard.warnings.empty() && configProfileFor(byCard.cfg, card0) && !configProfileFor(byCard.cfg, x4),
+              "args \"#0\": a card listed by its number");
+        const Parsed bySerial = parse("sdr.4.type = usrp\nsdr.4.serial = 31ddad7\n");
+        check(configProfileFor(bySerial.cfg, b205) && !configProfileFor(bySerial.cfg, x310), "serial: any case");
+
+        const std::vector<DeviceInfo> list = {noUhd, x310, b205, bb, sim};
+        check(configDefaultDevice(p.cfg, list) == 2, "sdr.default = b205: the B205mini, not the first device");
+        check(configDefaultDevice(parse("sdr.default = bb60\n").cfg, list) == 3, "sdr.default = bb60");
+        check(configDefaultDevice(parse(std::string(kExample) + "sdr.default = 1\n").cfg, list) == 1,
+              "sdr.default = 1: the device that profile 1 matches");
+        check(configDefaultDevice(parse("sdr.default = x4\n").cfg, list) == -1 && configDefaultDevice(WvtConfig{}, list) == -1,
+              "no such device, or no sdr.default: -1");
+
+        check(configSameDevice(b205, "uhd", "") && configSameDevice(b205, "uhd", "serial=31DDAD7") &&
+                  configSameDevice(b205, "uhd", "31ddad7") && configSameDevice(x310, "uhd", "addr=192.168.40.2") &&
+                  !configSameDevice(x310, "uhd", "addr=192.168.40.9") && !configSameDevice(noUhd, "uhd", "") &&
+                  !configSameDevice(bb, "uhd", ""),
+              "--device: the first device, by args, by serial");
+
+        StreamConfig c;
+        c.driver = "uhd";
+        configApplyProfile(*pb, c);
+        check(c.fc == 100e6 && c.rate == 61.44e6 && c.gain == 0 && !c.agc && c.antenna == "TX/RX" && c.bandwidth == 0 &&
+                  c.ref == "internal",
+              "apply sdr.0 to a USRP");
+        StreamConfig k;
+        k.driver = "uhd";
+        configApplyProfile(*pb, k, {"rate", "gain", "agc", "port"});
+        check(k.rate == 2.4e6 && k.gain == 30 && k.antenna.empty() && k.fc == 100e6, "options win: rate, gain, port kept");
+        const Parsed bbP = parse("sdr.0.type = bb60\nsdr.0.ref_level_dbm = -30\nsdr.0.agc = on\nsdr.0.atten = 20\n");
+        StreamConfig cb;
+        cb.driver = "bb";
+        configApplyProfile(bbP.cfg.sdrs[0], cb);
+        check(cb.gain == -30 && !cb.agc && cb.bbAtten == 2 && warned(bbP, {"sdr.0.agc does not apply"}),
+              "BB60: the reference level is the gain; agc does not apply and is not used");
     }
 
     printf("options\n");

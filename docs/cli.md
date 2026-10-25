@@ -44,6 +44,13 @@ For the keys, refer to the [design record](design/config-file-plan.md).
 Without `--config`, wvt reads `$WVT_CONFIG`. If that is not set, wvt reads
 `$XDG_CONFIG_HOME/wvt/wvt.conf` or `~/.config/wvt/wvt.conf`, if the file exists.
 
+The SDR profiles of the file (`sdr.N.*`) also apply on the command line:
+
+- With `--device`, the profile of that device sets its frequency, rate, gain and the other device
+  values. The options win over the profile.
+- `--no-gui --record` without `--device` records from the `sdr.default` device.
+- `--list-devices` shows `[config sdr.N]` after each device that has a profile.
+
 ## Logging
 
 | Option | Function | Page |

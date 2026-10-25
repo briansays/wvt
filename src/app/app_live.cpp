@@ -113,13 +113,21 @@ void App::pollScan() {
     // stay the device that streams.
     const bool running = live_ && live_->running();
     if (!devPicked_ && (first || !found) && !running && !devices_.empty()) {
-        selectDevice(devices_.front());
+        // The configuration file's sdr.default, else the first device.
+        const int want = configDefaultDevice(cfg_, devices_);
+        if (want < 0 && first && !cfg_.sdrDefault.empty())
+            LOG_INFO("config", "sdr.default %s: no such device found; using %s", cfg_.sdrDefault.c_str(),
+                     devices_.front().label.c_str());
+        selectDevice(devices_[want >= 0 ? (size_t)want : 0]);
         devPicked_ = false;
     }
 }
 
 void App::selectDevice(const DeviceInfo& d) {
     const bool driverChanged = d.driver != devCfg_.driver;
+    // The built-in devCfg_ is the simulator: choosing it first is a change too.
+    const bool deviceChanged = !devSelected_ || driverChanged || d.args != devCfg_.args;
+    devSelected_ = true;
     if (d.args != devCfg_.args || driverChanged) devCaps_ = {};
     devPicked_ = true;
     // The BB60's "gain" is a reference level in dBm: a value from another driver means nothing.
@@ -140,6 +148,21 @@ void App::selectDevice(const DeviceInfo& d) {
         devCfg_.channel = 0;
         devCfg_.ref.clear();
     }
+    // The configuration file's profile for this device (issue #88).
+    const SdrProfile* p = deviceChanged ? configProfileFor(cfg_, d) : nullptr;
+    if (!p) return;
+    devCfg_.antenna = antenna_;
+    configApplyProfile(*p, devCfg_);
+    std::string err, warn;
+    const double snapped = snapSampleRate(d.driver, devCfg_.rate);
+    if (std::fabs(snapped - devCfg_.rate) > 1)
+        LOG_INFO("config", "sdr.%d rate %s: using %s", p->index, fmtSI(devCfg_.rate, "S/s", 6).c_str(), fmtSI(snapped, "S/s", 6).c_str());
+    devCfg_.rate = snapped;
+    if (!checkSampleRate(d.driver, devCfg_.rate, err, warn)) LOG_WARN("config", "sdr.%d: %s", p->index, err.c_str());
+    const GainRange g = defaultGain(d.driver);
+    devCfg_.gain = std::clamp(devCfg_.gain, g.min, g.max);
+    snprintf(antenna_, sizeof antenna_, "%s", devCfg_.antenna.c_str());
+    LOG_INFO("config", "using sdr.%d (%s) for %s", p->index, p->type.c_str(), d.label.c_str());
 }
 
 bool App::restartDevice() {
@@ -163,8 +186,8 @@ bool App::restartDevice() {
 
 bool App::startDevice(const StreamConfig& cfg) {
     if (!liveMode_) enterLive();
-    devCfg_ = cfg;
-    devPicked_ = true;
+    devCfg_ = cfg;  // main() applied the SDR profile under the options
+    devPicked_ = devSelected_ = true;
     snprintf(devArgs_, sizeof devArgs_, "%s", cfg.args.c_str());
     snprintf(antenna_, sizeof antenna_, "%s", cfg.antenna.c_str());
     return restartDevice();

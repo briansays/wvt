@@ -259,7 +259,7 @@ void enumerateRtlSdr(std::vector<DeviceInfo>& out) {
         if (serial[0]) label += " (serial " + std::string(serial) + ")";
         // Select by serial when it is unique, so the choice survives replugging.
         std::string args = serial[0] && rtlsdr_get_index_by_serial(serial) == (int)i ? serial : std::to_string(i);
-        out.push_back({"rtlsdr", args, label});
+        out.push_back({"rtlsdr", args, label, "RTL-SDR", serial});
     }
 }
 

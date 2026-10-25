@@ -373,6 +373,8 @@ private:
     bool devicesScanned_ = false;
     std::future<std::vector<DeviceInfo>> scanJob_;  // a device scan in the background (a network scan takes ~0.5 s)
     bool devPicked_ = false;  // a device was chosen (command line or the list): a scan does not change it
+    WvtConfig cfg_;           // the configuration file: SDR profiles and sdr.default (issue #88)
+    bool devSelected_ = false;  // selectDevice ran: devCfg_ is a chosen device, not the built-in default
     DeviceCaps devCaps_;      // of the device last opened (antennas, channels, ranges)
     char devArgs_[256] = {};
     char antenna_[32] = {};

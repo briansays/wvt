@@ -34,6 +34,10 @@ struct DeviceInfo {
     std::string driver;  // as in StreamConfig::driver
     std::string args;    // value for StreamConfig::args that selects this device
     std::string label;   // for display
+    // The model ("B205mini", "X310", "BB60C", "X4", "RTL-SDR") and the serial
+    // number, when the scan knows them. The configuration file's SDR profiles
+    // match on them (issue #88).
+    std::string product, serial;
 };
 
 struct GainRange {
@@ -98,7 +102,8 @@ public:
 // Drivers compiled into this binary.
 std::vector<std::string> sdrDrivers();
 // Lists attached devices. UHD probes the network too, so this can take a second.
-std::vector<DeviceInfo> enumerateDevices();
+// `only`: list the devices of this driver only ("uhd", "bb", ...).
+std::vector<DeviceInfo> enumerateDevices(const std::string& only = "");
 // Opens and configures (rate, frequency, gain...) but does not start streaming.
 std::unique_ptr<SdrDevice> openDevice(const StreamConfig& cfg, std::string& err);
 // Checks a sample rate against what the driver supports. `warn` gets a

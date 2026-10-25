@@ -72,34 +72,43 @@ DeviceInfo uhdDeviceInfo(const std::string& found) {
     if (!serial.empty()) detail += (detail.empty() ? "serial " : ", serial ") + serial;
     if (!name.empty()) detail += (detail.empty() ? "" : ", ") + name;
     if (!detail.empty()) label += " (" + detail + ")";
-    return {"uhd", args, label};
+    return {"uhd", args, label, product, serial};
 }
 
-std::vector<DeviceInfo> enumerateDevices() {
+std::vector<DeviceInfo> enumerateDevices(const std::string& only) {
     std::vector<DeviceInfo> out;
+    auto want = [&](const char* driver) { return only.empty() || only == driver; };
     // Undetected drivers still get an entry, so Start explains what is wrong.
 #ifdef WVT_HAVE_RTLSDR
-    size_t before = out.size();
-    enumerateRtlSdr(out);
-    if (out.size() == before) out.push_back({"rtlsdr", "", "RTL-SDR (none detected)"});
+    if (want("rtlsdr")) {
+        const size_t before = out.size();
+        enumerateRtlSdr(out);
+        if (out.size() == before) out.push_back({"rtlsdr", "", "RTL-SDR (none detected)", "", ""});
+    }
 #endif
 #ifdef WVT_HAVE_UHD
-    size_t beforeUhd = out.size();
-    enumerateUhd(out);
-    if (out.size() == beforeUhd) out.push_back({"uhd", "", "USRP (none detected)"});
+    if (want("uhd")) {
+        const size_t before = out.size();
+        enumerateUhd(out);
+        if (out.size() == before) out.push_back({"uhd", "", "USRP (none detected)", "", ""});
+    }
 #endif
 #ifdef WVT_HAVE_BB
-    size_t beforeBb = out.size();
-    enumerateBb(out);
-    if (out.size() == beforeBb) out.push_back({"bb", "", "Signal Hound BB60 (none detected)"});
+    if (want("bb")) {
+        const size_t before = out.size();
+        enumerateBb(out);
+        if (out.size() == before) out.push_back({"bb", "", "Signal Hound BB60 (none detected)", "", ""});
+    }
 #endif
 #ifdef WVT_HAVE_SKIQ
-    size_t beforeSkiq = out.size();
-    enumerateSkiq(out);
-    if (out.size() == beforeSkiq) out.push_back({"skiq", "", "Sidekiq (none detected)"});
+    if (want("skiq")) {
+        const size_t before = out.size();
+        enumerateSkiq(out);
+        if (out.size() == before) out.push_back({"skiq", "", "Sidekiq (none detected)", "", ""});
+    }
 #endif
-    out.push_back({"sim", "", "Simulator (synthetic test signals)"});
-    out.push_back({"siggen", "", "Signal generator loopback"});
+    if (want("sim")) out.push_back({"sim", "", "Simulator (synthetic test signals)", "sim", ""});
+    if (want("siggen")) out.push_back({"siggen", "", "Signal generator loopback", "siggen", ""});
     return out;
 }
 

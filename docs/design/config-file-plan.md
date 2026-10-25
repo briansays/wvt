@@ -1,8 +1,8 @@
 # Plan: run-time configuration file (issue #88)
 
-Status: stages 1 and 2 of 4 implemented (2026-10-25) on `88-config-file`. wvt reads the file for
-the folders, the formats, the FFT and live values, the GPU, the UI scale and size, and the log
-folder. The SDR keys and the transmit limits are parsed but not used yet.
+Status: stages 1 to 3 of 4 implemented (2026-10-25) on `88-config-file`. wvt reads the file for
+the folders, the formats, the FFT and live values, the GPU, the UI scale and size, the log folder,
+the SDR profiles and `sdr.default`. The transmit limits are parsed but not used yet.
 
 ## 1. Goal
 
@@ -78,6 +78,11 @@ The rows marked **agreed** differ from the issue text; the owner agreed to them 
   match before the device opens. The UHD and Sidekiq scans already know it; the BB60 and RTL-SDR
   scans have a fixed model.
 - `--no-gui --record` with no `--device` uses `sdr.default`.
+- A Sidekiq card with a serial number is listed by its serial, not by its card number. A profile
+  for it matches on `serial`; `args = "#N"` matches only a card that has no serial.
+- With `--device`, wvt scans that driver (and only that driver) to know the model and serial, when
+  a profile for that driver exists. The options that set device values are kept out of the
+  profile.
 - The log folder key is read before `logInit`, so the config file is parsed first, and its
   warnings are kept and logged after `logInit`.
 - `tools/config_check.cpp`: comments, quotes, `#` in values, spaces, scientific notation and the
@@ -186,9 +191,9 @@ sdr.2.amp           = auto               # auto | 0 to 3
 sdr.2.bandwidth     = 27e6
 sdr.2.ext_ref       = off
 
-# Profile 3: Sidekiq X4, card 0, RF port J1.
+# Profile 3: Sidekiq X4 by its serial (as --list-devices shows it), RF port J1.
 sdr.3.type          = x4
-sdr.3.args          = "#0"               # "#" in quotes is not a comment
+sdr.3.serial        = 8N2Y
 sdr.3.fc            = 3.5e9
 sdr.3.rate          = 61.44e6
 sdr.3.gain_db       = 10

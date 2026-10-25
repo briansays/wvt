@@ -649,3 +649,97 @@ std::string configJoin(const std::string& folder, const std::string& name) {
     if (folder.empty()) return name;
     return folder.back() == '/' ? folder + name : cat(folder, "/", name);
 }
+
+namespace {
+// "M.2-2280" -> "m2-2280", "B205mini" -> "b205mini"
+std::string modelKey(const std::string& product) {
+    std::string k;
+    for (unsigned char c : product)
+        if (c != '.' && c != ' ') k += (char)std::tolower(c);
+    return k;
+}
+
+// Each comma-separated item of `want` ("addr=1.2.3.4", "#0") is an item of `have`.
+bool argsContain(const std::string& have, const std::string& want) {
+    const auto items = split(have, ',');
+    for (const auto& w : split(want, ',')) {
+        const std::string t = trim(w);
+        if (!t.empty() && std::find(items.begin(), items.end(), t) == items.end()) return false;
+    }
+    return true;
+}
+
+bool sameText(const std::string& a, const std::string& b) { return lower(a) == lower(b); }
+}  // namespace
+
+bool configTypeFits(const std::string& type, const DeviceInfo& d) {
+    const char* driver = configSdrDriver(type);
+    if (!driver || d.driver != driver) return false;
+    if (d.product.empty() && d.args.empty()) return false;  // "none detected"
+    const std::string t = lower(type);
+    if (t == "usrp" || t == "bb60" || t == "sidekiq" || t == "rtlsdr" || t == "sim") return true;
+    const std::string m = modelKey(d.product);
+    if (d.driver == "skiq") return m == t;
+    return m.rfind(t, 0) == 0;  // USRP: "b205" fits "b205mini"
+}
+
+const SdrProfile* configProfileFor(const WvtConfig& cfg, const DeviceInfo& d) {
+    for (const SdrProfile& p : cfg.sdrs) {
+        if (p.type.empty() || !configTypeFits(p.type, d)) continue;
+        if (!p.serial.empty() && !sameText(p.serial, d.serial) && !argsContain(d.args, "serial=" + p.serial) &&
+            !sameText(p.serial, d.args))
+            continue;
+        if (!p.args.empty() && !argsContain(d.args, p.args)) continue;
+        return &p;
+    }
+    return nullptr;
+}
+
+bool configSameDevice(const DeviceInfo& listed, const std::string& driver, const std::string& args) {
+    if (listed.driver != driver || (listed.product.empty() && listed.args.empty())) return false;
+    return args.empty() || listed.args == args || argsContain(listed.args, args) ||
+           (!listed.serial.empty() && (sameText(args, listed.serial) || sameText(args, "serial=" + listed.serial)));
+}
+
+int configDefaultDevice(const WvtConfig& cfg, const std::vector<DeviceInfo>& devices) {
+    const std::string& want = cfg.sdrDefault;
+    if (want.empty()) return -1;
+    const bool index = std::all_of(want.begin(), want.end(), [](unsigned char c) { return std::isdigit(c); });
+    const SdrProfile* prof = nullptr;
+    if (index) {
+        const int n = (int)std::strtol(want.c_str(), nullptr, 10);
+        for (const SdrProfile& p : cfg.sdrs)
+            if (p.index == n && !p.type.empty()) prof = &p;
+        if (!prof) return -1;
+    }
+    for (size_t i = 0; i < devices.size(); ++i) {
+        if (index ? configProfileFor(cfg, devices[i]) == prof : configTypeFits(want, devices[i])) return (int)i;
+    }
+    return -1;
+}
+
+void configApplyProfile(const SdrProfile& p, StreamConfig& c, const std::vector<std::string>& keep) {
+    // Not a field that the options set, and one that applies to this driver
+    // (the parse warned about the others).
+    auto use = [&](const char* field) {
+        if (std::find(keep.begin(), keep.end(), field) != keep.end()) return false;
+        for (const auto& k : profileKeys())
+            if (std::string(k.field) == field) return appliesTo(k.drivers, c.driver);
+        return true;
+    };
+    if (p.fc && use("fc")) c.fc = *p.fc;
+    if (p.rate && use("rate")) c.rate = *p.rate;
+    if (p.gainDb && use("gain_db") && use("gain")) c.gain = *p.gainDb;
+    if (p.refLevelDbm && use("ref_level_dbm") && use("gain")) c.gain = *p.refLevelDbm;
+    if (p.agc && use("agc") && use("gain")) c.agc = *p.agc;
+    if (p.port && use("port")) c.antenna = *p.port;
+    if (p.bandwidth && use("bandwidth")) c.bandwidth = *p.bandwidth;
+    if (p.ref && use("ref")) c.ref = *p.ref;
+    if (p.channel && use("channel")) c.channel = *p.channel;
+    if (p.atten && use("atten")) c.bbAtten = *p.atten;
+    if (p.amp && use("amp")) c.bbAmp = *p.amp;
+    if (p.extRef && use("ext_ref")) c.extRef = *p.extRef;
+    if (p.biasTee && use("bias_tee")) c.biasTee = *p.biasTee;
+    if (p.ppm && use("ppm")) c.ppm = *p.ppm;
+    if (p.directSampling && use("direct_sampling")) c.directSampling = *p.directSampling;
+}
