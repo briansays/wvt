@@ -19,13 +19,16 @@ inline std::string errnoText(int err) { return std::generic_category().message(e
 // never calls setenv(); the tests do, from their only thread.
 inline const char* envVar(const char* name) { return getenv(name); }  // NOLINT(concurrency-mt-unsafe)
 
+// mkdir -p. False (err set) when a folder cannot be made.
+bool makeDirs(const std::string& dir, std::string& err);
+
 enum class LogLevel { Debug, Info, Warn, Error, Off };
 
 struct LogConfig {
     LogLevel console = LogLevel::Warn;
     bool verbose = false;  // -v given: timestamped console lines instead of "wvt: ..."
     bool file = true;
-    std::string dir;  // empty: $WVT_LOG_DIR, then $TMPDIR, then /tmp
+    std::string dir;  // empty: $WVT_LOG_DIR, then $TMPDIR, then /tmp; made if missing
     std::string commandLine;  // written to the file header
     std::string build;        // git commit and version tag, for the file header; empty = "unknown"
     FILE* consoleStream = nullptr;  // nullptr = stderr (tests redirect it)

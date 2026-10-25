@@ -1,5 +1,6 @@
 #include "common/log.h"
 
+#include <sys/stat.h>
 #include <sys/utsname.h>
 #include <unistd.h>
 
@@ -105,6 +106,23 @@ void closeFile() {
 
 }  // namespace
 
+bool makeDirs(const std::string& dir, std::string& err) {
+    if (dir.empty()) return true;
+    std::string cur;
+    size_t i = 0;
+    while (i <= dir.size()) {
+        size_t j = dir.find('/', i);
+        if (j == std::string::npos) j = dir.size();
+        cur = dir.substr(0, j);
+        if (!cur.empty() && mkdir(cur.c_str(), 0755) != 0 && errno != EEXIST) {
+            err = "cannot create directory '" + cur + "': " + errnoText(errno);
+            return false;
+        }
+        i = j + 1;
+    }
+    return true;
+}
+
 bool parseLogLevel(const char* s, LogLevel& out) {
     std::string v;
     for (const char* p = s; *p; ++p) v += (char)tolower((unsigned char)*p);
@@ -171,7 +189,7 @@ void logInit(const LogConfig& cfg) {
         g_consoleMin = (int)cfg.console;
         if (cfg.file) {
             std::string dir = logDir(cfg), e;
-            g_file = openUnique(dir, g_path, e);
+            if (makeDirs(dir, e)) g_file = openUnique(dir, g_path, e);
             if (g_file) {
                 writeHeader(cfg);
                 g_fileMin = (int)LogLevel::Debug;
