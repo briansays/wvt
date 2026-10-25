@@ -25,6 +25,7 @@ folders.
 |---|---|
 | `src/app/main.cpp` | The table of command-line options, ImGui and ImPlot setup, the event loop |
 | `src/app/cli.*` | The table-driven command-line parser: it runs the option handlers and makes `--help` from the same table |
+| `src/app/config.*` | The run-time configuration file: the line parser, the key table and the SDR profiles (issue #88) |
 | `src/app/platform_x11.*` | The Xlib window, input, clipboard, and GLX or software presentation |
 | `src/app/sw_renderer.*` | The software rasterizer for ImGui draw data |
 | `src/app/app.*` | The UI: toolbar, linked plots, parameter panels |
@@ -103,6 +104,7 @@ folders.
 | `tools/segment_check.cpp` | The self-check for the time segment rules |
 | `tools/extract_check.cpp` | The self-check for the region export |
 | `tools/snapshot_check.cpp` | The self-check for the plot snapshots |
+| `tools/config_check.cpp` | The self-check for the configuration file parser |
 | `tools/device_check.cpp` | The self-check for the device list and the sample rate rules |
 | `tools/bb_check.cpp` | The self-check for the BB60 backend |
 | `tools/bb_sim/` | A simulated BB60D behind the `bb_api` calls that wvt uses |

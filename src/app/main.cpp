@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <map>
 #include <string>
 #include <thread>
 #include <unistd.h>
@@ -18,6 +19,7 @@
 #include "app/app.h"
 #include "common/build_info.h"
 #include "app/cli.h"
+#include "app/config.h"
 #include "dsp/extract.h"
 #include "gpu/gpu.h"
 #include "imgui.h"
@@ -387,13 +389,14 @@ int main(int argc, char** argv) {
     };
     StreamConfig dev;
     bool haveDevice = false, haveRecord = false, noGui = false, haveGain = false;
+    std::vector<std::string> devGiven;  // device fields set by options; an SDR profile leaves them (issue #88)
     RecordConfig rc;
     WaveformParams gp;
     FileGenConfig gc;
     TxConfig txc;
     bool haveGen = false, openGen = false, haveGenOut = false, haveTx = false, haveOffset = false, haveSweep = false;
     bool txDryRun = false, txConfirm = false;
-    TxLimits cliLimits;  // over WVT_TX_MAX_GAIN / WVT_TX_ALLOW
+    TxLimits cliLimits;  // with WVT_TX_MAX_GAIN / WVT_TX_ALLOW and the configuration file: the strictest applies
     std::string playFile, chainFile;
     std::vector<std::string> chainAdds;
     int chainLoops = -1;
@@ -403,27 +406,65 @@ int main(int argc, char** argv) {
     bool haveAudio = false;
     std::string audioOut, audioDevice;
     double audioVol = -6;
-    float scale = 1.f;
-    int winW = 1600, winH = 950;
+    // The configuration file (issue #88) comes first: it sets the defaults that
+    // the environment and the options then change, the log folder among them.
+    std::vector<char*> args(argv, argv + argc);
+    const std::vector<std::string> cmdLine(argv, argv + argc);  // before the option parsers take theirs
+    WvtConfig cfg;
+    std::vector<std::string> cfgWarnings;
+    std::string cfgOption, cfgFile, cfgErr;
+    bool noConfig = false;
+    if (configTakeArgs(args, cfgOption, noConfig, cfgErr) && !noConfig) {
+        bool required = false;
+        cfgFile = configPath(cfgOption, required);
+        if (required || access(cfgFile.c_str(), F_OK) == 0) {
+            if (!loadConfigFile(cfgFile, cfg, cfgWarnings, cfgErr) && !required) {
+                cfgWarnings.push_back(cfgErr);  // the default file exists but cannot be read
+                cfgErr.clear();
+            }
+        } else {
+            cfgFile.clear();  // no file: the built-in defaults
+        }
+    }
+    rc.sigmf = cfg.recordingSigmf;
+    rc.cf32 = cfg.recordingCf32;
+    rc.maxSeconds = cfg.recordingMaxSeconds;
+    gc.fmt = cfg.siggenSample;
+    extractCi16 = cfg.exportBandCi16;
+    bool haveRecordFormat = false;  // --record-format also sets the generator file format
+
+    float scale = (float)cfg.uiScale;
+    int winW = cfg.uiWidth, winH = cfg.uiHeight;
     if (const char* e = envVar("WVT_SCALE"); e && *e) {
         double x;
         if (parseSI(e, x) && x >= 0.5 && x <= 4) scale = (float)x;
         else LOG_WARN("main", "WVT_SCALE=%s is not a number from 0.5 to 4; using 1", e);
     }
     GpuMode gpuMode = GpuMode::Auto;
-    int gpuDevice = -1;
+    parseGpuMode(cfg.gpu.c_str(), gpuMode);  // the key table checked the value
+    int gpuDevice = cfg.gpuDevice;
 
     // Logging options come out of argv first, so the rest of the parse is logged.
     LogConfig lc;
     for (int i = 0; i < argc; ++i) lc.commandLine += (i ? " " : "") + std::string(argv[i]);
     lc.build = std::string(buildGitHash()) + (*buildVersionTag() ? std::string(" (") + buildVersionTag() + ")" : "");
-    std::vector<char*> args(argv, argv + argc);
     std::string logErr;
     if (!logParseArgs(args, lc, logErr)) {
         LOG_ERROR("main", "%s", logErr.c_str());
         return 2;
     }
+    // The file's log folder is below --log-dir and $WVT_LOG_DIR.
+    if (const char* e = envVar("WVT_LOG_DIR"); lc.dir.empty() && !cfg.logFolder.empty() && !(e && *e))
+        lc.dir = expandHome(cfg.logFolder);
     logInit(lc);
+    if (!cfgErr.empty()) {
+        LOG_ERROR("config", "%s", cfgErr.c_str());
+        return 2;
+    }
+    for (const auto& w : cfgWarnings) LOG_WARN("config", "%s", w.c_str());
+    if (noConfig) LOG_INFO("config", "no configuration file (--no-config)");
+    else if (cfgFile.empty()) LOG_DEBUG("config", "no configuration file; built-in defaults");
+    else LOG_INFO("config", "read %s: %zu settings", cfgFile.c_str(), cfg.origin.size());
     if (const char* e = envVar("WVT_GPU"); e && *e && !parseGpuMode(e, gpuMode))
         LOG_WARN("main", "WVT_GPU=%s is not auto, on or off; using auto", e);
     argc = (int)args.size();
@@ -532,6 +573,15 @@ int main(int argc, char** argv) {
              "print log messages to the console: debug | info | warn | error\n(default info; without -v only warnings and errors print)");
     cli.note(nullptr, "--log-dir", "DIR", "log file folder (default $WVT_LOG_DIR, then $TMPDIR, then /tmp)");
     cli.note(nullptr, "--no-log-file", nullptr, "don't write wvt_log_<date>_<time>.log");
+    cli.note(nullptr, "--config", "FILE", "configuration file (default $WVT_CONFIG, then ~/.config/wvt/wvt.conf)");
+    cli.note(nullptr, "--no-config", nullptr, "read no configuration file: the built-in defaults");
+    std::string writeConfig;
+    bool showConfig = false, forceWrite = false;
+    cli.add(nullptr, "--write-config", "FILE", "write a configuration file with every key (- = the terminal) and exit",
+            text(writeConfig));
+    cli.add(nullptr, "--force", nullptr, "with --write-config: replace an existing file", flag(forceWrite));
+    cli.add(nullptr, "--show-config", nullptr, "print each setting, its value and where it came from, and exit",
+            flag(showConfig));
     cli.action("-h", "--help", "show this help", [&](const char*) {
         exitNow = 0;
         showHelp = true;
@@ -552,10 +602,12 @@ int main(int argc, char** argv) {
     cli.add(nullptr, "--gain", "DB|auto", "receiver gain (default 30 dB)", [&](const char* v) {
         if (std::string(v) == "auto") dev.agc = true;
         else if (!parseSI(v, dev.gain)) return bad("bad gain");
+        devGiven.insert(devGiven.end(), {"gain", "agc"});
         return haveGain = true;
     });
     cli.add(nullptr, "--ref-level", "DBM", "BB60: strongest expected input (default -20 dBm)", [&](const char* v) {
         if (!parseSI(v, dev.gain)) return bad("bad reference level");
+        devGiven.emplace_back("gain");
         return haveGain = true;
     });
     cli.add(nullptr, "--atten", "auto|0|10|20|30", "BB60 attenuator (default auto)", [&](const char* v) {
@@ -563,6 +615,7 @@ int main(int argc, char** argv) {
         if (s == "auto") dev.bbAtten = -1;
         else if (s == "0" || s == "10" || s == "20" || s == "30") dev.bbAtten = s[0] - '0';
         else return bad("--atten wants auto, 0, 10, 20 or 30");
+        devGiven.emplace_back("atten");
         return true;
     });
     cli.add(nullptr, "--bb-amp", "auto|0-3", "BB60 amplifier setting (default auto)", [&](const char* v) {
@@ -570,41 +623,61 @@ int main(int argc, char** argv) {
         if (s == "auto") dev.bbAmp = -1;
         else if (s.size() == 1 && s[0] >= '0' && s[0] <= '3') dev.bbAmp = s[0] - '0';
         else return bad("--bb-amp wants auto or 0-3");
+        devGiven.emplace_back("amp");
         return true;
     });
     cli.add(nullptr, "--ext-ref", nullptr, "BB60: lock to a 10 MHz reference on port 1; Sidekiq: use the external reference clock",
-            flag(dev.extRef));
+            [&](const char*) {
+                devGiven.emplace_back("ext_ref");
+                return dev.extRef = true;
+            });
     cli.add(nullptr, "--antenna", "NAME", "USRP receive antenna (e.g. RX2, TX/RX) or Sidekiq RF port (e.g. \"J3 (RX A2)\" or J1; default: the device's)",
-            text(dev.antenna));
+            [&](const char* v) {
+                dev.antenna = v;
+                devGiven.emplace_back("port");
+                return true;
+            });
     cli.add(nullptr, "--usrp-channel", "N", "USRP receive / transmit channel (X310, N310, X410 have several; default 0)",
             [&](const char* v) {
                 long long c;
                 if (!whole("--usrp-channel", v, 0, 63, c)) return false;
                 dev.channel = txc.channel = (int)c;
+                devGiven.emplace_back("channel");
                 return true;
             });
     cli.add(nullptr, "--ref", "SRC", "USRP clock and time reference: internal | external | gpsdo", [&](const char* v) {
         dev.ref = txc.ref = v;
+        devGiven.emplace_back("ref");
         return true;
     });
     cli.add(nullptr, "--bandwidth", "HZ", "USRP analog / BB60 I/Q / Sidekiq RF bandwidth (default: automatic)", [&](const char* v) {
         if (!parseSI(v, dev.bandwidth)) return bad("bad bandwidth");
+        devGiven.emplace_back("bandwidth");
         return true;
     });
-    cli.add(nullptr, "--bias-tee", nullptr, "RTL-SDR: power an LNA / active antenna over the coax", flag(dev.biasTee));
+    cli.add(nullptr, "--bias-tee", nullptr, "RTL-SDR: power an LNA / active antenna over the coax", [&](const char*) {
+        devGiven.emplace_back("bias_tee");
+        return dev.biasTee = true;
+    });
     cli.add(nullptr, "--direct-sampling", "I|Q", "RTL-SDR: HF direct sampling (v3: Q)", [&](const char* v) {
         const std::string s = v;
         dev.directSampling = (s == "I" || s == "i" || s == "1") ? 1 : (s == "Q" || s == "q" || s == "2") ? 2 : 0;
+        devGiven.emplace_back("direct_sampling");
         return true;
     });
     cli.add(nullptr, "--ppm", "N", "RTL-SDR frequency correction", [&](const char* v) {
         long long n;
         if (!whole("--ppm", v, -1000, 1000, n)) return false;
         dev.ppm = (int)n;
+        devGiven.emplace_back("ppm");
         return true;
     });
     cli.action(nullptr, "--list-devices", "print attached devices and GPUs, and exit", [&](const char*) {
-        for (const auto& d : enumerateDevices()) printf("%-8s %-28s %s\n", d.driver.c_str(), d.args.c_str(), d.label.c_str());
+        for (const auto& d : enumerateDevices()) {
+            const SdrProfile* p = configProfileFor(cfg, d);
+            printf("%-8s %-28s %s%s\n", d.driver.c_str(), d.args.c_str(), d.label.c_str(),
+                   p ? ("   [config sdr." + std::to_string(p->index) + "]").c_str() : "");
+        }
         printf("\nGPUs (--gpu-device N):\n");
         for (const auto& g : gpuListDevices()) printf("  %s\n", g.c_str());
         exitNow = 0;
@@ -620,7 +693,7 @@ int main(int argc, char** argv) {
         const std::string s = v;
         if (s != "sigmf" && s != "raw") return bad("--record-format wants sigmf or raw");
         rc.sigmf = s == "sigmf";
-        return true;
+        return haveRecordFormat = true;
     });
     cli.add(nullptr, "--record-sample", "native|cf32", "(default native: cu8 for RTL-SDR, ci16 for USRP and BB60)",
             [&](const char* v) {
@@ -903,10 +976,91 @@ int main(int argc, char** argv) {
         LOG_ERROR("main", "%s", err.c_str());
         return 2;
     }
-    if (!std::isnan(cliLimits.maxGain)) txc.limits.maxGain = cliLimits.maxGain;
-    if (!cliLimits.allow.empty()) txc.limits.allow = cliLimits.allow;
+    // The configuration file, the environment and the options each only add limits (issue #88).
+    {
+        TxLimits fileLimits;
+        fileLimits.maxGain = cfg.txMaxGainDb;
+        for (const auto& [lo, hi] : cfg.txAllow) fileLimits.allow.push_back({lo, hi});
+        txc.limits = txLimitsStrictest(txLimitsStrictest(fileLimits, txc.limits), cliLimits);
+    }
     if (!positional.empty()) path = positional.back();
     scale = std::clamp(scale, 0.5f, 4.f);
+    if (!writeConfig.empty()) {
+        // The file's values over the defaults; not the environment or the options.
+        const std::string text = configFileText(cfg);
+        if (writeConfig == "-") {
+            fputs(text.c_str(), stdout);
+            return 0;
+        }
+        const std::string out = expandHome(writeConfig);
+        if (access(out.c_str(), F_OK) == 0 && !forceWrite) {
+            LOG_ERROR("config", "%s exists; add --force to replace it", out.c_str());
+            return 2;
+        }
+        std::string err;
+        if (const size_t slash = out.rfind('/'); slash != std::string::npos && slash > 0 && !makeDirs(out.substr(0, slash), err)) {
+            LOG_ERROR("config", "%s", err.c_str());
+            return 1;
+        }
+        FILE* f = fopen(out.c_str(), "w");
+        bool ok = f && fputs(text.c_str(), f) >= 0;
+        if (f && fclose(f) != 0) ok = false;
+        if (!ok) {
+            LOG_ERROR("config", "cannot write %s", out.c_str());
+            return 1;
+        }
+        logStatus("config", "wrote %s", out.c_str());
+        return 0;
+    }
+    if (showConfig) {
+        // The values in effect, and where each came from: an option, the environment, the file or the default.
+        std::map<std::string, std::string> from;
+        auto given = [&](const char* opt) {
+            const std::string o = opt;
+            return std::any_of(cmdLine.begin() + 1, cmdLine.end(), [&](const std::string& a) { return a == o || a.rfind(o + "=", 0) == 0; });
+        };
+        auto source = [&](const char* key, const char* env, const char* opt) {
+            if (opt && given(opt)) from[key] = opt;
+            else if (const char* e = env ? envVar(env) : nullptr; e && *e) from[key] = std::string("$") + env;
+        };
+        WvtConfig eff = cfg;
+        eff.uiScale = scale;
+        eff.uiWidth = winW;
+        eff.uiHeight = winH;
+        eff.gpu = gpuModeName(gpuMode);
+        eff.gpuDevice = gpuDevice;
+        eff.logFolder = lc.dir;
+        if (const char* e = envVar("WVT_LOG_DIR"); lc.dir.empty() && e && *e) eff.logFolder = e;
+        eff.recordingSigmf = rc.sigmf;
+        eff.recordingCf32 = rc.cf32;
+        eff.recordingMaxSeconds = rc.maxSeconds;
+        if (haveRecordFormat) eff.siggenSigmf = rc.sigmf;
+        eff.siggenSample = gc.fmt;
+        eff.exportBandCi16 = extractCi16;
+        eff.txMaxGainDb = txc.limits.maxGain;
+        eff.txAllow.clear();
+        for (const TxBand& b : txc.limits.allow) eff.txAllow.emplace_back(b.lo, b.hi);
+        eff.txNone = txc.limits.none;
+        source("ui.scale", "WVT_SCALE", "--scale");
+        source("ui.geometry", nullptr, "--geometry");
+        source("gpu", "WVT_GPU", "--gpu");
+        source("gpu.device", nullptr, "--gpu-device");
+        source("log.folder", "WVT_LOG_DIR", "--log-dir");
+        source("recording.format", nullptr, "--record-format");
+        source("recording.sample", nullptr, "--record-sample");
+        source("recording.max_seconds", nullptr, "--record-duration");
+        source("siggen.format", nullptr, "--record-format");
+        source("siggen.sample", nullptr, "--gen-sample");
+        source("export.band_sample", nullptr, "--extract-format");
+        for (const char* k : {"tx.max_gain_db", "tx.allow"}) {
+            const bool tx = std::string(k) == "tx.allow";
+            const bool env = envVar(tx ? "WVT_TX_ALLOW" : "WVT_TX_MAX_GAIN") && *envVar(tx ? "WVT_TX_ALLOW" : "WVT_TX_MAX_GAIN");
+            if (env || given(tx ? "--tx-allow" : "--tx-max-gain")) from[k] = "the strictest of the file, the environment and the options";
+        }
+        printf("# configuration file: %s\n", noConfig ? "none (--no-config)" : cfgFile.empty() ? "none" : cfgFile.c_str());
+        fputs(configShowText(eff, from).c_str(), stdout);
+        return 0;
+    }
     if (ov.haveFc) gp.fc = txc.fc = ov.fc;
     if (ov.haveRate) gp.rate = ov.rate;
     if (haveSweep && gp.mode != GenMode::CW && gp.mode != GenMode::Pulsed) {
@@ -1005,7 +1159,7 @@ int main(int argc, char** argv) {
             return 2;
         }
         if (haveGenOut) {
-            gc.rec.sigmf = rc.sigmf;
+            gc.rec.sigmf = haveRecordFormat ? rc.sigmf : cfg.siggenSigmf;
             gc.seconds = genSeconds > 0 ? genSeconds : 1;
             if (gc.pulses > 0 && gp.mode == GenMode::CW && !gp.sweeping()) {
                 LOG_ERROR("main", "--gen-pulses needs --gen pulsed, --play, a chain or a sweep");
@@ -1018,18 +1172,60 @@ int main(int argc, char** argv) {
         if (const int rc = confirmTx(gp, txc, genSeconds, txDryRun, txConfirm); rc != 0) return std::max(rc, 0);
         return runTx(gp, txc, genSeconds);
     }
+    // --no-gui --record without --device records from the configuration file's sdr.default.
+    if (!haveDevice && noGui && haveRecord && !cfg.sdrDefault.empty()) {
+        // Scan only the driver that sdr.default names (UHD probes the network).
+        const char* only = configSdrDriver(cfg.sdrDefault);
+        for (const SdrProfile& p : cfg.sdrs)
+            if (!only && std::to_string(p.index) == cfg.sdrDefault) only = configSdrDriver(p.type);
+        const auto devices = enumerateDevices(only ? only : "");
+        if (const int i = configDefaultDevice(cfg, devices); i >= 0) {
+            dev.driver = devices[(size_t)i].driver;
+            dev.args = devices[(size_t)i].args;
+            haveDevice = true;
+            LOG_INFO("config", "sdr.default %s: %s", cfg.sdrDefault.c_str(), devices[(size_t)i].label.c_str());
+        } else {
+            LOG_WARN("config", "sdr.default %s: no such device found", cfg.sdrDefault.c_str());
+        }
+    }
+    // The configuration file's profile for the device; the options win over it.
+    bool profileRate = false, profileGain = false;
+    if (haveDevice && dev.driver != "siggen") {
+        DeviceInfo info{dev.driver, dev.args, "", "", ""};
+        const bool anyFor = std::any_of(cfg.sdrs.begin(), cfg.sdrs.end(), [&](const SdrProfile& p) {
+            const char* d = configSdrDriver(p.type);
+            return d && dev.driver == d;
+        });
+        // A profile for a model or a serial needs what the scan knows.
+        if (anyFor)
+            for (const auto& d : enumerateDevices(dev.driver))
+                if (configSameDevice(d, dev.driver, dev.args)) {
+                    info = d;
+                    break;
+                }
+        if (const SdrProfile* p = anyFor ? configProfileFor(cfg, info) : nullptr) {
+            std::vector<std::string> keep = devGiven;
+            if (ov.haveFc) keep.emplace_back("fc");
+            if (ov.haveRate) keep.emplace_back("rate");
+            configApplyProfile(*p, dev, keep);
+            profileRate = p->rate && !ov.haveRate;
+            profileGain = !haveGain && (dev.driver == "bb" ? p->refLevelDbm.has_value() : p->gainDb.has_value());
+            LOG_INFO("config", "using sdr.%d (%s) for %s", p->index, p->type.c_str(),
+                     info.label.empty() ? (dev.driver + (dev.args.empty() ? "" : ":" + dev.args)).c_str() : info.label.c_str());
+        }
+    }
     if (haveDevice) {
         if (ov.haveFc) dev.fc = ov.fc;
         else if (dev.driver == "siggen" && haveGen) dev.fc = gp.fc;  // the loopback listens where the generator plays
         if (ov.haveRate) dev.rate = ov.rate;
-        else if (dev.driver == "uhd" || dev.driver == "bb" || dev.driver == "skiq") dev.rate = 10e6;
+        else if (!profileRate && (dev.driver == "uhd" || dev.driver == "bb" || dev.driver == "skiq")) dev.rate = 10e6;
         if (dev.driver == "bb") {
             // The BB60 has a reference level, not a gain, and no AGC.
             if (dev.agc) {
                 LOG_ERROR("main", "the BB60 has no automatic gain: use --ref-level DBM");
                 return 2;
             }
-            if (!haveGain) dev.gain = -20;
+            if (!haveGain && !profileGain) dev.gain = -20;
             const double snapped = snapSampleRate("bb", dev.rate);
             if (std::fabs(snapped - dev.rate) > 1)
                 LOG_WARN("main", "BB60 rate %s: using %s (40 MS/s divided by a power of 2)",
@@ -1106,7 +1302,7 @@ int main(int argc, char** argv) {
 
     int exitCode = 0;
     {
-        App app(win);
+        App app(win, cfg);
         app.setTxLimits(txc.limits);
         if (haveGen || openGen) app.openSigGen(haveGen ? &gp : nullptr);
         if (haveDevice) {

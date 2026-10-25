@@ -238,12 +238,15 @@ Safety and limits:
 For a lab, you can set limits that wvt cannot go past. The command line and the window both obey
 them.
 
-| Limit | Option | Environment variable |
-|---|---|---|
-| The maximum TX gain, in dB | `--tx-max-gain DB` | `WVT_TX_MAX_GAIN` |
-| The frequency bands where wvt can transmit | `--tx-allow LO:HI[,LO:HI...]` | `WVT_TX_ALLOW` |
+| Limit | Option | Environment variable | [Configuration file](config.md) |
+|---|---|---|---|
+| The maximum TX gain, in dB | `--tx-max-gain DB` | `WVT_TX_MAX_GAIN` | `tx.max_gain_db` |
+| The frequency bands where wvt can transmit | `--tx-allow LO:HI[,LO:HI...]` | `WVT_TX_ALLOW` | `tx.allow` |
 
-- An option replaces the value of its environment variable.
+- The strictest limit applies. Each source only adds limits: wvt uses the lowest maximum gain, and
+  only the frequencies that every source allows. An option cannot remove a limit of the
+  configuration file or of an environment variable.
+- If the allowed bands of two sources do not overlap, wvt cannot transmit at any frequency.
 - The full transmit band (the center frequency ± half the sample rate) must be in one allowed
   band, because the generator can put a signal anywhere in that band.
 - wvt does not start a transmission, change the gain or change the frequency past a limit. The

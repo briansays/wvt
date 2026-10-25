@@ -940,7 +940,8 @@ void App::drawSigGenTx() {
         if (lim.any()) {
             row("Limits");
             ImGui::TextWrapped("%s", describeTxLimits(lim).c_str());
-            tooltipAlways("Set with --tx-max-gain and --tx-allow, or WVT_TX_MAX_GAIN and WVT_TX_ALLOW.\n"
+            tooltipAlways("Set with --tx-max-gain and --tx-allow, WVT_TX_MAX_GAIN and WVT_TX_ALLOW, or\n"
+                          "tx.max_gain_db and tx.allow in the configuration file. The strictest applies.\n"
                           "wvt refuses a gain above the maximum, and a frequency where the band\n"
                           "center +- rate/2 is not inside an allowed band.");
         }

@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "app/config.h"
 #include "audio/audio_engine.h"
 #include "dsp/engine.h"
 #include "dsp/extract.h"
@@ -32,7 +33,8 @@ struct CliOverrides {
 
 class App {
 public:
-    explicit App(X11Window& win);
+    // cfg: the defaults from the configuration file (issue #88).
+    App(X11Window& win, const WvtConfig& cfg);
     ~App();
     // A recording, or a session file (issue #76), which opens its recording
     // and puts back the state it saved.
@@ -371,6 +373,8 @@ private:
     bool devicesScanned_ = false;
     std::future<std::vector<DeviceInfo>> scanJob_;  // a device scan in the background (a network scan takes ~0.5 s)
     bool devPicked_ = false;  // a device was chosen (command line or the list): a scan does not change it
+    WvtConfig cfg_;           // the configuration file: SDR profiles and sdr.default (issue #88)
+    bool devSelected_ = false;  // selectDevice ran: devCfg_ is a chosen device, not the built-in default
     DeviceCaps devCaps_;      // of the device last opened (antennas, channels, ranges)
     char devArgs_[256] = {};
     char antenna_[32] = {};

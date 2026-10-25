@@ -1,6 +1,7 @@
 #include "app/app.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cfloat>
 #include <cmath>
 #include <cstring>
@@ -37,7 +38,7 @@ float dbGroupW() {
 }
 }  // namespace
 
-App::App(X11Window& win) : win_(win) {
+App::App(X11Window& win, const WvtConfig& cfg) : win_(win), cfg_(cfg) {
     auto wake = [this] { win_.wake(); };
     wfWorker_ = std::make_unique<Worker<WaterfallReq, WaterfallRes>>(computeWaterfall, wake, "waterfall");
     dmWorker_ = std::make_unique<Worker<DemodReq, DemodRes>>(computeDemod, wake, "demod");
@@ -45,14 +46,53 @@ App::App(X11Window& win) : win_(win) {
     cmap_ = ImPlotColormap_Viridis;
     demod_.chanBw = 50e3;
     status_ = "No file loaded - type a path in the File box and press Enter (or run: wvt <file>)";
+    recCfg_.prefix = configJoin(cfg.recordingFolder, cfg.recordingName);
+    recCfg_.sigmf = cfg.recordingSigmf;
+    recCfg_.cf32 = cfg.recordingCf32;
+    recCfg_.maxSeconds = cfg.recordingMaxSeconds;
     snprintf(recPrefix_, sizeof recPrefix_, "%s", recCfg_.prefix.c_str());
     sgPrevWorker_ = std::make_unique<Worker<SigPreviewReq, SigPreviewRes>>(
         [](const SigPreviewReq& r, const CancelFn& c, Progress*) { return computeSigPreview(r, c); }, wake, "siggen preview");
     sgFile_ = std::make_unique<FileGenJob>();
-    snprintf(sgPrefix_, sizeof sgPrefix_, "~/wvt-recordings/siggen");
+    snprintf(sgPrefix_, sizeof sgPrefix_, "%s", configJoin(cfg.siggenFolder, cfg.siggenName).c_str());
+    sgFileCfg_.fmt = cfg.siggenSample;
+    sgFileCfg_.rec.sigmf = cfg.siggenSigmf;
     snprintf(txArgs_, sizeof txArgs_, "%s", txCfg_.args.c_str());
     snprintf(txAntenna_, sizeof txAntenna_, "%s", txCfg_.antenna.c_str());
-    snprintf(auPrefix_, sizeof auPrefix_, "~/wvt-recordings/audio");
+    snprintf(auPrefix_, sizeof auPrefix_, "%s", configJoin(cfg.audioFolder, "audio").c_str());
+    snprintf(snapDir_, sizeof snapDir_, "%s", cfg.snapshotFolder.c_str());
+    exCi16_ = cfg.exportBandCi16;
+
+    nfft_ = cfg.fftSize;
+    window_ = (int)cfg.fftWindow;
+    overlapPct_ = cfg.fftOverlapPct;
+    bool cmapFound = false;
+    for (int i = 0; i < ImPlot::GetColormapCount() && !cmapFound; ++i) {
+        std::string n = ImPlot::GetColormapName(i);
+        std::transform(n.begin(), n.end(), n.begin(), [](unsigned char c) { return (char)std::tolower(c); });
+        if (n == cfg.colormap) {
+            cmap_ = i;
+            cmapFound = true;
+        }
+    }
+    if (!cmapFound) {
+        std::string names;
+        for (int i = 0; i < ImPlot::GetColormapCount(); ++i) names += std::string(i ? ", " : "") + ImPlot::GetColormapName(i);
+        LOG_WARN("config", "display.colormap: no colormap '%s' (colormaps: %s); using Viridis", cfg.colormap.c_str(), names.c_str());
+    }
+    // One fixed end of the dB range turns the automatic range off; the other end keeps its default.
+    if (!std::isnan(cfg.dbMin) || !std::isnan(cfg.dbMax)) {
+        autoDb_ = false;
+        if (!std::isnan(cfg.dbMin)) dbMin_ = (float)cfg.dbMin;
+        if (!std::isnan(cfg.dbMax)) dbMax_ = (float)cfg.dbMax;
+    }
+
+    liveParams_.nfft = cfg.liveFftSize;
+    liveParams_.window = (int)cfg.liveWindow;
+    liveParams_.avg = cfg.liveAvg;
+    liveParams_.rowsPerSec = cfg.liveRowsPerSec;
+    liveParams_.maxCols = cfg.liveMaxColumns;
+    liveHistory_ = cfg.liveHistoryRows;
 }
 
 App::~App() {

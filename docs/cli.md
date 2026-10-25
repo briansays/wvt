@@ -31,6 +31,29 @@ their range. For more information about an option, refer to the page in the last
 | `--gpu-device N` | Use GPU `N` | [GPU](gpu.md) |
 | `-h`, `--help` | Show the options, then stop | |
 
+## Configuration file
+
+The configuration file sets the defaults. The environment variables and the options change them.
+Refer to [Configuration file](config.md).
+
+| Option | Function |
+|---|---|
+| `--config FILE` | Read this configuration file. If it does not exist, wvt stops |
+| `--no-config` | Read no configuration file. wvt uses the built-in defaults |
+| `--write-config FILE` | Write a configuration file with all the keys, then stop. `-` writes to the terminal |
+| `--force` | With `--write-config`: replace a file that exists |
+| `--show-config` | Show each setting, its value and its source, then stop |
+
+Without `--config`, wvt reads `$WVT_CONFIG`. If that is not set, wvt reads
+`$XDG_CONFIG_HOME/wvt/wvt.conf` or `~/.config/wvt/wvt.conf`, if the file exists.
+
+The SDR profiles of the file (`sdr.N.*`) also apply on the command line:
+
+- With `--device`, the profile of that device sets its frequency, rate, gain and the other device
+  values. The options win over the profile.
+- `--no-gui --record` without `--device` records from the `sdr.default` device.
+- `--list-devices` shows `[config sdr.N]` after each device that has a profile.
+
 ## Logging
 
 | Option | Function | Page |
@@ -106,6 +129,7 @@ For the full list, refer to [Signal generator](siggen.md#command-line).
 
 | Variable | Function |
 |---|---|
+| `WVT_CONFIG` | The configuration file, as `--config` |
 | `WVT_SCALE` | The UI scale, as `--scale` |
 | `WVT_GPU` | `auto`, `on` or `off`, as `--gpu` |
 | `WVT_LOG_DIR` | The folder for the log file, as `--log-dir` |

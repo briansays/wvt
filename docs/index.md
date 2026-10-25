@@ -37,6 +37,7 @@ siggen
 audio
 gpu
 logging
+config
 controls
 cli
 ```

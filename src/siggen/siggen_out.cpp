@@ -207,6 +207,22 @@ bool parseTxBands(const std::string& s, std::vector<TxBand>& out, std::string& e
     return true;
 }
 
+TxLimits txLimitsStrictest(const TxLimits& a, const TxLimits& b) {
+    TxLimits r;
+    r.maxGain = std::isnan(a.maxGain) ? b.maxGain : std::isnan(b.maxGain) ? a.maxGain : std::min(a.maxGain, b.maxGain);
+    r.none = a.none || b.none;
+    if (a.allow.empty() || b.allow.empty()) {
+        r.allow = a.allow.empty() ? b.allow : a.allow;
+    } else {
+        for (const TxBand& x : a.allow)
+            for (const TxBand& y : b.allow)
+                if (std::min(x.hi, y.hi) > std::max(x.lo, y.lo)) r.allow.push_back({std::max(x.lo, y.lo), std::min(x.hi, y.hi)});
+        r.none = r.none || r.allow.empty();
+    }
+    if (r.none) r.allow.clear();
+    return r;
+}
+
 bool txLimitsFromEnv(TxLimits& l, std::string& err) {
     if (const char* v = envVar("WVT_TX_MAX_GAIN"); v && *v) {
         if (!parseSI(v, l.maxGain)) {
@@ -228,19 +244,23 @@ std::string bandText(double lo, double hi) { return fmtSI(lo, "Hz", 9) + " to " 
 }  // namespace
 
 bool txFreqAllowed(const TxLimits& l, double fc, double rate, std::string& err) {
+    if (l.none) {
+        err = "no frequency is allowed: the allowed bands of the configuration file, WVT_TX_ALLOW and --tx-allow do not overlap";
+        return false;
+    }
     if (l.allow.empty()) return true;
     const double lo = fc - rate / 2, hi = fc + rate / 2;
     for (const TxBand& b : l.allow)
         if (lo >= b.lo - 1 && hi <= b.hi + 1) return true;
     err = "the transmit band " + bandText(lo, hi) + " (center " + fmtSI(fc, "Hz", 9) + " +- rate/2) is not inside an allowed band (" +
-          describeTxLimits({NAN, l.allow}) + "; --tx-allow or WVT_TX_ALLOW)";
+          describeTxLimits({NAN, l.allow}) + "; --tx-allow, WVT_TX_ALLOW or tx.allow)";
     return false;
 }
 
 bool txGainAllowed(const TxLimits& l, double db, std::string& err) {
     if (std::isnan(l.maxGain) || db <= l.maxGain + 1e-9) return true;
     char buf[160];
-    snprintf(buf, sizeof buf, "transmit gain %.2f dB is above the limit of %.2f dB (--tx-max-gain or WVT_TX_MAX_GAIN)", db,
+    snprintf(buf, sizeof buf, "transmit gain %.2f dB is above the limit of %.2f dB (--tx-max-gain, WVT_TX_MAX_GAIN or tx.max_gain_db)", db,
              l.maxGain);
     err = buf;
     return false;
@@ -255,6 +275,7 @@ std::string describeTxLimits(const TxLimits& l) {
     }
     for (size_t i = 0; i < l.allow.size(); ++i)
         s += (i ? ", " : s.empty() ? "" : "; ") + bandText(l.allow[i].lo, l.allow[i].hi);
+    if (l.none) s += std::string(s.empty() ? "" : "; ") + "no frequency (the allowed bands do not overlap)";
     return s.empty() ? "none" : s;
 }
 

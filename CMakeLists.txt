@@ -99,6 +99,7 @@ add_executable(wvt
   src/app/sw_renderer.cpp
   src/common/ui_util.cpp
   src/app/app_live.cpp
+  src/app/config.cpp
   src/app/app_siggen.cpp
   src/app/app_chain.cpp
   src/device/live.cpp
@@ -670,6 +671,11 @@ add_executable(measure_check tools/measure_check.cpp src/dsp/measure.cpp)
 target_include_directories(measure_check PRIVATE src)
 target_compile_options(measure_check PRIVATE ${WVT_WARNINGS})
 
+# Configuration file self-test (issue #88)
+add_executable(config_check tools/config_check.cpp src/app/config.cpp)
+target_include_directories(config_check PRIVATE src)
+target_compile_options(config_check PRIVATE ${WVT_WARNINGS})
+
 add_executable(snapshot_check tools/snapshot_check.cpp src/io/snapshot.cpp)
 target_include_directories(snapshot_check PRIVATE src third_party/stb)
 target_compile_options(snapshot_check PRIVATE ${WVT_WARNINGS})
@@ -712,7 +718,7 @@ endif()
 # ---------------------------------------------------------------------------
 enable_testing()
 set(WVT_CHECKS siggen_check audio_check log_check segment_check gpu_check extract_check snapshot_check device_check
-  clipboard_check session_check measure_check skiq_check)
+  clipboard_check session_check measure_check config_check skiq_check)
 if(WVT_BB_SIM)
   list(APPEND WVT_CHECKS bb_check)
 endif()
@@ -724,6 +730,9 @@ set_tests_properties(clipboard_check PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME session_roundtrip COMMAND ${CMAKE_COMMAND} -DWVT=$<TARGET_FILE:wvt> -DIQGEN=$<TARGET_FILE:iqgen>
   -DDIR=${CMAKE_BINARY_DIR}/session_roundtrip -P ${CMAKE_SOURCE_DIR}/tools/session_roundtrip.cmake)
 set_tests_properties(session_roundtrip PROPERTIES SKIP_REGULAR_EXPRESSION "skipped")
+# The configuration file (issue #88): the defaults written and shown without a file.
+add_test(NAME config_write COMMAND wvt --no-log-file --no-config --write-config -)
+add_test(NAME config_show COMMAND wvt --no-log-file --no-config --show-config)
 # The option table: --help fails if an option name is defined twice.
 add_test(NAME cli_help COMMAND wvt --no-log-file --help)
 # --tx-dry-run checks the transmit limits and opens no device (issue #49).
@@ -749,7 +758,8 @@ if(WVT_FUZZ)
     src/device/sdr_siggen.cpp src/io/iq_file.cpp src/dsp/dsp.cpp src/common/ui_util.cpp src/common/log.cpp)
   set(_fuzz_meta src/io/iq_file.cpp src/common/json.cpp src/common/log.cpp)
   set(_fuzz_parse_si src/common/ui_util.cpp src/common/log.cpp)
-  foreach(_f json chain meta parse_si)
+  set(_fuzz_config src/app/config.cpp)
+  foreach(_f json chain meta parse_si config)
     add_executable(fuzz_${_f} tools/fuzz/fuzz_${_f}.cpp ${_fuzz_${_f}})
     target_include_directories(fuzz_${_f} PRIVATE src tools/fuzz)
     target_compile_options(fuzz_${_f} PRIVATE ${_fuzz_flags} ${WVT_WARNINGS})
@@ -761,5 +771,5 @@ if(WVT_FUZZ)
     file(GLOB _seeds "${CMAKE_SOURCE_DIR}/tools/fuzz/corpus/${_f}/*")
     add_test(NAME fuzz_${_f}_seeds COMMAND fuzz_${_f} ${_seeds})
   endforeach()
-  message(STATUS "wvt: libFuzzer targets enabled (fuzz_json, fuzz_chain, fuzz_meta, fuzz_parse_si)")
+  message(STATUS "wvt: libFuzzer targets enabled (fuzz_json, fuzz_chain, fuzz_meta, fuzz_parse_si, fuzz_config)")
 endif()

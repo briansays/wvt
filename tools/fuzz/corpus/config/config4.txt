@@ -1,0 +1,5 @@
+= x
+no equals
+sdr.99.ppm = 1
+sdr.default = 99
+key = "open

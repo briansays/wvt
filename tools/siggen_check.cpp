@@ -1292,6 +1292,26 @@ int main(int argc, char** argv) {
         unsetenv("WVT_TX_ALLOW");
         check(envOk && envBad, "TX limits: from the environment", err);
 
+        // The strictest of several sources (issue #88).
+        TxLimits fileL, optL;
+        fileL.maxGain = 40;
+        parseTxBands("902M:928M,2.4G:2.5G", fileL.allow, err);
+        optL.maxGain = 20;
+        parseTxBands("915M:950M", optL.allow, err);
+        const TxLimits st = txLimitsStrictest(fileL, optL);
+        check(st.maxGain == 20 && st.allow.size() == 1 && st.allow[0].lo == 915e6 && st.allow[0].hi == 928e6 && !st.none,
+              "TX limits: the lower gain and the overlap of the bands", describeTxLimits(st));
+        TxLimits noGain;
+        check(txLimitsStrictest(noGain, optL).maxGain == 20 && txLimitsStrictest(fileL, TxLimits{}).allow.size() == 2,
+              "TX limits: a source without a limit adds none");
+        TxLimits far;
+        parseTxBands("5G:6G", far.allow, err);
+        const TxLimits nothing = txLimitsStrictest(fileL, far);
+        check(nothing.none && nothing.allow.empty() && !txFreqAllowed(nothing, 915e6, 1e6, err) &&
+                  describeTxLimits(nothing).find("no frequency") != std::string::npos && nothing.any() &&
+                  txLimitsStrictest(nothing, TxLimits{}).none,
+              "TX limits: bands that do not overlap allow no frequency", describeTxLimits(nothing));
+
         // TxEngine refuses before it opens a device, so this needs no USRP.
         WaveformParams p;
         p.rate = 1e6;

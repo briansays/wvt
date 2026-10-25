@@ -1,0 +1,3 @@
+fft.size = 2048 # comment
+recording.folder = ~/rec/
+sdr.default = b205

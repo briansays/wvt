@@ -58,6 +58,10 @@ private:
 
 // "LO:HI[,LO:HI...]" with SI suffixes, e.g. "902M:928M,2.4G:2.4835G".
 bool parseTxBands(const std::string& s, std::vector<TxBand>& out, std::string& err);
+// The stricter of two sets of limits (issue #88: the configuration file, the
+// environment and the options only add limits): the lower maximum gain, and
+// only the frequencies that both allow. Bands that do not overlap allow none.
+TxLimits txLimitsStrictest(const TxLimits& a, const TxLimits& b);
 // Reads WVT_TX_MAX_GAIN and WVT_TX_ALLOW into `l`. False on a bad value.
 bool txLimitsFromEnv(TxLimits& l, std::string& err);
 // The transmitter sends anything in fc +- rate/2, so all of that band must

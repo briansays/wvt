@@ -171,7 +171,7 @@ public:
             desc_ = label(param_.card_param);
             gOpenInfo = {"skiq",
                          param_.card_param.serial_string[0] ? param_.card_param.serial_string : "#" + std::to_string(card_),
-                         desc_};
+                         desc_, partName(part_), param_.card_param.serial_string};
             listPorts();
         }
         return configure(cfg, err);
@@ -619,7 +619,7 @@ void enumerateSkiq(std::vector<DeviceInfo>& out) {
     std::vector<uint8_t> avail;
     for (int i = 0; i < n; ++i) {
         const std::string num = "#" + std::to_string(cards[i]);
-        found[i] = {"skiq", num, "Sidekiq card " + std::to_string(cards[i])};
+        found[i] = {"skiq", num, "Sidekiq card " + std::to_string(cards[i]), "", ""};
         pid_t owner = 0;
         if (skiq_is_card_avail(cards[i], &owner) == 0) avail.push_back(cards[i]);
         else if (owner > 0) found[i].label += " (in use by process " + std::to_string(owner) + ")";
@@ -631,8 +631,9 @@ void enumerateSkiq(std::vector<DeviceInfo>& out) {
             if (std::find(avail.begin(), avail.end(), cards[i]) == avail.end()) continue;
             skiq_param_t p{};
             if (skiq_read_parameters(cards[i], &p) != 0) continue;
-            if (p.card_param.serial_string[0]) found[i].args = p.card_param.serial_string;
+            if (p.card_param.serial_string[0]) found[i].args = found[i].serial = p.card_param.serial_string;
             found[i].label = label(p.card_param);
+            found[i].product = partName(p.card_param.part_type);
         }
         skiq_exit();
     }

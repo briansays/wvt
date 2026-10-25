@@ -323,7 +323,7 @@ void enumerateBb(std::vector<DeviceInfo>& out) {
     if (bbGetSerialNumberList2(serials, types, &n) < bbNoError) return;
     for (int i = 0; i < std::min(n, (int)BB_MAX_DEVICES); ++i) {
         const std::string s = std::to_string(serials[i]);
-        out.push_back({"bb", s, std::string("Signal Hound ") + typeName(types[i]) + " (serial " + s + ")"});
+        out.push_back({"bb", s, std::string("Signal Hound ") + typeName(types[i]) + " (serial " + s + ")", typeName(types[i]), s});
     }
 }
 

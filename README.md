@@ -61,6 +61,7 @@ sphinx-build -W -b html docs build/docs      # then open build/docs/index.html
 | [Audio](docs/audio.md) | Demodulation, playback and WAV files |
 | [GPU processing](docs/gpu.md) | CUDA and Metal, run-time selection, fallback |
 | [Logging](docs/logging.md) | The log file and the console output |
+| [Configuration file](docs/config.md) | Defaults for folders, formats, FFT, GPU and a profile for each SDR |
 | [Mouse and keyboard](docs/controls.md) | All controls |
 | [Command-line reference](docs/cli.md) | All options and environment variables |
 | [Signal processing](docs/signal-processing.md) | How wvt calculates each plot |
