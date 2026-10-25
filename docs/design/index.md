@@ -21,6 +21,7 @@ is correct.
 | [Signal Hound BB60](bb60-integration-plan.md) | #2 | Implemented with a simulated device. Needs a BB60 to verify |
 | [Epiq Sidekiq](sidekiq-integration-plan.md) | #4 | Receive implemented, tested with a simulated card and built against SDK 4.26.0. Needs a card to verify |
 | [Point measurements](point-measurement-plan.md) | #80 | Implemented |
+| [Run-time configuration file](config-file-plan.md) | #88 | Plan |
 
 ```{toctree}
 :hidden:
@@ -39,4 +40,5 @@ usrp-models-plan
 bb60-integration-plan
 sidekiq-integration-plan
 point-measurement-plan
+config-file-plan
 ```
