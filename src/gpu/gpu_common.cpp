@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cstdlib>
 #include <mutex>
 
@@ -17,15 +18,25 @@ GpuInfo g_info = [] {
     return i;
 }();
 std::atomic<bool> g_enabled{false};
-// One per GPU path: after a failure (not out of memory) the path uses the
-// CPU until the next gpuInit.
+// One per GPU path. After a failure (not out of memory) the path uses the CPU
+// for a while, then tries the GPU again: 1 s after the first failure, doubling
+// up to 60 s while the failures go on. A success, gpuInit or switching the GPU
+// on again clears it.
+constexpr int64_t kRetryFirstMs = 1000, kRetryMaxMs = 60000;
+int64_t nowMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
 struct PathState {
     explicit PathState(const char* n) : name(n) {}
     const char* name;
-    std::atomic<bool> broken{false}, oomLogged{false};
+    std::atomic<int> failures{0};       // in a row, not counting out of memory
+    std::atomic<int64_t> retryAt{0};    // nowMs() from which the GPU is tried again
+    std::atomic<bool> oomLogged{false};
     std::string note;  // for gpuFallbackNotes, under g_noteMutex
+    bool waiting() const { return failures > 0 && nowMs() < retryAt; }
     void reset() {
-        broken = false;
+        failures = 0;
+        retryAt = 0;
         oomLogged = false;
         std::lock_guard<std::mutex> lk(g_noteMutex);
         note.clear();
@@ -42,19 +53,50 @@ bool forcedFail(std::string& err) {
 
 // Logs a failed call and applies the fallback rule.
 void noteFailure(PathState& p, const std::string& err, bool oom) {
-    {
-        std::lock_guard<std::mutex> lk(g_noteMutex);
-        if (!p.broken) p.note = std::string(p.name) + (oom ? ": the GPU ran out of memory; large jobs use the CPU (" : ": uses the CPU after an error (") + err + ")";
-    }
     if (oom) {
         // Smaller jobs may still fit, so the path stays on.
+        {
+            std::lock_guard<std::mutex> lk(g_noteMutex);
+            p.note = std::string(p.name) + ": the GPU ran out of memory; large jobs use the CPU (" + err + ")";
+        }
         if (!p.oomLogged.exchange(true))
             LOG_WARN("gpu", "%s: the GPU is out of memory (%s); such jobs use the CPU", p.name, err.c_str());
         else
             LOG_DEBUG("gpu", "%s: out of memory again (%s)", p.name, err.c_str());
-    } else if (!p.broken.exchange(true)) {
-        LOG_WARN("gpu", "%s on the GPU failed: %s; it uses the CPU from now on", p.name, err.c_str());
+        return;
     }
+    const int n = ++p.failures;
+    const int64_t delay = std::min(kRetryMaxMs, kRetryFirstMs << std::min(n - 1, 6));
+    p.retryAt = nowMs() + delay;
+    {
+        std::lock_guard<std::mutex> lk(g_noteMutex);
+        p.note = std::string(p.name) + ": uses the CPU after an error, tries the GPU again in " + std::to_string(delay / 1000) +
+                 " s (" + err + ")";
+    }
+    if (n == 1)
+        LOG_WARN("gpu", "%s on the GPU failed: %s; it uses the CPU and tries the GPU again in %lld s", p.name, err.c_str(),
+                 (long long)(delay / 1000));
+    else
+        LOG_DEBUG("gpu", "%s on the GPU failed again (%d in a row): %s; next try in %lld s", p.name, n, err.c_str(),
+                  (long long)(delay / 1000));
+}
+
+// A call that worked: a path that had failed is back on the GPU.
+void noteSuccess(PathState& p) {
+    if (p.failures == 0) return;
+    const int n = p.failures.exchange(0);
+    if (n == 0) return;
+    {
+        std::lock_guard<std::mutex> lk(g_noteMutex);
+        p.note.clear();
+    }
+    LOG_INFO("gpu", "%s is back on the GPU after %d failed %s", p.name, n, n == 1 ? "try" : "tries");
+}
+
+// Applies the result of one GPU call to its path.
+void noteResult(PathState& p, GpuStatus st, const std::string& err, bool oom) {
+    if (st == GpuStatus::Failed) noteFailure(p, err, oom);
+    else if (st == GpuStatus::Ok) noteSuccess(p);
 }
 }  // namespace
 
@@ -112,21 +154,28 @@ bool gpuEnabled() { return g_enabled.load(); }
 
 void gpuSetEnabled(bool on) {
     on = on && g_info.available;
-    if (g_enabled.exchange(on) != on) LOG_INFO("gpu", "GPU processing %s", on ? "on" : "off");
+    if (g_enabled.exchange(on) == on) return;
+    LOG_INFO("gpu", "GPU processing %s", on ? "on" : "off");
+    if (on) {
+        // The user asks for the GPU: paths that failed try it at once.
+        g_spec.reset();
+        g_live.reset();
+        g_chan.reset();
+    }
 }
 
 std::vector<std::string> gpuListDevices() { return gpuBackendList(); }
 
 GpuLimits gpuLimits() { return gpuBackendLimits(); }
 
-bool gpuSpectrogramUsable() { return gpuEnabled() && !g_spec.broken && gpuBackendImplements(GpuJob::Spectrogram); }
+bool gpuSpectrogramUsable() { return gpuEnabled() && !g_spec.waiting() && gpuBackendImplements(GpuJob::Spectrogram); }
 
 GpuStatus gpuSpectrogram(const SpecJob& job, float* lin, const std::function<bool()>& cancelled) {
     if (!gpuSpectrogramUsable()) return GpuStatus::Unavailable;
     std::string err;
     bool oom = false;
     const GpuStatus st = forcedFail(err) ? GpuStatus::Failed : gpuBackendSpectrogram(job, lin, cancelled, err, oom);
-    if (st == GpuStatus::Failed) noteFailure(g_spec, err, oom);
+    noteResult(g_spec, st, err, oom);
     return st;
 }
 
@@ -138,18 +187,18 @@ std::string gpuFallbackNotes() {
     return s;
 }
 
-bool gpuChannelUsable() { return gpuEnabled() && !g_chan.broken && gpuBackendImplements(GpuJob::Channel); }
+bool gpuChannelUsable() { return gpuEnabled() && !g_chan.waiting() && gpuBackendImplements(GpuJob::Channel); }
 
 GpuStatus gpuChannelize(const ChanJob& job, float* y, const std::function<bool()>& cancelled) {
     if (!gpuChannelUsable()) return GpuStatus::Unavailable;
     std::string err;
     bool oom = false;
     const GpuStatus st = forcedFail(err) ? GpuStatus::Failed : gpuBackendChannelize(job, y, cancelled, err, oom);
-    if (st == GpuStatus::Failed) noteFailure(g_chan, err, oom);
+    noteResult(g_chan, st, err, oom);
     return st;
 }
 
-bool gpuLiveUsable() { return gpuEnabled() && !g_live.broken && gpuBackendImplements(GpuJob::Live); }
+bool gpuLiveUsable() { return gpuEnabled() && !g_live.waiting() && gpuBackendImplements(GpuJob::Live); }
 
 GpuLiveSpectrum::GpuLiveSpectrum() = default;
 GpuLiveSpectrum::~GpuLiveSpectrum() { gpuBackendLiveDestroy(impl_); }
@@ -165,6 +214,11 @@ GpuStatus GpuLiveSpectrum::run(const uint8_t* raw, const FormatParams& fp, int n
         if (!impl_) impl_ = gpuBackendLiveCreate();
         st = impl_ ? gpuBackendLiveRun(impl_, raw, fp, n, frames, win, pw, err, oom) : GpuStatus::Unavailable;
     }
-    if (st == GpuStatus::Failed) noteFailure(g_live, err, oom);
+    if (st == GpuStatus::Failed && !oom) {
+        // Start the next try with a new queue and buffers.
+        gpuBackendLiveDestroy(impl_);
+        impl_ = nullptr;
+    }
+    noteResult(g_live, st, err, oom);
     return st;
 }

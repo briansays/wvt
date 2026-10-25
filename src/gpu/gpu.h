@@ -36,7 +36,7 @@ struct GpuInfo {
 bool gpuInit(GpuMode mode, int device, std::string& err);
 const GpuInfo& gpuInfo();
 bool gpuEnabled();            // available and not switched off
-void gpuSetEnabled(bool on);  // UI switch; no effect when not available
+void gpuSetEnabled(bool on);  // UI switch; no effect when not available. On: failed paths try the GPU at once
 
 // A spectrogram job: `rows` rows of `avg` FFTs of size n (a power of two).
 // FFT a of row r starts at specFftStart(job, r, a); samples outside the file
@@ -60,18 +60,20 @@ inline int64_t specFftStart(const SpecJob& j, int row, int a) {
 enum class GpuStatus : int { Ok = 0, Cancelled, Unavailable, Failed };
 
 // Runs the job on the GPU and writes rows * cols linear powers to lin.
-// Unavailable: no GPU, switched off, or this path failed earlier in the
-// session. Failed: a CUDA error (logged as WARN); the caller then uses the
-// CPU. After a failure other than "out of memory", it returns Unavailable
-// for the rest of the session. Setting WVT_GPU_FORCE_FAIL=1 makes every call
-// fail, to test the fallback.
+// Unavailable: no GPU, switched off, or this path failed a short time ago.
+// Failed: a GPU error (logged as WARN); the caller then uses the CPU. After a
+// failure other than "out of memory", it returns Unavailable for 1 s, then
+// tries the GPU again; each failure in a row doubles the wait, up to 60 s. A
+// success, gpuInit or gpuSetEnabled(true) ends the wait. Setting
+// WVT_GPU_FORCE_FAIL=1 makes every call fail, to test the fallback.
 GpuStatus gpuSpectrogram(const SpecJob& job, float* lin, const std::function<bool()>& cancelled);
 bool gpuSpectrogramUsable();  // gpuSpectrogram would try the GPU
 
 // Live spectrum rows on the GPU. One object per thread (the live spectrum
 // thread owns one); it keeps its stream, buffers and cuFFT plans between
 // rows. The fallback rules are the same as for gpuSpectrogram, with their own
-// "failed earlier" state.
+// "failed a short time ago" state. After a failure the next try starts with
+// new buffers.
 struct GpuLiveImpl;
 class GpuLiveSpectrum {
 public:
@@ -105,12 +107,13 @@ struct ChanJob {
     Progress* progress = nullptr;  // gets the outputs done (issue #75); may be null
 };
 // y gets outLen complex values (interleaved re, im). Same status and
-// fallback rules as gpuSpectrogram, with its own "failed earlier" state.
+// fallback rules as gpuSpectrogram, with its own "failed a short time ago" state.
 GpuStatus gpuChannelize(const ChanJob& job, float* y, const std::function<bool()>& cancelled);
 bool gpuChannelUsable();  // gpuChannelize would try the GPU
 
 // One line per path that fell back to the CPU, e.g. "waterfall: uses the CPU
-// after an error: ...". Empty when nothing failed.
+// after an error, tries the GPU again in 2 s (...)". Empty when nothing failed
+// or every path that failed works again.
 std::string gpuFallbackNotes();
 
 // Work limits of the backend in use, from its benchmarks. Jobs below the

@@ -343,7 +343,7 @@ void testSpectrogram(const std::string& dir) {
         j.win = w.data();
         check(gpuSpectrogram(j, lin.data(), [] { return true; }) == GpuStatus::Cancelled, "cancel stops the GPU job");
 
-        // A forced failure: the CPU takes over, and the path stays off.
+        // A forced failure: the CPU takes over, and the path waits before it tries again.
         setenv("WVT_GPU_FORCE_FAIL", "1", 1);
         auto f = computeWaterfall(r, never);
         unsetenv("WVT_GPU_FORCE_FAIL");
@@ -357,7 +357,7 @@ void testSpectrogram(const std::string& dir) {
                            std::to_string(c->fftsPerRow) + " FFTs per row, " + std::to_string(diff) + " of " +
                            std::to_string(c->db.size()) + " pixels differ)"
                      : std::string(" (no result)")));
-        check(!gpuSpectrogramUsable(), "after a failure the waterfall stays on the CPU");
+        check(!gpuSpectrogramUsable(), "after a failure the waterfall waits on the CPU");
         std::string e2;
         gpuInit(GpuMode::Auto, -1, e2);
         check(gpuSpectrogramUsable(), "gpuInit turns the path on again");
@@ -438,7 +438,8 @@ void testLive() {
                  (long long)d.compared);
         check(d.strongDb <= 0.05 && d.zeroMismatch == 0, b);
     }
-    // A forced failure turns the live path off until gpuInit.
+    // A forced failure turns the live path off for a while: until the retry
+    // time, gpuInit, or switching the GPU on again.
     const auto raw = rawSignal(2048, SampleFormat::CI16);
     const auto win = makeWindow(WindowType::Hann, 2048);
     std::vector<float> pw(2048);
@@ -449,6 +450,20 @@ void testLive() {
     unsetenv("WVT_GPU_FORCE_FAIL");
     check(st == GpuStatus::Failed && !gpuLiveUsable() && gpuSpectrogramUsable(),
           "a live failure turns off only the live path");
+    check(gpuFallbackNotes().find("live spectrum") != std::string::npos, "the failure is in the fallback notes");
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    check(gpuLiveUsable(), "1 s after the first failure the live path tries the GPU again");
+    check(live.run(raw.data(), fp, 2048, 1, win.data(), pw.data()) == GpuStatus::Ok && gpuFallbackNotes().empty(),
+          "a success after the retry clears the failure");
+    setenv("WVT_GPU_FORCE_FAIL", "1", 1);
+    live.run(raw.data(), fp, 2048, 1, win.data(), pw.data());
+    unsetenv("WVT_GPU_FORCE_FAIL");
+    gpuSetEnabled(false);
+    gpuSetEnabled(true);
+    check(gpuLiveUsable(), "switching the GPU on again turns the live path on at once");
+    setenv("WVT_GPU_FORCE_FAIL", "1", 1);
+    live.run(raw.data(), fp, 2048, 1, win.data(), pw.data());
+    unsetenv("WVT_GPU_FORCE_FAIL");
     std::string err;
     gpuInit(GpuMode::Auto, -1, err);
     check(gpuLiveUsable(), "gpuInit turns the live path on again");

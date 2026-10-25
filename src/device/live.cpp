@@ -184,6 +184,7 @@ void LiveEngine::spectrumLoop() {
     auto lastGapLog = clock::now() - std::chrono::seconds(5);
     bool fatalLogged = false;
     GpuLiveSpectrum gpu;  // used while gpuLiveUsable()
+    int side = -1;        // 1 = the last row ran on the GPU, 0 = on the CPU; logged when it changes
 
     while (!quit_) {
         {
@@ -220,9 +221,11 @@ void LiveEngine::spectrumLoop() {
             return std::min(f, (w - freshFrom_.load()) / n);  // nothing from before a retune
         };
         bool tryGpu = gpuLiveUsable();
+        const char* why = tryGpu ? "the GPU call failed" : !gpuEnabled() ? "the GPU is off or not available" : "waiting after a GPU error";
         int64_t frames = framesFor(tryGpu ? gl.liveMaxRate : kMaxAnalyzeRate);
         if (tryGpu && (double)frames * n < gl.liveMinInput) {
             tryGpu = false;  // a small row is faster on the CPU
+            why = "row below the GPU minimum";
             frames = framesFor(kMaxAnalyzeRate);
         }
         if (frames < 1) continue;
@@ -255,6 +258,11 @@ void LiveEngine::spectrumLoop() {
                 fft->forward(seg.data());
                 for (int i = 0; i < n; ++i) pw[i] += std::norm(seg[(i + n / 2) & (n - 1)]);  // fftshift
             }
+        }
+        if (side != (int)onGpu) {
+            if (onGpu) LOG_DEBUG("live", "spectrum rows on the GPU (FFT %d, %d FFTs per row)", n, avg);
+            else LOG_DEBUG("live", "spectrum rows on the CPU: %s (FFT %d, %d FFTs per row)", why, n, avg);
+            side = onGpu;
         }
         onGpu_ = onGpu;
 

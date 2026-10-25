@@ -67,8 +67,23 @@ calculated it.
 
 ## Errors
 
-If a GPU error occurs, that part of wvt goes back to the CPU for the rest of the session. The log
-and the status-bar tooltip tell you why.
+If a GPU error occurs, that part of wvt uses the CPU for 1 s and then tries the GPU again. If the
+errors continue, each wait is two times longer, up to a maximum of 60 s. When the GPU operates
+correctly again, wvt uses the GPU again and writes `... is back on the GPU` in the log. The log and
+the status-bar tooltip tell you about the error. To try the GPU again immediately, disable and
+enable **Tools → Use the GPU**.
+
+If the GPU has insufficient memory for a job, only that job uses the CPU.
+
+wvt also uses the CPU, without an error, for jobs that are too small (refer to the work limits in
+[How it works](#how-it-works)). On an M5, the CPU is as fast as the GPU for these jobs. For example:
+
+- A live row with fewer than 131072 samples. This occurs at low sample rates, with a manual
+  **Avg** value, or for one row after a retune.
+- A waterfall view with less than 16 M FFT input samples, for example a view that you zoomed in.
+
+With `-v`, the log shows each change of the live spectrum between the GPU and the CPU, and the
+reason.
 
 To test the fallback without an error, set `WVT_GPU_FORCE_FAIL=1`. Each GPU call then fails, and
 wvt uses the CPU.
