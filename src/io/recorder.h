@@ -118,7 +118,5 @@ private:
 
 // "~/x" -> "$HOME/x"
 std::string expandHome(const std::string& path);
-// mkdir -p
-bool makeDirs(const std::string& dir, std::string& err);
 // Extension of a raw recording in format f, e.g. ".cs16"
 const char* rawFileExt(SampleFormat f);

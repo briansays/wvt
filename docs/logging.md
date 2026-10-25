@@ -14,6 +14,9 @@ these folders that is set:
 4. The `TMPDIR` environment variable.
 5. `/tmp`.
 
+If the folder does not exist, wvt makes it. If wvt cannot make the folder or the file, it writes a
+warning and continues without a log file.
+
 The file gets all messages, at all levels, also when you do not use `-v`. To write no file, use
 `--no-log-file`.
 

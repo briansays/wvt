@@ -45,23 +45,6 @@ std::string trimmed(double v, int keep) {
     return s;
 }
 
-bool mkdirs(const std::string& dir, std::string& err) {
-    if (dir.empty()) return true;
-    std::string cur;
-    size_t i = 0;
-    while (i <= dir.size()) {
-        size_t j = dir.find('/', i);
-        if (j == std::string::npos) j = dir.size();
-        cur = dir.substr(0, j);
-        if (!cur.empty() && mkdir(cur.c_str(), 0755) != 0 && errno != EEXIST) {
-            err = "cannot create directory '" + cur + "': " + errnoText(errno);
-            return false;
-        }
-        i = j + 1;
-    }
-    return true;
-}
-
 bool writeAll(int fd, const void* data, size_t n) {
     const char* p = (const char*)data;
     while (n > 0) {
@@ -102,7 +85,6 @@ const char* rawExt(SampleFormat f) {
 
 const char* rawFileExt(SampleFormat f) { return rawExt(f); }
 
-bool makeDirs(const std::string& dir, std::string& err) { return mkdirs(dir, err); }
 
 std::string expandHome(const std::string& path) {
     if (path == "~" || path.rfind("~/", 0) == 0) {
@@ -133,7 +115,7 @@ bool Recorder::start(std::shared_ptr<SampleRing> ring, const RecordSource& src, 
     std::string base = cfg.exactPath.empty() ? prefix + "_" + stamp + "_" + trimmed(src.fc / 1e6, 3) + "MHz_" + rate
                                              : expandHome(cfg.exactPath);
     size_t sl = base.find_last_of('/');
-    if (sl != std::string::npos && !mkdirs(base.substr(0, sl), err)) {
+    if (sl != std::string::npos && !makeDirs(base.substr(0, sl), err)) {
         LOG_DEBUG("record", "start failed: %s", err.c_str());
         return false;
     }

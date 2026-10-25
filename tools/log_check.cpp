@@ -1,6 +1,6 @@
 // Logger self-test: level names, -v / --log-dir argument parsing, console and
-// file filtering, the log file name and header, name clashes, and lines from
-// many threads at once. Writes into a fresh temp folder. Exit status is
+// file filtering, the log file name and header, name clashes, a missing log
+// folder (made), and lines from many threads at once. Writes into a fresh temp folder. Exit status is
 // nonzero on failure.
 #include <unistd.h>
 
@@ -191,7 +191,7 @@ void testStatusProgress(const std::string& dir) {
     fclose(con);
 }
 
-void testNoFile() {
+void testNoFile(const std::string& dir) {
     printf("no file\n");
     FILE* con = tmpfile();
     LogConfig cfg;
@@ -201,11 +201,27 @@ void testNoFile() {
     check(logFilePath().empty(), "--no-log-file opens nothing");
     check(!logEnabled(LogLevel::Debug), "DEBUG off with no file and console at WARN");
     cfg.file = true;
-    cfg.dir = "/nonexistent/wvt";
+    std::string blocker = dir + "/a_file";  // a folder below a file cannot be made
+    fclose(fopen(blocker.c_str(), "w"));
+    cfg.dir = blocker + "/wvt";
     logInit(cfg);
     std::string c = slurp(con);
-    check(logFilePath().empty() && count(c, "wvt: warning: cannot create a log file in /nonexistent/wvt") == 1,
-          "unwritable folder: one warning, no file");
+    check(logFilePath().empty() && count(c, "wvt: warning: cannot create a log file in " + cfg.dir) == 1,
+          "folder that cannot be made: one warning, no file");
+    fclose(con);
+}
+
+void testMakeFolder(const std::string& dir) {
+    printf("missing folder\n");
+    FILE* con = tmpfile();
+    LogConfig cfg;
+    cfg.dir = dir + "/new/logs/";
+    cfg.consoleStream = con;
+    logInit(cfg);
+    std::string path = logFilePath();
+    check(path.rfind(dir + "/new/logs/wvt_log_", 0) == 0, "missing folders are made: " + path);
+    logShutdown();
+    check(slurp(path).find("# wvt log, started") == 0, "the file in the new folder has the header");
     fclose(con);
 }
 
@@ -255,7 +271,8 @@ int main() {
     testFile(dir);
     testVerboseConsole(dir);
     testStatusProgress(dir);
-    testNoFile();
+    testNoFile(dir);
+    testMakeFolder(dir);
     testThreads(dir);
     std::string cmd = "rm -rf '" + dir + "'";
     if (system(cmd.c_str()) != 0) fprintf(stderr, "could not remove %s\n", dir.c_str());
