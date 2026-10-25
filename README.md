@@ -4,7 +4,11 @@ An X11 desktop tool to examine raw IQ recordings from software-defined radios.
 The left side shows a spectrum and a waterfall. The right side shows I/Q, AM, FM and PM plots
 that share one time axis. When you pan or zoom one plot, all the other plots follow.
 
-<img width="2125" height="1407" alt="image" src="https://github.com/user-attachments/assets/71d188af-cc07-4a0c-93ef-36d082b5829b" />
+*File View:*
+<img width="1628" height="1000" alt="CleanShot 2026-10-25 at 12 33 26 PM" src="https://github.com/user-attachments/assets/516071cb-e20a-4f28-9f93-a0f25db03535" />
+
+*Live View:* 
+<img width="1628" height="1000" alt="CleanShot 2026-10-25 at 12 32 03 PM" src="https://github.com/user-attachments/assets/1b6723c9-adea-4075-b649-0d37eaf3a7da" />
 
 - **Live devices:** wvt streams from an RTL-SDR v3, a USRP (B200 family, N3xx, X3xx, X4xx), a Signal Hound BB60 or an Epiq
   Sidekiq (M.2, mPCIe, X2, X4, NV100), and records the
