@@ -436,7 +436,9 @@ void testTransportAndFaults() {
     if (d) {
         Capture cap;
         cap.start(*d, err);
-        sleepS(0.6);
+        // The card fails at 0.2 s and the error comes after 10 failed reads 10 ms
+        // apart; a loaded CI runner can take much longer, so wait up to 5 s.
+        for (int i = 0; i < 100 && d->fatalError().empty(); ++i) sleepS(0.05);
         check(d->fatalError().find("card removed") != std::string::npos, "removal: " + d->fatalError());
         d->stop();
     }
