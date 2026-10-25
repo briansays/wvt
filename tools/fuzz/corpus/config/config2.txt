@@ -1,0 +1,4 @@
+sdr.0.type = b205
+sdr.0.rate = 61.44e6
+sdr.0.port = TX/RX
+sdr.0.args = "serial=\"31\" #x"

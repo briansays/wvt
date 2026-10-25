@@ -1,6 +1,7 @@
 # Plan: run-time configuration file (issue #88)
 
-Status: plan (2026-10-25). Not implemented.
+Status: stage 1 of 4 implemented (2026-10-25) on `88-config-file`: the parser, the key table and
+`config_check`. wvt does not read the file yet.
 
 ## 1. Goal
 
@@ -45,7 +46,7 @@ The rows marked **agreed** differ from the issue text; the owner agreed to them 
 | `wvt_sdr_count` (**agreed**) | Not used. The profiles are the `sdr.N.*` indexes that are in the file | A count can disagree with the lines. A missing index is not an error |
 | Default SDR | `sdr.default = b205` (a type), or `sdr.default = 1` (a profile index) | The issue gives a type. An index is needed when there are two of one type (two X310s) |
 | Profile match | A scanned device uses the first profile whose `type` matches its model and, if set, whose `serial` (or `args`) matches | Per-type defaults as the issue asks, with a per-unit override |
-| Types | `b200`, `b205`, `b210`, `x310`, `n310`, `x410`, `usrp` (any USRP), `bb60`, `m2`, `x2`, `x4`, `nv100`, `sidekiq` (any card), `rtlsdr`, `sim` | The models that wvt supports now. Matched without case against the model that the scan reports (`B205mini` matches `b205`) |
+| Types | `b200`, `b205`, `b210`, `x310`, `n310`, `x410`, `usrp` (any USRP), `bb60`, `mpcie`, `m2`, `m2-2280`, `z3u`, `x2`, `x4`, `nv100`, `sidekiq` (any card), `rtlsdr`, `sim` | The models that wvt supports now. Matched without case against the model that the scan reports (`B205mini` matches `b205`) |
 | Units (**agreed**) | A number is in base units (Hz, S/s, s, dB), written plainly or in scientific notation: `61.44e6` (61.44 MS/s), `915e6`, `2.4e6`, `-20`. Letter suffixes (`61.44M`) are not accepted in the file; the warning shows the scientific form (`use 61.44e6`) | The issue writes `sample_rate_sps = 61.44`, which is 61.44 S/s if read literally. One unambiguous form; `M` (mega) and `m` (milli) cannot be mixed up |
 | Paths (**agreed**) | `~` expands. After expansion the path must be absolute; a relative path is a warning and the default stays | The issue says absolute but gives `~/wvt/...`. Accept both forms that the issue shows |
 | Folder vs prefix | The file sets folders (`recording.folder`); the file name start stays a separate key (`recording.name = wvt`) | The issue asks for folders. wvt uses prefixes inside |
@@ -61,7 +62,8 @@ The rows marked **agreed** differ from the issue text; the owner agreed to them 
 
 ## 4. Implementation notes
 
-- `src/common/config.{h,cpp}`: the parser and the key table. One table entry per key: name, type
+- `src/app/config.{h,cpp}`: the parser and the key table (in `src/app/`, because `src/common/`
+  does not include other folders, and the table uses `WindowType` and `SampleFormat`). One table entry per key: name, type
   (path, frequency, number, whole number, choice, bool, text), default, help line, and where the
   value goes. The table drives the parse, `--write-config`, `--show-config` and the "did you mean"
   hint, as `CliParser` does for options (issue #54).

@@ -1,0 +1,5 @@
+sdr.3.type = x4
+sdr.3.args = "#0"
+sdr.3.fc = 3.5G
+tx.allow = 902e6:928e6, 2.4e9:2.5e9
+ui.geometry = 800x600

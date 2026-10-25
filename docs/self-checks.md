@@ -37,6 +37,7 @@ code if a check fails.
 | `build/extract_check` | The region export: copies, the band filter, metadata, input checks and cancel |
 | `build/snapshot_check` | Plot snapshots: file names, numbering, the crop and the PNG files |
 | `build/session_check` | File sessions: write and read back, the recording after a folder move, session files and recordings told apart, no replace without asking, bad values |
+| `build/config_check` | The configuration file parser: comments, quotes, numbers in base units and the refused SI suffixes, folders, unknown keys and bad values with their line numbers, duplicates, SDR profiles and the file search order |
 | `build/measure_check` | Point measurements: the nearest sample, the snap to a peak or a valley, which differences apply, the plot names |
 | `build/device_check` | The device list entries from a UHD search, device arguments and the sample rate rules |
 | `build/clipboard_check` | The system clipboard, both ways, with a second X client: UTF-8, Latin-1, large texts in parts. It needs an X server (for example `xvfb-run -a build/clipboard_check`); without one it is skipped |
@@ -86,12 +87,13 @@ libFuzzer). Refer to [`WVT_FUZZ`](build.md#wvt_fuzz).
 | `fuzz_chain` | `loadChain` (chain files), then `checkParams` on the result |
 | `fuzz_meta` | `guessMeta`: file names (gqrx and the rate and frequency in a name) and SigMF metadata files |
 | `fuzz_parse_si` | `parseSI`, the number parser of the command line and the input fields (`2.4M`, `915 MHz`) |
+| `fuzz_config` | `parseConfig`, the configuration file parser |
 
 To build them and run them on their seed inputs (`tools/fuzz/corpus/`):
 
 ```sh
 cmake -S . -B build-fuzz -DWVT_FUZZ=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
-cmake --build build-fuzz -j --target fuzz_json fuzz_chain fuzz_meta fuzz_parse_si
+cmake --build build-fuzz -j --target fuzz_json fuzz_chain fuzz_meta fuzz_parse_si fuzz_config
 ctest --test-dir build-fuzz -R '^fuzz_' --output-on-failure
 ```
 
