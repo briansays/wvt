@@ -18,6 +18,7 @@
 #include "app/app.h"
 #include "common/build_info.h"
 #include "app/cli.h"
+#include "app/config.h"
 #include "dsp/extract.h"
 #include "gpu/gpu.h"
 #include "imgui.h"
@@ -403,27 +404,64 @@ int main(int argc, char** argv) {
     bool haveAudio = false;
     std::string audioOut, audioDevice;
     double audioVol = -6;
-    float scale = 1.f;
-    int winW = 1600, winH = 950;
+    // The configuration file (issue #88) comes first: it sets the defaults that
+    // the environment and the options then change, the log folder among them.
+    std::vector<char*> args(argv, argv + argc);
+    WvtConfig cfg;
+    std::vector<std::string> cfgWarnings;
+    std::string cfgOption, cfgFile, cfgErr;
+    bool noConfig = false;
+    if (configTakeArgs(args, cfgOption, noConfig, cfgErr) && !noConfig) {
+        bool required = false;
+        cfgFile = configPath(cfgOption, required);
+        if (required || access(cfgFile.c_str(), F_OK) == 0) {
+            if (!loadConfigFile(cfgFile, cfg, cfgWarnings, cfgErr) && !required) {
+                cfgWarnings.push_back(cfgErr);  // the default file exists but cannot be read
+                cfgErr.clear();
+            }
+        } else {
+            cfgFile.clear();  // no file: the built-in defaults
+        }
+    }
+    rc.sigmf = cfg.recordingSigmf;
+    rc.cf32 = cfg.recordingCf32;
+    rc.maxSeconds = cfg.recordingMaxSeconds;
+    gc.fmt = cfg.siggenSample;
+    extractCi16 = cfg.exportBandCi16;
+    bool haveRecordFormat = false;  // --record-format also sets the generator file format
+
+    float scale = (float)cfg.uiScale;
+    int winW = cfg.uiWidth, winH = cfg.uiHeight;
     if (const char* e = envVar("WVT_SCALE"); e && *e) {
         double x;
         if (parseSI(e, x) && x >= 0.5 && x <= 4) scale = (float)x;
         else LOG_WARN("main", "WVT_SCALE=%s is not a number from 0.5 to 4; using 1", e);
     }
     GpuMode gpuMode = GpuMode::Auto;
-    int gpuDevice = -1;
+    parseGpuMode(cfg.gpu.c_str(), gpuMode);  // the key table checked the value
+    int gpuDevice = cfg.gpuDevice;
 
     // Logging options come out of argv first, so the rest of the parse is logged.
     LogConfig lc;
     for (int i = 0; i < argc; ++i) lc.commandLine += (i ? " " : "") + std::string(argv[i]);
     lc.build = std::string(buildGitHash()) + (*buildVersionTag() ? std::string(" (") + buildVersionTag() + ")" : "");
-    std::vector<char*> args(argv, argv + argc);
     std::string logErr;
     if (!logParseArgs(args, lc, logErr)) {
         LOG_ERROR("main", "%s", logErr.c_str());
         return 2;
     }
+    // The file's log folder is below --log-dir and $WVT_LOG_DIR.
+    if (const char* e = envVar("WVT_LOG_DIR"); lc.dir.empty() && !cfg.logFolder.empty() && !(e && *e))
+        lc.dir = expandHome(cfg.logFolder);
     logInit(lc);
+    if (!cfgErr.empty()) {
+        LOG_ERROR("config", "%s", cfgErr.c_str());
+        return 2;
+    }
+    for (const auto& w : cfgWarnings) LOG_WARN("config", "%s", w.c_str());
+    if (noConfig) LOG_INFO("config", "no configuration file (--no-config)");
+    else if (cfgFile.empty()) LOG_DEBUG("config", "no configuration file; built-in defaults");
+    else LOG_INFO("config", "read %s: %zu settings", cfgFile.c_str(), cfg.origin.size());
     if (const char* e = envVar("WVT_GPU"); e && *e && !parseGpuMode(e, gpuMode))
         LOG_WARN("main", "WVT_GPU=%s is not auto, on or off; using auto", e);
     argc = (int)args.size();
@@ -532,6 +570,8 @@ int main(int argc, char** argv) {
              "print log messages to the console: debug | info | warn | error\n(default info; without -v only warnings and errors print)");
     cli.note(nullptr, "--log-dir", "DIR", "log file folder (default $WVT_LOG_DIR, then $TMPDIR, then /tmp)");
     cli.note(nullptr, "--no-log-file", nullptr, "don't write wvt_log_<date>_<time>.log");
+    cli.note(nullptr, "--config", "FILE", "configuration file (default $WVT_CONFIG, then ~/.config/wvt/wvt.conf)");
+    cli.note(nullptr, "--no-config", nullptr, "read no configuration file: the built-in defaults");
     cli.action("-h", "--help", "show this help", [&](const char*) {
         exitNow = 0;
         showHelp = true;
@@ -620,7 +660,7 @@ int main(int argc, char** argv) {
         const std::string s = v;
         if (s != "sigmf" && s != "raw") return bad("--record-format wants sigmf or raw");
         rc.sigmf = s == "sigmf";
-        return true;
+        return haveRecordFormat = true;
     });
     cli.add(nullptr, "--record-sample", "native|cf32", "(default native: cu8 for RTL-SDR, ci16 for USRP and BB60)",
             [&](const char* v) {
@@ -1005,7 +1045,7 @@ int main(int argc, char** argv) {
             return 2;
         }
         if (haveGenOut) {
-            gc.rec.sigmf = rc.sigmf;
+            gc.rec.sigmf = haveRecordFormat ? rc.sigmf : cfg.siggenSigmf;
             gc.seconds = genSeconds > 0 ? genSeconds : 1;
             if (gc.pulses > 0 && gp.mode == GenMode::CW && !gp.sweeping()) {
                 LOG_ERROR("main", "--gen-pulses needs --gen pulsed, --play, a chain or a sweep");
@@ -1106,7 +1146,7 @@ int main(int argc, char** argv) {
 
     int exitCode = 0;
     {
-        App app(win);
+        App app(win, cfg);
         app.setTxLimits(txc.limits);
         if (haveGen || openGen) app.openSigGen(haveGen ? &gp : nullptr);
         if (haveDevice) {

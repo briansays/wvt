@@ -31,6 +31,19 @@ their range. For more information about an option, refer to the page in the last
 | `--gpu-device N` | Use GPU `N` | [GPU](gpu.md) |
 | `-h`, `--help` | Show the options, then stop | |
 
+## Configuration file
+
+The configuration file sets the defaults. The environment variables and the options change them.
+For the keys, refer to the [design record](design/config-file-plan.md).
+
+| Option | Function |
+|---|---|
+| `--config FILE` | Read this configuration file. If it does not exist, wvt stops |
+| `--no-config` | Read no configuration file. wvt uses the built-in defaults |
+
+Without `--config`, wvt reads `$WVT_CONFIG`. If that is not set, wvt reads
+`$XDG_CONFIG_HOME/wvt/wvt.conf` or `~/.config/wvt/wvt.conf`, if the file exists.
+
 ## Logging
 
 | Option | Function | Page |
@@ -106,6 +119,7 @@ For the full list, refer to [Signal generator](siggen.md#command-line).
 
 | Variable | Function |
 |---|---|
+| `WVT_CONFIG` | The configuration file, as `--config` |
 | `WVT_SCALE` | The UI scale, as `--scale` |
 | `WVT_GPU` | `auto`, `on` or `off`, as `--gpu` |
 | `WVT_LOG_DIR` | The folder for the log file, as `--log-dir` |

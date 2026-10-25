@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "app/config.h"
 #include "audio/audio_engine.h"
 #include "dsp/engine.h"
 #include "dsp/extract.h"
@@ -32,7 +33,8 @@ struct CliOverrides {
 
 class App {
 public:
-    explicit App(X11Window& win);
+    // cfg: the defaults from the configuration file (issue #88).
+    App(X11Window& win, const WvtConfig& cfg);
     ~App();
     // A recording, or a session file (issue #76), which opens its recording
     // and puts back the state it saved.

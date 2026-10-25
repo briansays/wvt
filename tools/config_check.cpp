@@ -217,6 +217,9 @@ int main() {
               "tx.allow bands, tx.max_gain_db");
         check(warned(p, {"t.conf:14:", "without '/'"}), "a name with '/'");
         check(std::isnan(p.cfg.dbMin) && p.cfg.dbMax == -10, "db_min auto, db_max -10");
+        const Parsed db = parse("display.db_min = -10\ndisplay.db_max = -20\n");
+        check(warned(db, {"t.conf:2:", "not below"}) && std::isnan(db.cfg.dbMin) && std::isnan(db.cfg.dbMax),
+              "db_min above db_max: both unused");
         const Parsed b = parse("tx.allow = 928e6:902e6\nsdr.0.type=b205\nsdr.0.agc = maybe\n");
         check(warned(b, {"t.conf:1:", "LO:HI"}) && b.cfg.txAllow.empty(), "a band with LO > HI");
         check(warned(b, {"t.conf:3:", "on or off"}), "a bool that is not one" + list(b));
@@ -300,6 +303,21 @@ int main() {
         setenv("HOME", "/home/u", 1);
         check(configPath("", req) == "/home/u/.config/wvt/wvt.conf" && !req, "then ~/.config/wvt/wvt.conf");
         check(configPath("~/c.conf", req) == "/home/u/c.conf", "~ in --config");
+    }
+
+    printf("options\n");
+    {
+        std::string a0 = "wvt", a1 = "--config", a2 = "/x.conf", a3 = "file.iq", a4 = "--no-config", a5 = "--config=/y.conf";
+        std::vector<char*> args = {a0.data(), a1.data(), a2.data(), a3.data(), a4.data(), a5.data()};
+        std::string path, err;
+        bool none = false;
+        check(configTakeArgs(args, path, none, err) && args.size() == 2 && std::string(args[1]) == "file.iq" &&
+                  path == "/y.conf" && none,
+              "--config FILE, --config=FILE and --no-config come out of argv");
+        std::vector<char*> bad = {a0.data(), a1.data()};
+        check(!configTakeArgs(bad, path, none, err) && !err.empty(), "--config without a file");
+        check(configJoin("~/rec/", "wvt") == "~/rec/wvt" && configJoin("/data", "siggen") == "/data/siggen",
+              "configJoin with and without a trailing /");
     }
 
     if (failures) {

@@ -8,6 +8,7 @@
 #include <fstream>
 #include <functional>
 #include <sstream>
+#include <utility>
 
 #include "common/log.h"
 
@@ -568,6 +569,11 @@ void parseConfig(const std::string& text, const std::string& name, WvtConfig& cf
                 warnLate(it->second, pre + k.field + " does not apply to a " + p.type + "; it is not used");
         }
     }
+    if (!std::isnan(cfg.dbMin) && !std::isnan(cfg.dbMax) && cfg.dbMin >= cfg.dbMax) {
+        warnLate(seen["display.db_max"], "display.db_min (" + fmtNum(cfg.dbMin) + ") is not below display.db_max (" +
+                                             fmtNum(cfg.dbMax) + "); the automatic range is used");
+        cfg.dbMin = cfg.dbMax = NAN;
+    }
     if (!cfg.sdrDefault.empty()) {
         const int ln = seen.count("sdr.default") ? seen["sdr.default"] : 0;
         const std::string& d = cfg.sdrDefault;
@@ -611,4 +617,35 @@ std::string configPath(const std::string& option, bool& required) {
     required = false;
     if (const char* x = envVar("XDG_CONFIG_HOME"); x && *x) return std::string(x) + "/wvt/wvt.conf";
     return expandTilde("~/.config/wvt/wvt.conf");
+}
+
+bool configTakeArgs(std::vector<char*>& args, std::string& path, bool& noConfig, std::string& err) {
+    std::vector<char*> keep;
+    for (size_t i = 0; i < args.size(); ++i) {
+        const std::string a = args[i] ? args[i] : "";
+        if (i > 0 && a == "--no-config") {
+            noConfig = true;
+        } else if (i > 0 && a == "--config") {
+            if (i + 1 >= args.size() || !args[i + 1]) {
+                err = "--config wants a file";
+                return false;
+            }
+            path = args[++i];
+        } else if (i > 0 && a.rfind("--config=", 0) == 0) {
+            path = a.substr(9);
+            if (path.empty()) {
+                err = "--config wants a file";
+                return false;
+            }
+        } else {
+            keep.push_back(args[i]);
+        }
+    }
+    args = std::move(keep);
+    return true;
+}
+
+std::string configJoin(const std::string& folder, const std::string& name) {
+    if (folder.empty()) return name;
+    return folder.back() == '/' ? folder + name : cat(folder, "/", name);
 }

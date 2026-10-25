@@ -1,7 +1,8 @@
 # Plan: run-time configuration file (issue #88)
 
-Status: stage 1 of 4 implemented (2026-10-25) on `88-config-file`: the parser, the key table and
-`config_check`. wvt does not read the file yet.
+Status: stages 1 and 2 of 4 implemented (2026-10-25) on `88-config-file`. wvt reads the file for
+the folders, the formats, the FFT and live values, the GPU, the UI scale and size, and the log
+folder. The SDR keys and the transmit limits are parsed but not used yet.
 
 ## 1. Goal
 

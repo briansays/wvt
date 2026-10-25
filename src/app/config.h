@@ -100,6 +100,15 @@ bool loadConfigFile(const std::string& path, WvtConfig& cfg, std::vector<std::st
 // file is an error, else it is skipped.
 std::string configPath(const std::string& option, bool& required);
 
+// Takes --config FILE, --config=FILE and --no-config out of args (args[0] is
+// the program name), as logParseArgs does for the log options, so that the
+// file is read before the log starts. False (err set) when --config has no
+// value.
+bool configTakeArgs(std::vector<char*>& args, std::string& path, bool& noConfig, std::string& err);
+
+// A folder and a file name start: "~/rec" + "wvt" -> "~/rec/wvt".
+std::string configJoin(const std::string& folder, const std::string& name);
+
 // A number in base units, plain or in scientific notation ("61.44e6", "-20").
 // No SI suffixes: "61.44M" fails, and hint gets "use 61.44e6".
 bool parseConfigNumber(const std::string& s, double& out, std::string& hint);
