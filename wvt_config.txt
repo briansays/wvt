@@ -1,0 +1,70 @@
+# wvt configuration file (issue #88)
+# One "key = value" per line. "#" starts a comment (at the line start or after a space).
+# Numbers are in base units (Hz, S/s, s, dB), in scientific notation: 61.44e6 = 61.44 MS/s.
+# "~" is the home folder.
+# Order: built-in default < this file < environment variable < command-line option.
+
+# ---- folders ----------------------------------------------------------------
+recording.folder    = ~/wvt/recordings/
+recording.name      = wvt                # file names: <name>_<date>_<time>_<fc>_<rate>
+snapshot.folder     = ~/wvt/snapshot/
+siggen.folder       = ~/wvt/siggen/
+siggen.name         = siggen
+audio.folder        = ~/wvt/audio/
+
+# ---- file formats -----------------------------------------------------------
+recording.format    = sigmf              # sigmf | raw
+recording.sample    = native             # native (cu8 RTL-SDR, ci16 USRP/BB60/Sidekiq) | cf32
+recording.max_seconds = 0                # 0 = no limit
+siggen.format       = sigmf              # sigmf | raw
+siggen.sample       = cf32               # cf32 | ci16 | ci8 | cu8
+export.band_sample  = cf32               # region export with a band filter: cf32 | ci16
+
+# ---- file waterfall FFT -----------------------------------------------------
+fft.size            = 1024               # power of two, 64 to 65536
+fft.window          = blackman-harris    # rect | hann | hamming | blackman | blackman-harris | flat-top
+fft.overlap_pct     = 50                 # 0 to 95
+display.colormap    = viridis            # an ImPlot colormap: viridis | plasma | hot | cool | jet | twilight | greys ...
+# display.db_min    = auto
+# display.db_max    = auto
+
+# ---- live spectrum ----------------------------------------------------------
+live.fft_size       = 2048               # power of two, 64 to 65536
+live.window         = blackman-harris
+live.avg            = auto               # auto (all new samples) | 1 to 64
+live.rows_per_sec   = 30                 # 1 to 100
+live.max_columns    = 2048               # 64 to 8192; more bins are max-pooled
+live.history_rows   = 600                # 64 to 4096
+
+# ---- general ----------------------------------------------------------------
+gpu                 = auto               # auto | on | off   (env WVT_GPU)
+# gpu.device        = 0
+ui.scale            = 1                  # 0.5 to 4         (env WVT_SCALE)
+ui.geometry         = 1600x950           # window size WxH
+log.folder        = ~/wvt/logs/        # (env WVT_LOG_DIR)
+
+# ---- transmit limits (only stricter than the environment and the options) ---
+# tx.max_gain_db    = 60
+# tx.allow          = 902e6:928e6, 2.4e9:2.5e9
+
+# ---- SDRs -------------------------------------------------------------------
+# sdr.default: a type (the first profile and the first device of that type)
+# or a profile index. Not set: the first device that the scan finds.
+sdr.default       = b205
+
+# Profiles: sdr.N.<field>, N from 0 to 99. A device uses the first profile whose type
+# fits it and whose serial and args, where set, match it.
+# Types: b200 b205 b210 x310 n310 x410 usrp bb60 mpcie m2 m2-2280 z3u x2 x4 nv100 sidekiq rtlsdr sim.
+
+# Profile 0, an example:
+sdr.0.type        = b205
+# sdr.0.serial      = 31DDAD7            # only this unit
+sdr.0.fc          = 100e6
+sdr.0.rate        = 61.44e6
+sdr.0.gain_db     = 0                  # BB60: sdr.0.ref_level_dbm
+sdr.0.agc         = off
+sdr.0.port        = TX/RX              # USRP antenna or Sidekiq RF port
+sdr.0.bandwidth   = auto
+sdr.0.ref         = internal           # USRP: internal | external | gpsdo
+sdr.0.channel     = 0                  # USRP
+# Also: atten, amp (BB60), ext_ref (BB60, Sidekiq), direct_sampling, bias_tee, ppm (RTL-SDR).
