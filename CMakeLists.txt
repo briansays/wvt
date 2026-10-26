@@ -299,13 +299,14 @@ else()
     set_target_properties(bb_api PROPERTIES IMPORTED_LOCATION "${_bb_lib}"
       INTERFACE_INCLUDE_DIRECTORIES "${BB_API_INCLUDE_DIR}")
     # The x86-64 Linux library needs FTDI's libftd2xx, which the SDK ships next to it.
-    # libbb_api has no RUNPATH of its own, and wvt's RUNPATH applies only to wvt's own
-    # NEEDED entries, so wvt must list libftd2xx itself. wvt calls nothing in it, so
-    # --no-as-needed keeps the linker from dropping it.
+    # libbb_api has no RUNPATH of its own, and a RUNPATH on wvt applies only to wvt's
+    # own NEEDED entries, so wvt gets an old-style RPATH, which the loader also uses for
+    # libbb_api's libftd2xx. wvt must not list libftd2xx itself: it has its own copy of
+    # libusb and exports the libusb_* functions, so ahead of the system libusb it takes
+    # over librtlsdr's and UHD's libusb calls, and they crash.
     if(EXISTS "${_bb_src_dir}/libftd2xx.so")
       configure_file("${_bb_src_dir}/libftd2xx.so" "${_bb_dir}/libftd2xx.so" COPYONLY)
-      set_property(TARGET bb_api PROPERTY INTERFACE_LINK_LIBRARIES
-        "-Wl,--push-state,--no-as-needed" "${_bb_dir}/libftd2xx.so" "-Wl,--pop-state")
+      target_link_options(wvt PRIVATE "LINKER:--disable-new-dtags")
     endif()
     set(WVT_BB_TARGET bb_api)
     set(WVT_BB_OK TRUE)
