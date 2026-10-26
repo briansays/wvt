@@ -406,6 +406,9 @@ else()
         endif()
       endforeach()
       separate_arguments(_skiq_libs UNIX_COMMAND "${_skiq_libs-static}")
+      # It comes after wvt's own link options and would turn the RPATH that the BB60
+      # backend needs into a RUNPATH. The Sidekiq rpaths work in either form.
+      list(REMOVE_ITEM _skiq_libs "-Wl,--enable-new-dtags")
     endif()
   else()
     # The link flags of SDK 4.26.0's share/sidekiq/sidekiq-config/<build>.conf.
