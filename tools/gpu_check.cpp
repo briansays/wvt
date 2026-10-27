@@ -1,6 +1,6 @@
 // gpu_check - GPU acceleration self-test and benchmark (issue #3).
 //
-//   gpu_check [--bench] [--samples N] [scratch_dir]
+//   gpu_check [--bench] [--samples N] [--require-gpu] [scratch_dir]
 //
 // Without --bench it checks the GPU setup rules and, when a GPU can be used,
 // compares the GPU waterfall, live spectrum and channel filter with the CPU.
@@ -8,7 +8,9 @@
 // waterfall (CPU and GPU), the live spectrum row, the channel filter and the
 // waterfall colouring. The test file is a ci16 recording of N samples (default 64M,
 // 256 MB) with tones, a chirp, short pulses and noise. Exit status 0 = all
-// checks passed. Use a larger --samples (e.g. 1G) to time wide views past the
+// checks passed. Without a usable GPU the GPU checks pass on the CPU rules
+// only; --require-gpu (or WVT_REQUIRE_GPU=1) makes that a failure, for a
+// computer that has a GPU. Use a larger --samples (e.g. 1G) to time wide views past the
 // CPU budget; smaller files clip them.
 #include <unistd.h>
 
@@ -16,6 +18,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <thread>
 #include <vector>
@@ -28,6 +31,7 @@
 
 namespace {
 int failures = 0;
+bool requireGpu = false;  // --require-gpu or WVT_REQUIRE_GPU=1
 
 void check(bool ok, const std::string& what) {
     printf("  [%s] %s\n", ok ? " ok " : "FAIL", what.c_str());
@@ -158,6 +162,7 @@ void testSetup() {
     printf("  build: %s; GPU: %s\n", info.built ? info.backend.c_str() : "no GPU backend",
            info.available ? (info.name + ", " + info.version).c_str() : ("none, " + info.reason).c_str());
     check(info.available || !info.reason.empty(), "auto without a GPU gives the reason");
+    if (requireGpu) check(info.available, "a GPU is usable (--require-gpu)" + (info.available ? "" : ": " + info.reason));
     check(gpuEnabled() == info.available, "auto: enabled when a GPU is usable");
     if (info.available) {
         gpuSetEnabled(false);
@@ -698,16 +703,18 @@ int main(int argc, char** argv) {
     bool bench = false;
     double samples = 64 * 1024 * 1024;
     std::string dir;
+    if (const char* e = getenv("WVT_REQUIRE_GPU"); e && *e && std::string(e) != "0") requireGpu = true;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--bench") bench = true;
+        else if (a == "--require-gpu") requireGpu = true;
         else if (a == "--samples" && i + 1 < argc) {
             if (!parseSI(argv[++i], samples) || samples < 1e6) {
                 fprintf(stderr, "gpu_check: bad --samples\n");
                 return 2;
             }
         } else if (a == "-h" || a == "--help") {
-            printf("usage: gpu_check [--bench] [--samples N] [scratch_dir]\n");
+            printf("usage: gpu_check [--bench] [--samples N] [--require-gpu] [scratch_dir]\n");
             return 0;
         } else dir = a;
     }

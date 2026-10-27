@@ -92,6 +92,18 @@ wvt uses the CPU.
 
 - `build/gpu_check` compares the GPU results with the CPU results.
 - `build/gpu_check --bench` measures the speed of the GPU and the CPU.
+- `build/gpu_check --require-gpu` (or `WVT_REQUIRE_GPU=1`) fails when no GPU can be used. Without
+  it, `gpu_check` passes on a computer without a GPU, and it skips the GPU comparisons. Use it on a
+  computer that has a GPU. The line `build: CUDA; GPU: ...` shows the GPU or the reason.
+
+If the log shows `CUDA cannot start: unknown error (cudaErrorUnknown 999)`, the NVIDIA driver did
+not start. wvt and all other CUDA programs then cannot use the GPU. Usually the cause is one of these:
+
+- The `nvidia_uvm` module is not loaded. `lsmod | grep nvidia_uvm` shows nothing and
+  `/dev/nvidia-uvm` is missing. Load it with `sudo modprobe nvidia-uvm`. `nvidia-smi` works without it.
+- The driver did not recover after a suspend. Load `nvidia_uvm` again, or restart the computer.
+- The driver was updated and the computer was not restarted. `dmesg` shows an `NVRM: API mismatch`.
+- You cannot open `/dev/nvidia*`.
 
 ## How it works
 

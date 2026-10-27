@@ -43,7 +43,7 @@ code if a check fails.
 | `build/clipboard_check` | The system clipboard, both ways, with a second X client: UTF-8, Latin-1, large texts in parts. It needs an X server (for example `xvfb-run -a build/clipboard_check`); without one it is skipped |
 | `build/bb_check` | The BB60 backend with the simulated device: open, rates, bandwidths, streaming, overload, unplug, and the capture segments of a recording across retunes. Only with `-DWVT_BB_SIM=ON` |
 | `build/skiq_check` | The Sidekiq logic: the gain in dB to a gain index, the lost samples from the RF timestamps, the 12-bit scaling and the I/Q order. With `-DWVT_SKIQ_SIM=ON`, also the backend with the simulated card: open and its errors, streaming, the tone level on a 12-bit and a 16-bit card, a retune while streaming, overload, USB, an overrun and a card removal |
-| `build/gpu_check` | The GPU results against the CPU results. `--bench` measures the speed |
+| `build/gpu_check` | The GPU results against the CPU results. `--bench` measures the speed. `--require-gpu` fails when no GPU can be used; without it, the check passes on the CPU only |
 
 To run all of them, use CTest:
 
