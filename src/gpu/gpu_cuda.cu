@@ -56,6 +56,11 @@ std::string describe(const cudaDeviceProp& p) {
     return b;
 }
 
+// "unknown error (cudaErrorUnknown 999)": the message alone does not say which error it was.
+std::string errorText(cudaError_t e) {
+    return std::string(cudaGetErrorString(e)) + " (" + cudaGetErrorName(e) + " " + std::to_string((int)e) + ")";
+}
+
 // Why no device can be used, from the cudaGetDeviceCount error.
 std::string noDeviceReason(cudaError_t e) {
     int driver = 0;
@@ -65,7 +70,13 @@ std::string noDeviceReason(cudaError_t e) {
     if (e == cudaErrorInsufficientDriver)
         return "the NVIDIA driver (CUDA " + versionText(driver) + ") is older than this build (CUDA " +
                versionText(CUDART_VERSION) + ")";
-    return std::string("CUDA cannot start: ") + cudaGetErrorString(e);
+    std::string r = "CUDA cannot start: " + errorText(e);
+    // The driver's cuInit failed. This is a state of the computer, not of wvt.
+    if (e == cudaErrorUnknown)
+        r += "; the NVIDIA driver (CUDA " + versionText(driver) +
+             ") did not start: check that the nvidia_uvm module is loaded (lsmod, /dev/nvidia-uvm), "
+             "that you can open /dev/nvidia*, and the NVRM messages in dmesg";
+    return r;
 }
 
 int deviceCount(std::string& reason) {
@@ -92,7 +103,7 @@ bool usable(int d, const cudaDeviceProp& p, std::string& reason) {
     if (e == cudaSuccess) e = cudaMemGetInfo(&freeB, &totalB);
     if (e != cudaSuccess) {
         cudaGetLastError();
-        reason = "GPU " + std::to_string(d) + " cannot start: " + cudaGetErrorString(e);
+        reason = "GPU " + std::to_string(d) + " cannot start: " + errorText(e);
         return false;
     }
     if ((double)freeB < kGpuMinFreeBytes) {
