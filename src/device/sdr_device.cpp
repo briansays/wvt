@@ -31,6 +31,9 @@ std::vector<std::string> sdrDrivers() {
 #ifdef WVT_HAVE_SKIQ
     d.push_back("skiq");
 #endif
+#ifdef WVT_HAVE_ZMQ
+    d.push_back("zmq");
+#endif
     return d;
 }
 
@@ -107,6 +110,9 @@ std::vector<DeviceInfo> enumerateDevices(const std::string& only) {
         if (out.size() == before) out.push_back({"skiq", "", "Sidekiq (none detected)", "", ""});
     }
 #endif
+#ifdef WVT_HAVE_ZMQ
+    if (want("zmq")) enumerateZmq(out);
+#endif
     if (want("sim")) out.push_back({"sim", "", "Simulator (synthetic test signals)", "sim", ""});
     if (want("siggen")) out.push_back({"siggen", "", "Signal generator loopback", "siggen", ""});
     return out;
@@ -127,10 +133,13 @@ static std::unique_ptr<SdrDevice> openBackend(const StreamConfig& cfg, std::stri
 #ifdef WVT_HAVE_SKIQ
     if (cfg.driver == "skiq") return openSkiqDevice(cfg, err);
 #endif
-    if (cfg.driver == "rtlsdr" || cfg.driver == "uhd" || cfg.driver == "bb" || cfg.driver == "skiq")
+#ifdef WVT_HAVE_ZMQ
+    if (cfg.driver == "zmq") return openZmqDevice(cfg, err);
+#endif
+    if (cfg.driver == "rtlsdr" || cfg.driver == "uhd" || cfg.driver == "bb" || cfg.driver == "skiq" || cfg.driver == "zmq")
         err = "this wvt was built without " + cfg.driver + " support (see docs/live.md)";
     else
-        err = "unknown device driver '" + cfg.driver + "' (use sim, siggen, rtlsdr, uhd, bb or skiq)";
+        err = "unknown device driver '" + cfg.driver + "' (use sim, siggen, rtlsdr, uhd, bb, skiq or zmq)";
     return nullptr;
 }
 

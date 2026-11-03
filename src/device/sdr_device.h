@@ -11,9 +11,10 @@
 #include "io/iq_file.h"
 
 struct StreamConfig {
-    std::string driver = "sim";  // "sim" | "siggen" | "rtlsdr" | "uhd" | "bb" | "skiq"
+    std::string driver = "sim";  // "sim" | "siggen" | "rtlsdr" | "uhd" | "bb" | "skiq" | "zmq"
     std::string args;            // rtlsdr: index or serial; uhd: device args ("serial=...", "addr=192.168.10.2"); bb: serial;
-                                 // skiq: serial, or "#N" for card number N
+                                 // skiq: serial, or "#N" for card number N; zmq: the stream address
+                                 // ("127.0.0.1:5600", "239.10.0.1:5600"; empty = the default address)
     double fc = 100e6;
     double rate = 2.4e6;
     bool agc = false;
@@ -170,4 +171,10 @@ void enumerateBb(std::vector<DeviceInfo>& out);
 #ifdef WVT_HAVE_SKIQ
 std::unique_ptr<SdrDevice> openSkiqDevice(const StreamConfig& cfg, std::string& err);
 void enumerateSkiq(std::vector<DeviceInfo>& out);
+#endif
+#ifdef WVT_HAVE_ZMQ
+// The stream of another wvt over ZMQ on UDP (issue #96). It opens when the
+// first message arrives (up to 3 s).
+std::unique_ptr<SdrDevice> openZmqDevice(const StreamConfig& cfg, std::string& err);
+void enumerateZmq(std::vector<DeviceInfo>& out);
 #endif

@@ -21,6 +21,8 @@ LiveEngine::LiveEngine(std::function<void()> wake) : wake_(std::move(wake)) {}
 LiveEngine::~LiveEngine() { stop(); }
 
 bool LiveEngine::start(const StreamConfig& cfg, std::string& err) {
+    const bool republish = pub_.active();
+    const PublishConfig pubCfg = pub_.config();
     stop();
     auto dev = openDevice(cfg, err);
     if (!dev) return false;
@@ -34,8 +36,10 @@ bool LiveEngine::start(const StreamConfig& cfg, std::string& err) {
     // A device that restarts its stream to retune marks the boundary itself,
     // between the last old sample and the first new one.
     dev->setRetuneMark([this, ring](double fc) {
-        freshFrom_ = ring->written();
+        const int64_t at = ring->written();
+        freshFrom_ = at;
         rec_.noteRetune(fc);
+        pub_.noteRetune(at, fc);
     });
     if (!dev->start([ring](const uint8_t* p, int64_t n) { ring->push(p, n); },
                     [ring](int64_t lost, const char* why) { ring->noteGap(lost, why); }, err)) {
@@ -57,11 +61,16 @@ bool LiveEngine::start(const StreamConfig& cfg, std::string& err) {
     freshFrom_ = 0;
     quit_ = false;
     th_ = std::thread([this] { spectrumLoop(); });
+    if (republish) {
+        std::string perr;
+        if (!startPublishing(pubCfg, perr)) LOG_WARN("live", "cannot publish again after the restart: %s", perr.c_str());
+    }
     return true;
 }
 
 void LiveEngine::stop() {
     rec_.stop();
+    pub_.stop();
     if (th_.joinable()) {
         quit_ = true;
         cv_.notify_all();
@@ -90,8 +99,10 @@ bool LiveEngine::setCenterFreq(double hz, std::string& err) {
     LOG_INFO("live", "tuned to %s", fmtSI(dev_->centerFreq(), "Hz", 9).c_str());
     cfg_.fc = hz;
     if (!dev_->usesRetuneMark()) {
-        freshFrom_ = ring_->written();
+        const int64_t at = ring_->written();
+        freshFrom_ = at;
         rec_.noteRetune(dev_->centerFreq());
+        pub_.noteRetune(at, dev_->centerFreq());
     }
     std::lock_guard<std::mutex> lk(m_);
     ++gen_;
@@ -107,6 +118,7 @@ bool LiveEngine::setGain(bool agc, double db, std::string& err) {
     LOG_INFO("live", "gain %s", agc ? "auto" : fmtSI(db, "dB", 4).c_str());
     cfg_.agc = agc;
     cfg_.gain = db;
+    pub_.setGain(db, agc);
     return true;
 }
 
@@ -163,6 +175,22 @@ bool LiveEngine::startRecording(const RecordConfig& cfg, std::string& err) {
     src.fc = dev_->centerFreq();
     src.hw = dev_->description();
     return rec_.start(ring_, src, cfg, err);
+}
+
+bool LiveEngine::startPublishing(const PublishConfig& cfg, std::string& err) {
+    if (!dev_) {
+        err = "no device is streaming";
+        return false;
+    }
+    PublishSource src;
+    src.fmt = dev_->format();
+    src.rate = dev_->sampleRate();
+    src.fc = dev_->centerFreq();
+    src.gain = cfg_.gain;
+    src.agc = cfg_.agc;
+    src.driver = cfg_.driver;
+    src.description = dev_->description();
+    return pub_.start(ring_, src, cfg, err);
 }
 
 void LiveEngine::spectrumLoop() {

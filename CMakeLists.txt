@@ -103,6 +103,8 @@ add_executable(wvt
   src/app/app_siggen.cpp
   src/app/app_chain.cpp
   src/device/live.cpp
+  src/net/zmq_wire.cpp
+  src/net/zmq_pub.cpp
   src/io/recorder.cpp
   src/device/sdr_device.cpp
   src/device/sdr_sim.cpp
@@ -466,6 +468,136 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
+# Optional ZMQ streaming over UDP (issue #96). The stream uses the RADIO and
+# DISH sockets, which are in the draft API of libzmq. Most packages of libzmq
+# (Homebrew, Debian, Fedora) are built without the draft API, so:
+#  1. a system libzmq is used if it has the draft API (zmq_join);
+#  2. else libzmq is built from WVT_ZMQ_SOURCE_DIR (an extracted release);
+#  3. else the libzmq release is downloaded and its SHA-256 checked.
+# libzmq is then a static library with only the draft API added: no CURVE,
+# no WebSocket, no TLS. AUTO disables ZMQ if all three fail (for example a
+# build without a network); ON stops with an error.
+# ---------------------------------------------------------------------------
+set(WVT_WITH_ZMQ AUTO CACHE STRING "Build ZMQ streaming over UDP (AUTO, ON, OFF)")
+set_property(CACHE WVT_WITH_ZMQ PROPERTY STRINGS AUTO ON OFF)
+set(WVT_ZMQ_SOURCE_DIR "" CACHE PATH "Extracted libzmq 4.3.x source to build (empty: use the system libzmq or download)")
+set(WVT_ZMQ_VERSION 4.3.5)
+set(WVT_ZMQ_URL "https://github.com/zeromq/libzmq/releases/download/v${WVT_ZMQ_VERSION}/zeromq-${WVT_ZMQ_VERSION}.tar.gz")
+set(WVT_ZMQ_SHA256 6653ef5910f17954861fe72332e68b03ca6e4d9c7160eb3a8de5a5a913bfab43)
+set(WVT_ZMQ_OK FALSE)
+set(WVT_ZMQ_WHY "")
+if(NOT WVT_WITH_ZMQ STREQUAL "OFF")
+  # wvt_zmq is the target that wvt and the checks link to get libzmq.
+  add_library(wvt_zmq INTERFACE)
+
+  # 1. A system libzmq with the draft API
+  if(PKG_CONFIG_FOUND AND NOT WVT_ZMQ_SOURCE_DIR)
+    pkg_check_modules(ZMQPC QUIET IMPORTED_TARGET libzmq)
+  endif()
+  if(ZMQPC_FOUND)
+    include(CheckCXXSourceCompiles)
+    set(CMAKE_REQUIRED_LIBRARIES PkgConfig::ZMQPC)
+    set(CMAKE_REQUIRED_DEFINITIONS -DZMQ_BUILD_DRAFT_API)
+    check_cxx_source_compiles("
+      #include <zmq.h>
+      int main() { void* s = zmq_socket(nullptr, ZMQ_DISH); return zmq_join(s, \"wvt\"); }"
+      WVT_SYSTEM_ZMQ_HAS_DRAFTS)
+    unset(CMAKE_REQUIRED_LIBRARIES)
+    unset(CMAKE_REQUIRED_DEFINITIONS)
+    if(WVT_SYSTEM_ZMQ_HAS_DRAFTS)
+      target_link_libraries(wvt_zmq INTERFACE PkgConfig::ZMQPC)
+      target_compile_definitions(wvt_zmq INTERFACE ZMQ_BUILD_DRAFT_API)
+      set(WVT_ZMQ_OK TRUE)
+      set(WVT_ZMQ_WHAT "system libzmq ${ZMQPC_VERSION} with the draft API")
+    else()
+      message(STATUS "wvt: the system libzmq ${ZMQPC_VERSION} has no draft API (RADIO/DISH); building libzmq ${WVT_ZMQ_VERSION}")
+    endif()
+  endif()
+
+  # 2. and 3. Build libzmq from a source folder, or from the downloaded release
+  if(NOT WVT_ZMQ_OK)
+    set(_zmq_src "${WVT_ZMQ_SOURCE_DIR}")
+    if(NOT _zmq_src)
+      set(_zmq_tgz "${CMAKE_BINARY_DIR}/_deps/zeromq-${WVT_ZMQ_VERSION}.tar.gz")
+      set(_zmq_src "${CMAKE_BINARY_DIR}/_deps/zeromq-${WVT_ZMQ_VERSION}")
+      if(NOT EXISTS "${_zmq_src}/CMakeLists.txt")
+        set(_zmq_hash "")
+        if(EXISTS "${_zmq_tgz}")
+          file(SHA256 "${_zmq_tgz}" _zmq_hash)
+        endif()
+        if(NOT _zmq_hash STREQUAL WVT_ZMQ_SHA256)
+          message(STATUS "wvt: downloading ${WVT_ZMQ_URL}")
+          file(DOWNLOAD "${WVT_ZMQ_URL}" "${_zmq_tgz}" STATUS _zmq_status TIMEOUT 120 INACTIVITY_TIMEOUT 30)
+          list(GET _zmq_status 0 _zmq_code)
+          if(_zmq_code EQUAL 0)
+            file(SHA256 "${_zmq_tgz}" _zmq_hash)
+          else()
+            list(GET _zmq_status 1 _zmq_msg)
+            file(REMOVE "${_zmq_tgz}")
+            set(WVT_ZMQ_WHY "the download of libzmq failed (${_zmq_msg}); set WVT_ZMQ_SOURCE_DIR to an extracted libzmq ${WVT_ZMQ_VERSION}")
+          endif()
+        endif()
+        if(EXISTS "${_zmq_tgz}" AND NOT WVT_ZMQ_WHY)
+          if(_zmq_hash STREQUAL WVT_ZMQ_SHA256)
+            file(ARCHIVE_EXTRACT INPUT "${_zmq_tgz}" DESTINATION "${CMAKE_BINARY_DIR}/_deps")
+          else()
+            file(REMOVE "${_zmq_tgz}")
+            set(WVT_ZMQ_WHY "the downloaded libzmq has the wrong SHA-256 (${_zmq_hash})")
+          endif()
+        endif()
+      endif()
+    endif()
+    if(NOT WVT_ZMQ_WHY AND NOT EXISTS "${_zmq_src}/CMakeLists.txt")
+      set(WVT_ZMQ_WHY "no libzmq source in ${_zmq_src}")
+    endif()
+    if(NOT WVT_ZMQ_WHY)
+      # Only the static library with the draft API. Normal variables set the
+      # options of libzmq (policy CMP0077), so the user's cache does not change.
+      set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+      set(CMAKE_POLICY_VERSION_MINIMUM 3.5)  # libzmq asks for CMake 2.8.12; CMake 4 removed that
+      set(ENABLE_DRAFTS ON)
+      set(BUILD_SHARED OFF)
+      set(BUILD_STATIC ON)
+      set(BUILD_TESTS OFF)
+      set(WITH_DOCS OFF)
+      set(WITH_PERF_TOOL OFF)
+      set(ENABLE_CPACK OFF)
+      set(ENABLE_CURVE OFF)
+      set(WITH_LIBSODIUM OFF)
+      set(ENABLE_WS OFF)
+      set(WITH_TLS OFF)
+      set(WITH_NSS OFF)
+      set(WITH_LIBBSD OFF)
+      set(ENABLE_PRECOMPILED OFF)
+      set(LIBZMQ_PEDANTIC OFF)
+      set(LIBZMQ_WERROR OFF)
+      add_subdirectory("${_zmq_src}" "${CMAKE_BINARY_DIR}/_deps/libzmq-build" EXCLUDE_FROM_ALL)
+      unset(CMAKE_POLICY_VERSION_MINIMUM)
+      # libzmq-static exports ZMQ_STATIC and ZMQ_BUILD_DRAFT_API.
+      target_link_libraries(wvt_zmq INTERFACE libzmq-static)
+      set(WVT_ZMQ_OK TRUE)
+      if(WVT_ZMQ_SOURCE_DIR)
+        set(WVT_ZMQ_WHAT "libzmq from ${WVT_ZMQ_SOURCE_DIR}, static, draft API")
+      else()
+        set(WVT_ZMQ_WHAT "libzmq ${WVT_ZMQ_VERSION}, static, draft API, built here")
+      endif()
+    endif()
+  endif()
+endif()
+if(WVT_ZMQ_OK)
+  target_sources(wvt PRIVATE src/device/sdr_zmq.cpp)
+  target_link_libraries(wvt PRIVATE wvt_zmq)
+  target_compile_definitions(wvt PRIVATE WVT_HAVE_ZMQ)
+  message(STATUS "wvt: ZMQ streaming enabled (${WVT_ZMQ_WHAT})")
+elseif(WVT_WITH_ZMQ STREQUAL "ON")
+  message(FATAL_ERROR "WVT_WITH_ZMQ=ON but libzmq cannot be used: ${WVT_ZMQ_WHY}")
+elseif(WVT_WITH_ZMQ STREQUAL "OFF")
+  message(STATUS "wvt: ZMQ streaming disabled (WVT_WITH_ZMQ=OFF)")
+else()
+  message(STATUS "wvt: ZMQ streaming disabled (${WVT_ZMQ_WHY})")
+endif()
+
+# ---------------------------------------------------------------------------
 # Optional NVIDIA GPU acceleration (issue #3). AUTO builds the CUDA backend
 # when the CUDA toolkit (12.0 or later, with cuFFT) is found, ON requires it.
 # A CUDA build still runs on computers without a GPU: wvt checks at start.
@@ -680,7 +812,7 @@ target_include_directories(measure_check PRIVATE src)
 target_compile_options(measure_check PRIVATE ${WVT_WARNINGS})
 
 # Configuration file self-test (issue #88)
-add_executable(config_check tools/config_check.cpp src/app/config.cpp)
+add_executable(config_check tools/config_check.cpp src/app/config.cpp src/net/zmq_wire.cpp)
 target_include_directories(config_check PRIVATE src)
 target_compile_options(config_check PRIVATE ${WVT_WARNINGS})
 
@@ -697,7 +829,7 @@ target_compile_options(device_check PRIVATE ${WVT_WARNINGS})
 
 # BB60 backend self-test against the simulated device (only with WVT_BB_SIM)
 if(WVT_BB_SIM)
-  add_executable(bb_check tools/bb_check.cpp src/device/sdr_bb60.cpp src/device/live.cpp src/io/recorder.cpp src/device/sdr_device.cpp
+  add_executable(bb_check tools/bb_check.cpp src/device/sdr_bb60.cpp src/device/live.cpp src/net/zmq_wire.cpp src/net/zmq_pub.cpp src/io/recorder.cpp src/device/sdr_device.cpp
     src/device/sdr_sim.cpp src/device/sdr_siggen.cpp src/siggen/siggen.cpp src/siggen/siggen_out.cpp src/common/json.cpp src/dsp/engine.cpp src/io/iq_file.cpp
     src/dsp/dsp.cpp src/common/ui_util.cpp src/common/log.cpp)
   target_include_directories(bb_check PRIVATE src)
@@ -720,13 +852,27 @@ if(WVT_SKIQ_SIM)
   target_link_libraries(skiq_check PRIVATE skiq_api_sim)
 endif()
 
+# ZMQ streaming self-test (issue #96): the wire format in every build; with
+# ZMQ also the sockets, the publisher, and a zmq device in a live engine
+add_executable(zmq_check tools/zmq_check.cpp src/net/zmq_wire.cpp src/net/zmq_pub.cpp src/common/log.cpp)
+target_include_directories(zmq_check PRIVATE src)
+target_link_libraries(zmq_check PRIVATE Threads::Threads)
+target_compile_options(zmq_check PRIVATE ${WVT_WARNINGS})
+if(WVT_ZMQ_OK)
+  target_sources(zmq_check PRIVATE src/device/sdr_zmq.cpp src/device/live.cpp src/io/recorder.cpp src/device/sdr_device.cpp
+    src/device/sdr_sim.cpp src/device/sdr_siggen.cpp src/siggen/siggen.cpp src/siggen/siggen_out.cpp src/common/json.cpp
+    src/dsp/engine.cpp src/io/iq_file.cpp src/dsp/dsp.cpp src/common/ui_util.cpp)
+  target_link_libraries(zmq_check PRIVATE wvt_zmq wvt_gpu imgui_implot)
+  target_compile_definitions(zmq_check PRIVATE WVT_HAVE_ZMQ)
+endif()
+
 # ---------------------------------------------------------------------------
 # CTest (issue #53): "ctest --test-dir build --output-on-failure" runs every
 # self-check. The checks need no hardware.
 # ---------------------------------------------------------------------------
 enable_testing()
 set(WVT_CHECKS siggen_check audio_check log_check segment_check gpu_check extract_check snapshot_check device_check
-  clipboard_check session_check measure_check config_check skiq_check)
+  clipboard_check session_check measure_check config_check skiq_check zmq_check)
 if(WVT_BB_SIM)
   list(APPEND WVT_CHECKS bb_check)
 endif()
@@ -748,6 +894,19 @@ add_test(NAME tx_dry_run COMMAND wvt --no-log-file --gen cw -c 915M -r 1M --tx-g
   --tx-allow 902M:928M --tx-dry-run)
 add_test(NAME tx_dry_run_refused COMMAND wvt --no-log-file --gen cw -c 927.8M -r 1M --tx-allow 902M:928M --tx-dry-run)
 set_tests_properties(tx_dry_run_refused PROPERTIES WILL_FAIL TRUE)
+# The network stream options (issue #96): the refusals need no ZMQ; the
+# two-program test on the loopback does.
+add_test(NAME zmq_cli_no_tuning COMMAND wvt --no-log-file --no-config --device zmq -c 915M --no-gui --record x)
+add_test(NAME zmq_cli_no_loop COMMAND wvt --no-log-file --no-config --device zmq:127.0.0.1:15999
+  --publish 127.0.0.1:15999 --no-gui)
+add_test(NAME zmq_cli_bad_address COMMAND wvt --no-log-file --no-config --device sim --publish 10.0.0.300 --no-gui)
+set_tests_properties(zmq_cli_no_tuning PROPERTIES PASS_REGULAR_EXPRESSION "takes the frequency, rate and gain")
+set_tests_properties(zmq_cli_no_loop PROPERTIES PASS_REGULAR_EXPRESSION "back to this wvt")
+set_tests_properties(zmq_cli_bad_address PROPERTIES PASS_REGULAR_EXPRESSION "--publish: ")
+if(WVT_ZMQ_OK)
+  add_test(NAME zmq_cli_loopback COMMAND ${CMAKE_COMMAND} -DWVT=$<TARGET_FILE:wvt>
+    -DDIR=${CMAKE_BINARY_DIR}/zmq_cli_loopback -P ${CMAKE_SOURCE_DIR}/tools/zmq_cli.cmake)
+endif()
 
 # ---------------------------------------------------------------------------
 # libFuzzer targets for the parsers of user-supplied text (issue #53), clang
@@ -766,8 +925,9 @@ if(WVT_FUZZ)
     src/device/sdr_siggen.cpp src/io/iq_file.cpp src/dsp/dsp.cpp src/common/ui_util.cpp src/common/log.cpp)
   set(_fuzz_meta src/io/iq_file.cpp src/common/json.cpp src/common/log.cpp)
   set(_fuzz_parse_si src/common/ui_util.cpp src/common/log.cpp)
-  set(_fuzz_config src/app/config.cpp)
-  foreach(_f json chain meta parse_si config)
+  set(_fuzz_config src/app/config.cpp src/net/zmq_wire.cpp)
+  set(_fuzz_zmq_wire src/net/zmq_wire.cpp)
+  foreach(_f json chain meta parse_si config zmq_wire)
     add_executable(fuzz_${_f} tools/fuzz/fuzz_${_f}.cpp ${_fuzz_${_f}})
     target_include_directories(fuzz_${_f} PRIVATE src tools/fuzz)
     target_compile_options(fuzz_${_f} PRIVATE ${_fuzz_flags} ${WVT_WARNINGS})
@@ -779,5 +939,5 @@ if(WVT_FUZZ)
     file(GLOB _seeds "${CMAKE_SOURCE_DIR}/tools/fuzz/corpus/${_f}/*")
     add_test(NAME fuzz_${_f}_seeds COMMAND fuzz_${_f} ${_seeds})
   endforeach()
-  message(STATUS "wvt: libFuzzer targets enabled (fuzz_json, fuzz_chain, fuzz_meta, fuzz_parse_si, fuzz_config)")
+  message(STATUS "wvt: libFuzzer targets enabled (fuzz_json, fuzz_chain, fuzz_meta, fuzz_parse_si, fuzz_config, fuzz_zmq_wire)")
 endif()

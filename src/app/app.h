@@ -54,6 +54,8 @@ public:
     // Live device mode (app_live.cpp)
     bool startDevice(const StreamConfig& cfg);
     bool startRecording(const RecordConfig& cfg);
+    // Publishes the live stream over ZMQ on UDP (issue #96); needs a running device.
+    bool startPublishing(const PublishConfig& cfg);
     bool isLive() const { return liveMode_; }
     int liveRowsReceived() const { return liveFilled_; }
 
@@ -143,6 +145,7 @@ private:
     void drawSourceSelector(float width);
     void drawDeviceToolbar();
     void drawRecordBar();
+    void drawPublishBar();
     void drawLiveLeft();
     void drawLiveStatusBar();
     void handleLiveShortcuts();
@@ -387,6 +390,12 @@ private:
     std::string recErr_;
     bool recWasActive_ = false;  // for logging a recording that fails on its own
     std::string lastRecording_;  // path to reopen in file mode
+
+    // Publishing over the network (issue #96)
+    char pubAddr_[256] = {};  // the subscriber's address or a group; empty = this computer's address at first use
+    int pubTtl_ = 1;
+    std::string pubErr_;
+    bool pubWasActive_ = false;  // for the error of a publisher that stops on its own
 
     LiveParams liveParams_;
     int liveHistory_ = 600;  // waterfall rows kept

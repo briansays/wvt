@@ -8,6 +8,7 @@
 #include "app/app.h"
 #include "common/log.h"
 #include "app/platform_x11.h"
+#include "net/zmq_wire.h"
 
 namespace {
 const int kFftSizes[] = {256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536};
@@ -43,7 +44,17 @@ const char* driverName(const std::string& d) {
     if (d == "bb") return "BB60";
     if (d == "skiq") return "Sidekiq";
     if (d == "siggen") return "Signal generator";
+    if (d == "zmq") return "ZMQ stream";
     return "Simulator";
+}
+
+// True when two stream addresses are the same IP and port: a publisher to the
+// address that the zmq device receives on would send the stream back to itself.
+bool sameStreamAddress(const std::string& a, const std::string& b) {
+    StreamAddress x, y;
+    std::string err;
+    return parseStreamAddress(a.empty() ? defaultStreamAddress() : a, x, err) &&
+           parseStreamAddress(b.empty() ? defaultStreamAddress() : b, y, err) && x.ip == y.ip && x.port == y.port;
 }
 
 }  // namespace
@@ -66,7 +77,8 @@ void App::drawSourceSelector(float width) {
         else if (mode == 0 && liveMode_) leaveLive();
     }
     ImGui::EndDisabled();
-    tooltipAlways("File: analyze a recording.\nDevice: stream live from an RTL-SDR, a USRP, a Signal Hound BB60 or a Sidekiq.");
+    tooltipAlways("File: analyze a recording.\nDevice: stream live from an RTL-SDR, a USRP, a Signal Hound BB60 or a Sidekiq,\n"
+                  "or receive the stream of another wvt over the network (ZMQ stream).");
 }
 
 void App::enterLive() {
@@ -102,6 +114,7 @@ void App::pollScan() {
     if (!scanJob_.valid() || scanJob_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
     const bool first = !devicesScanned_;
     devices_ = scanJob_.get();
+    configApplyZmqAddress(cfg_, devices_);
     devicesScanned_ = true;
     LOG_INFO("app", "found %zu device entries", devices_.size());
     bool found = false;
@@ -193,6 +206,28 @@ bool App::startDevice(const StreamConfig& cfg) {
     return restartDevice();
 }
 
+bool App::startPublishing(const PublishConfig& cfg) {
+    snprintf(pubAddr_, sizeof pubAddr_, "%s", cfg.address.c_str());
+    pubTtl_ = cfg.ttl;
+    std::string err;
+    if (live_ && live_->running() && live_->config().driver == "zmq" && sameStreamAddress(live_->config().args, cfg.address))
+        err = "the stream would come back to this wvt: the device receives on that address";
+    else if (!live_ || !live_->running())
+        err = "start a device before publishing";
+    else if (live_->startPublishing(cfg, err)) {
+        pubErr_.clear();
+        pubWasActive_ = true;
+        const auto ps = live_->publisher().status();
+        status_ = "Publishing to " + ps.address;
+        LOG_INFO("app", "publishing to %s (TTL %d)", ps.address.c_str(), cfg.ttl);
+        return true;
+    }
+    pubErr_ = err;
+    status_ = "Publishing failed: " + err;
+    LOG_ERROR("app", "publishing failed: %s", err.c_str());
+    return false;
+}
+
 bool App::startRecording(const RecordConfig& cfg) {
     recCfg_ = cfg;
     snprintf(recPrefix_, sizeof recPrefix_, "%s", cfg.prefix.c_str());
@@ -254,116 +289,140 @@ void App::drawDeviceToolbar() {
                       "  addr=192.168.40.2,master_clock_rate=184.32e6\n"
                       "Empty: the first USRP UHD finds.");
     }
-    ImGui::EndDisabled();
-
-    // --- tuning ---
-    label("Center freq", fieldW(15));
-    double fc = running ? liveStats_.fc : devCfg_.fc;
-    ImGui::BeginDisabled(recRaw);
-    if (InputSI("##lfc", &fc, "Hz", fieldW(15))) {
-        devCfg_.fc = fc;
-        if (running && !live_->setCenterFreq(fc, err)) {
-            status_ = "Tune failed: " + err;
-            LOG_ERROR("app", "tune failed: %s", err.c_str());
-        }
+    const bool zmq = devCfg_.driver == "zmq";
+    if (zmq) {
+        label("Address", fieldW(16));
+        if (ImGui::InputText("##zaddr", devArgs_, sizeof devArgs_, ImGuiInputTextFlags_EnterReturnsTrue) && running)
+            restartDevice();
+        tooltipAlways("Where this wvt receives the stream (Enter applies):\n"
+                      "  an address of this computer, e.g. 192.168.1.20:5600 or 127.0.0.1:5600\n"
+                      "    (send to it from the source)\n"
+                      "  or a multicast group, e.g. 239.10.0.1:5600 (the same group as the source),\n"
+                      "    on one interface: en0;239.10.0.1:5600\n"
+                      "The port is 5600 when not given. Start waits up to 3 s for the stream.");
     }
     ImGui::EndDisabled();
-    tooltipAlways(recRaw ? "A raw recording can't store a frequency change.\nStop recording, or record SigMF instead."
-                         : "Accepts SI suffixes, e.g. 915M, 100.1M, 7.074M");
-    label("Sample rate", fieldW(13));
-    double rate = running ? liveStats_.rate : devCfg_.rate;
-    ImGui::BeginDisabled(rec);
-    const auto rates = supportedRates(devCfg_.driver);
-    if (!rates.empty()) {
-        // Only discrete rates exist (decimations of one clock): pick from the list.
-        ImGui::SetNextItemWidth(fieldW(13));
-        if (ImGui::BeginCombo("##lfs", fmtSI(rate, "S/s", 6).c_str())) {
-            for (double r : rates)
-                if (ImGui::Selectable(fmtSI(r, "S/s", 6).c_str(), std::fabs(r - rate) < 1)) {
-                    devCfg_.rate = r;
-                    std::string warn;
-                    if (checkSampleRate(devCfg_.driver, r, err, warn) && !warn.empty()) {
-                        status_ = warn;
-                        LOG_WARN("app", "%s", warn.c_str());
-                    }
-                    if (running) restartDevice();
-                }
-            ImGui::EndCombo();
-        }
-    } else if (InputSI("##lfs", &rate, "Sps", fieldW(13))) {
-        std::string warn;
-        if (!checkSampleRate(devCfg_.driver, rate, err, warn)) {
-            status_ = err;
-            LOG_WARN("app", "%s", err.c_str());
-        } else {
-            devCfg_.rate = rate;
-            if (!warn.empty()) {
-                status_ = warn;
-                LOG_WARN("app", "%s", warn.c_str());
+
+    // A zmq stream has the tuning of its source: the fields show it, read only.
+    if (zmq && !running) {
+        flow(ImGui::CalcTextSize("Frequency, rate and gain come from the source").x);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextDisabled("Frequency, rate and gain come from the source");
+    }
+    if (!zmq || running) {
+
+        // --- tuning ---
+        label("Center freq", fieldW(15));
+        double fc = running ? liveStats_.fc : devCfg_.fc;
+        ImGui::BeginDisabled(recRaw || zmq);
+        if (InputSI("##lfc", &fc, "Hz", fieldW(15))) {
+            devCfg_.fc = fc;
+            if (running && !live_->setCenterFreq(fc, err)) {
+                status_ = "Tune failed: " + err;
+                LOG_ERROR("app", "tune failed: %s", err.c_str());
             }
-            if (running) restartDevice();
         }
-    }
-    ImGui::EndDisabled();
-    std::string rateTip;
-    if (rec) rateTip = "A recording has a single sample rate. Stop recording to change it.";
-    else if (devCfg_.driver == "rtlsdr") rateTip = "RTL-SDR: 225-300 kS/s or 0.9-3.2 MS/s (2.4 MS/s or less is reliable)";
-    else if (devCfg_.driver == "bb") rateTip = "BB60: 40 MS/s divided by a power of 2.\nAbove 10 MS/s the host CPU does a lot of filtering.";
-    else if (devCfg_.driver == "uhd" && devCaps_.rate.valid())
-        rateTip = "USRP " + devCaps_.product + ": " + fmtSI(devCaps_.rate.min, "S/s", 4) + " to " +
-                  fmtSI(devCaps_.rate.max, "S/s", 4) + (devCaps_.usb ? " (USB 3 above about 8 MS/s)" : "") +
-                  ". The USRP uses the nearest rate it can make.";
-    else if (devCfg_.driver == "skiq" && devCaps_.rate.valid())
-        rateTip = "Sidekiq " + devCaps_.product + ": " + fmtSI(devCaps_.rate.min, "S/s", 4) + " to " +
-                  fmtSI(devCaps_.rate.max, "S/s", 4) + (devCaps_.usb ? ".\nOn USB the card streams much less than on PCIe." : ".");
-    else if (devCfg_.driver == "skiq")
-        rateTip = "Sidekiq: the range depends on the card (M.2 and mPCIe up to 61.44 MS/s, X2 and X4 245.76 MS/s).\n"
-                  "On USB the card streams much less than on PCIe.";
-    else if (devCfg_.driver == "uhd")
-        rateTip = "USRP: the limit depends on the model (B2xx 61.44 MS/s on USB 3, N310 153.6 MS/s,\n"
-                  "X310 200 MS/s, X410 500 MS/s). Network USRPs divide a fixed master clock.";
-    else rateTip = "Up to 20 MS/s";
-    tooltipAlways(rateTip.c_str());
+        ImGui::EndDisabled();
+        if (zmq) tooltipAlways("The source sets the frequency");
+        else tooltipAlways(recRaw ? "A raw recording can't store a frequency change.\nStop recording, or record SigMF instead."
+                             : "Accepts SI suffixes, e.g. 915M, 100.1M, 7.074M");
+        label("Sample rate", fieldW(13));
+        double rate = running ? liveStats_.rate : devCfg_.rate;
+        ImGui::BeginDisabled(rec || zmq);
+        const auto rates = supportedRates(devCfg_.driver);
+        if (!rates.empty()) {
+            // Only discrete rates exist (decimations of one clock): pick from the list.
+            ImGui::SetNextItemWidth(fieldW(13));
+            if (ImGui::BeginCombo("##lfs", fmtSI(rate, "S/s", 6).c_str())) {
+                for (double r : rates)
+                    if (ImGui::Selectable(fmtSI(r, "S/s", 6).c_str(), std::fabs(r - rate) < 1)) {
+                        devCfg_.rate = r;
+                        std::string warn;
+                        if (checkSampleRate(devCfg_.driver, r, err, warn) && !warn.empty()) {
+                            status_ = warn;
+                            LOG_WARN("app", "%s", warn.c_str());
+                        }
+                        if (running) restartDevice();
+                    }
+                ImGui::EndCombo();
+            }
+        } else if (InputSI("##lfs", &rate, "Sps", fieldW(13))) {
+            std::string warn;
+            if (!checkSampleRate(devCfg_.driver, rate, err, warn)) {
+                status_ = err;
+                LOG_WARN("app", "%s", err.c_str());
+            } else {
+                devCfg_.rate = rate;
+                if (!warn.empty()) {
+                    status_ = warn;
+                    LOG_WARN("app", "%s", warn.c_str());
+                }
+                if (running) restartDevice();
+            }
+        }
+        ImGui::EndDisabled();
+        std::string rateTip;
+        if (zmq) rateTip = "The source sets the sample rate";
+        else if (rec) rateTip = "A recording has a single sample rate. Stop recording to change it.";
+        else if (devCfg_.driver == "rtlsdr") rateTip = "RTL-SDR: 225-300 kS/s or 0.9-3.2 MS/s (2.4 MS/s or less is reliable)";
+        else if (devCfg_.driver == "bb") rateTip = "BB60: 40 MS/s divided by a power of 2.\nAbove 10 MS/s the host CPU does a lot of filtering.";
+        else if (devCfg_.driver == "uhd" && devCaps_.rate.valid())
+            rateTip = "USRP " + devCaps_.product + ": " + fmtSI(devCaps_.rate.min, "S/s", 4) + " to " +
+                      fmtSI(devCaps_.rate.max, "S/s", 4) + (devCaps_.usb ? " (USB 3 above about 8 MS/s)" : "") +
+                      ". The USRP uses the nearest rate it can make.";
+        else if (devCfg_.driver == "skiq" && devCaps_.rate.valid())
+            rateTip = "Sidekiq " + devCaps_.product + ": " + fmtSI(devCaps_.rate.min, "S/s", 4) + " to " +
+                      fmtSI(devCaps_.rate.max, "S/s", 4) + (devCaps_.usb ? ".\nOn USB the card streams much less than on PCIe." : ".");
+        else if (devCfg_.driver == "skiq")
+            rateTip = "Sidekiq: the range depends on the card (M.2 and mPCIe up to 61.44 MS/s, X2 and X4 245.76 MS/s).\n"
+                      "On USB the card streams much less than on PCIe.";
+        else if (devCfg_.driver == "uhd")
+            rateTip = "USRP: the limit depends on the model (B2xx 61.44 MS/s on USB 3, N310 153.6 MS/s,\n"
+                      "X310 200 MS/s, X410 500 MS/s). Network USRPs divide a fixed master clock.";
+        else rateTip = "Up to 20 MS/s";
+        tooltipAlways(rateTip.c_str());
 
-    // --- gain ---
-    const GainRange g = running ? live_->gainRange() : defaultGain(devCfg_.driver);
-    label(g.label, fieldW(12));
-    float gain = (float)devCfg_.gain;
-    char gainFmt[16];
-    snprintf(gainFmt, sizeof gainFmt, "%%.1f %s", g.unit);
-    // A BB60 restarts its stream for a new reference level, so apply it when the drag ends.
-    const bool applyOnRelease = devCfg_.driver == "bb";
-    ImGui::BeginDisabled(devCfg_.agc && g.agc);
-    if (ImGui::SliderFloat("##gain", &gain, (float)g.min, (float)g.max, gainFmt)) {
-        double v = gain;
-        if (!g.steps.empty()) {  // snap to the tuner's discrete gains
-            double best = g.steps.front();
-            for (double s : g.steps)
-                if (std::fabs(s - v) < std::fabs(best - v)) best = s;
-            v = best;
+        // --- gain ---
+        const GainRange g = running ? live_->gainRange() : defaultGain(devCfg_.driver);
+        label(g.label, fieldW(12));
+        float gain = (float)(zmq ? g.min : devCfg_.gain);
+        char gainFmt[16];
+        snprintf(gainFmt, sizeof gainFmt, "%%.1f %s", g.unit);
+        // A BB60 restarts its stream for a new reference level, so apply it when the drag ends.
+        const bool applyOnRelease = devCfg_.driver == "bb";
+        ImGui::BeginDisabled((devCfg_.agc && g.agc) || zmq);
+        if (ImGui::SliderFloat("##gain", &gain, (float)g.min, (float)g.max, gainFmt)) {
+            double v = gain;
+            if (!g.steps.empty()) {  // snap to the tuner's discrete gains
+                double best = g.steps.front();
+                for (double s : g.steps)
+                    if (std::fabs(s - v) < std::fabs(best - v)) best = s;
+                v = best;
+            }
+            devCfg_.gain = v;
+            if (running && !applyOnRelease && !live_->setGain(devCfg_.agc, devCfg_.gain, err)) {
+                status_ = "Gain failed: " + err;
+                LOG_ERROR("app", "gain failed: %s", err.c_str());
+            }
         }
-        devCfg_.gain = v;
-        if (running && !applyOnRelease && !live_->setGain(devCfg_.agc, devCfg_.gain, err)) {
-            status_ = "Gain failed: " + err;
-            LOG_ERROR("app", "gain failed: %s", err.c_str());
+        if (running && applyOnRelease && ImGui::IsItemDeactivatedAfterEdit() && !live_->setGain(false, devCfg_.gain, err)) {
+            status_ = "Reference level failed: " + err;
+            LOG_ERROR("app", "reference level failed: %s", err.c_str());
         }
-    }
-    if (running && applyOnRelease && ImGui::IsItemDeactivatedAfterEdit() && !live_->setGain(false, devCfg_.gain, err)) {
-        status_ = "Reference level failed: " + err;
-        LOG_ERROR("app", "reference level failed: %s", err.c_str());
-    }
-    ImGui::EndDisabled();
-    if (devCfg_.driver == "bb")
-        tooltipAlways("The strongest input you expect, in dBm. The BB60 sets its attenuator and amplifier from it\n"
-                      "(unless Atten and Amp are set by hand in the options). Too low overloads the ADC;\n"
-                      "too high raises the noise floor.");
-    if (g.agc) {
-        ImGui::SameLine(0, st.ItemInnerSpacing.x);
-        if (ImGui::Checkbox("AGC", &devCfg_.agc) && running && !live_->setGain(devCfg_.agc, devCfg_.gain, err)) {
-            status_ = "Gain failed: " + err;
-            LOG_ERROR("app", "gain failed: %s", err.c_str());
+        ImGui::EndDisabled();
+        if (zmq) tooltipAlways("The gain of the source");
+        if (devCfg_.driver == "bb")
+            tooltipAlways("The strongest input you expect, in dBm. The BB60 sets its attenuator and amplifier from it\n"
+                          "(unless Atten and Amp are set by hand in the options). Too low overloads the ADC;\n"
+                          "too high raises the noise floor.");
+        if (g.agc) {
+            ImGui::SameLine(0, st.ItemInnerSpacing.x);
+            if (ImGui::Checkbox("AGC", &devCfg_.agc) && running && !live_->setGain(devCfg_.agc, devCfg_.gain, err)) {
+                status_ = "Gain failed: " + err;
+                LOG_ERROR("app", "gain failed: %s", err.c_str());
+            }
         }
-    }
+    }  // !zmq || running
 
     // --- driver-specific, in the options popup (these restart the stream) ---
     bool restart = false;
@@ -514,8 +573,75 @@ void App::drawDeviceToolbar() {
         ImGui::TextColored(kColErr, "%s", liveErr_.c_str());
     }
 
-    // --- recording (wraps to the next row when there is no room) ---
+    // --- recording and publishing (wrap to the next row when there is no room) ---
     drawRecordBar();
+    drawPublishBar();
+}
+
+void App::drawPublishBar() {
+    const bool running = live_ && live_->running();
+    const StreamPublisher::Status ps = live_ ? live_->publisher().status() : StreamPublisher::Status{};
+    // A publisher that stops by itself (a send error) has no UI event; catch its edge here.
+    if (pubWasActive_ && !ps.active && !ps.error.empty()) pubErr_ = ps.error;
+    pubWasActive_ = ps.active;
+    if (!pubAddr_[0]) snprintf(pubAddr_, sizeof pubAddr_, "%s", defaultStreamAddress().c_str());
+    const bool loop = running && live_->config().driver == "zmq" && sameStreamAddress(live_->config().args, pubAddr_);
+
+    flow(ImGui::CalcTextSize("Stop publishing").x + ImGui::GetStyle().FramePadding.x * 2 + ImGui::GetFrameHeight() * 1.5f);
+    if (!ps.active) {
+        ImGui::BeginDisabled(!running || loop);
+        if (ImGui::Button("Publish")) startPublishing({pubAddr_, pubTtl_});
+        ImGui::EndDisabled();
+        tooltipAlways(!running ? "Start a device first"
+                      : loop   ? "This wvt receives the stream on that address: publishing there would send it back.\n"
+                                 "Choose another address in the options."
+                               : "Send the stream over the network (ZMQ on UDP) to the address in the options.\n"
+                                 "Another wvt receives it with the device ZMQ stream. Recording still works.");
+    } else if (ImGui::Button("Stop publishing")) {
+        live_->stopPublishing();
+        status_ = "Stopped publishing";
+    }
+    ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+    settingsButton("##pubopts", "Where to publish: the subscriber's address or a multicast group");
+    if (ImGui::BeginPopup("##pubopts")) {
+        ImGui::BeginDisabled(ps.active);
+        if (beginForm("##pubform", 5.5f, 18)) {
+            row("Address", "The address of the subscriber (the computer that runs the other wvt),\n"
+                           "e.g. 192.168.1.50:5600, or a multicast group, e.g. 239.10.0.1:5600,\n"
+                           "optionally on one interface: en0;239.10.0.1:5600. The port is 5600 when not given.");
+            ImGui::InputText("##pubaddr", pubAddr_, sizeof pubAddr_);
+            StreamAddress a;
+            std::string err;
+            const bool ok = parseStreamAddress(pubAddr_, a, err);
+            if (!ok) {
+                row("", nullptr);
+                ImGui::TextColored(kColErr, "%s", err.c_str());
+            }
+            if (ok && a.multicast) {
+                row("TTL", "Multicast hops: 1 keeps the stream on the local network.");
+                if (ImGui::InputInt("##pubttl", &pubTtl_)) pubTtl_ = std::clamp(pubTtl_, 1, 255);
+            }
+            ImGui::EndTable();
+        }
+        ImGui::EndDisabled();
+        ImGui::EndPopup();
+    }
+
+    std::string text;
+    ImVec4 col = ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled);
+    if (ps.active) {
+        text = "PUB " + ps.address + "  " + fmtSI(ps.bytesPerSec, "B", 3) + "/s";
+        if (ps.skipped > 0) text += "  skipped " + fmtSI((double)ps.skipped, "S", 3);
+        col = ImVec4(0.45f, 0.8f, 1.f, 1.f);
+    } else if (!pubErr_.empty()) {
+        text = pubErr_;
+        col = kColErr;
+    } else {
+        text = std::string(pubAddr_);
+    }
+    flow(ImGui::CalcTextSize(text.c_str()).x);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextColored(col, "%s", text.c_str());
 }
 
 void App::drawRecordBar() {
@@ -939,10 +1065,12 @@ void App::drawLiveStatusBar() {
         snprintf(b, sizeof b, " | FFT sees %.0f%%%s", std::min(1.0, t.analyzed) * 100, t.gpu ? " (GPU)" : "");
         right += b;
         if (t.gapEvents > 0)
-            right += " | overflows " + std::to_string(t.gapEvents) +
+            right += (live_->config().driver == "zmq" ? " | network loss " : " | overflows ") + std::to_string(t.gapEvents) +
                      (t.dropped > 0 ? " (" + fmtSI((double)t.dropped, "S", 3) + " lost)" : "");
         const auto rs = live_->recorder().status();
         if (rs.active) right += " | REC " + fmtSI(rs.seconds, "s", 4);
+        const auto ps = live_->publisher().status();
+        if (ps.active) right += " | PUB " + fmtSI(ps.bytesPerSec, "B", 3) + "/s";
     } else {
         right = "not streaming";
     }

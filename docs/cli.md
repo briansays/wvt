@@ -66,7 +66,7 @@ The SDR profiles of the file (`sdr.N.*`) also apply on the command line:
 
 | Option | Function | Page |
 |---|---|---|
-| `--device DEV` | `rtlsdr[:INDEX\|SERIAL]`, `uhd[:ARGS]` (for example `uhd:addr=192.168.40.2`), `bb[:SERIAL]`, `skiq[:SERIAL\|#N]`, `sim` or `siggen` | [Live devices](live.md) |
+| `--device DEV` | `rtlsdr[:INDEX\|SERIAL]`, `uhd[:ARGS]` (for example `uhd:addr=192.168.40.2`), `bb[:SERIAL]`, `skiq[:SERIAL\|#N]`, `zmq[:ADDR]`, `sim` or `siggen` | [Live devices](live.md) |
 | `--gain DB\|auto` | The receiver gain (default 30 dB) | [Live devices](live.md) |
 | `--ref-level DBM` | BB60: the strongest expected input (default −20 dBm) | [Live devices](live.md#bb60-settings) |
 | `--atten auto\|0\|10\|20\|30` | BB60: the attenuator (default `auto`) | [Live devices](live.md#bb60-settings) |
@@ -84,7 +84,13 @@ The SDR profiles of the file (`sdr.N.*`) also apply on the command line:
 | `--record-format sigmf\|raw` | The file type (default `sigmf`) | [Live devices](live.md#recording) |
 | `--record-sample native\|cf32` | The sample format (default `native`) | [Live devices](live.md#recording) |
 | `--record-duration T` | Stop after `T` seconds | [Live devices](live.md#recording) |
-| `--no-gui` | Record without a window. Ctrl+C stops | [Live devices](live.md#recording) |
+| `--no-gui` | Record or publish without a window. Ctrl+C stops | [Live devices](live.md#recording) |
+| `--publish ADDR` | Send the live stream over the network to `ADDR`: the subscriber's `a.b.c.d[:PORT]`, or a multicast group `[IFACE;]GROUP[:PORT]` (port 5600 by default) | [Live devices](live.md#stream-over-the-network) |
+| `--publish-ttl N` | The multicast hops, 1 to 255 (default `zmq.ttl`, 1) | [Live devices](live.md#stream-over-the-network) |
+
+`--device zmq[:ADDR]` receives the stream of another wvt on `ADDR`: an address of this computer or
+a multicast group. Without `ADDR`, it uses `zmq.address`, else this computer's address. It does not
+accept `-c`, `-r`, `--gain` or the other device options.
 
 ## Signal generator
 

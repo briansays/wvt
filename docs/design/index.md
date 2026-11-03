@@ -22,6 +22,7 @@ is correct.
 | [Epiq Sidekiq](sidekiq-integration-plan.md) | #4 | Receive implemented, tested with a simulated card and built against SDK 4.26.0. Needs a card to verify |
 | [Point measurements](point-measurement-plan.md) | #80 | Implemented |
 | [Run-time configuration file](config-file-plan.md) | #88 | Implemented |
+| [ZMQ stream over UDP](zmq-stream-plan.md) | #96 | Implemented |
 
 ```{toctree}
 :hidden:
@@ -41,4 +42,5 @@ bb60-integration-plan
 sidekiq-integration-plan
 point-measurement-plan
 config-file-plan
+zmq-stream-plan
 ```

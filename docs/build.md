@@ -76,6 +76,8 @@ scripts/build.sh -- -DCMAKE_CUDA_ARCHITECTURES=89  # extra CMake arguments
 | [`WVT_WITH_BB`](#wvt_with_bb) | `AUTO`, `ON`, `OFF` | `AUTO` | Linux, macOS ARM |
 | [`SIGNALHOUND_SDK_DIR`](#signalhound_sdk_dir) | A folder | Empty | Linux, macOS ARM |
 | [`WVT_BB_SIM`](#wvt_bb_sim) | `ON`, `OFF` | `OFF` | All |
+| [`WVT_WITH_ZMQ`](#wvt_with_zmq) | `AUTO`, `ON`, `OFF` | `AUTO` | All |
+| [`WVT_ZMQ_SOURCE_DIR`](#wvt_zmq_source_dir) | A folder | Empty | All |
 | [`WVT_WITH_AUDIO`](#wvt_with_audio) | `AUTO`, `ON`, `OFF` | `AUTO` | All |
 | [`WVT_WITH_CUDA`](#wvt_with_cuda) | `AUTO`, `ON`, `OFF` | `AUTO` | Linux |
 | [`WVT_CUDA_STATIC`](#wvt_cuda_static) | `ON`, `OFF` | `ON` | Linux |
@@ -196,6 +198,39 @@ The folder of the extracted Sidekiq SDK: the folder with `bin/sidekiq-config` an
 `ON` builds the Sidekiq backend against a simulated card (`tools/skiq_sim/`) instead of the SDK,
 also on macOS. Use it for CI and tests. `skiq_check` then also tests the backend. Do not use it
 for normal use: the device list then shows the simulated card.
+
+### WVT_WITH_ZMQ
+
+Enables or disables streaming over the network with ZMQ on UDP (issue #96). The stream uses the
+RADIO and DISH sockets, which are in the draft API of libzmq. Most libzmq packages (Homebrew,
+Debian, Fedora) do not have the draft API. CMake gets libzmq in this order:
+
+1. A system libzmq (`pkg-config libzmq`), if it has the draft API.
+2. The libzmq source in [`WVT_ZMQ_SOURCE_DIR`](#wvt_zmq_source_dir).
+3. The libzmq 4.3.5 release from GitHub. CMake downloads it to `build/_deps/` and checks its
+   SHA-256 before it uses it. The configure step needs the network the first time only.
+
+For 2 and 3, CMake builds a static libzmq with the draft API, without CURVE, WebSocket or TLS.
+libzmq shows one CMake warning about its old `cmake_minimum_required`. You can ignore it.
+
+- With `AUTO`, if the download fails (for example, a computer without a network), wvt builds
+  without ZMQ and CMake tells you why.
+- Without ZMQ, the self-check `zmq_check` tests the message format only.
+
+Output: `wvt: ZMQ streaming enabled (libzmq 4.3.5, static, draft API, built here)`.
+
+### WVT_ZMQ_SOURCE_DIR
+
+An extracted libzmq 4.3.x release, for a build without a network. For example:
+
+```sh
+curl -LO https://github.com/zeromq/libzmq/releases/download/v4.3.5/zeromq-4.3.5.tar.gz
+shasum -a 256 zeromq-4.3.5.tar.gz   # 6653ef5910f17954861fe72332e68b03ca6e4d9c7160eb3a8de5a5a913bfab43
+tar -xzf zeromq-4.3.5.tar.gz
+cmake -S . -B build -DWVT_ZMQ_SOURCE_DIR=$PWD/zeromq-4.3.5
+```
+
+CMake does not check this folder. Use a release that you checked.
 
 ### WVT_WITH_AUDIO
 
@@ -355,8 +390,9 @@ cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
 | `device_check` | Self-check for the device list and the sample rate rules |
 | `bb_check` | Self-check for the BB60 backend, with the simulated device. Only with `WVT_BB_SIM=ON` |
 | `skiq_check` | Self-check for the Sidekiq logic. With `WVT_SKIQ_SIM=ON`, also for the backend with the simulated card |
+| `zmq_check` | Self-check for the network stream format. With ZMQ ([`WVT_WITH_ZMQ`](#wvt_with_zmq)), also for the sockets |
 | `gpu_check` | Compares the GPU results with the CPU results, and measures the speed |
-| `fuzz_json`, `fuzz_chain`, `fuzz_meta`, `fuzz_parse_si` | The fuzz targets. Only with `WVT_FUZZ=ON` |
+| `fuzz_json`, `fuzz_chain`, `fuzz_meta`, `fuzz_parse_si`, `fuzz_config`, `fuzz_zmq_wire` | The fuzz targets. Only with `WVT_FUZZ=ON` |
 
 `ctest --test-dir build --output-on-failure` runs all the self-checks.
 
