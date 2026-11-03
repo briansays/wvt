@@ -466,6 +466,135 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
+# Optional ZMQ streaming over UDP (issue #96). The stream uses the RADIO and
+# DISH sockets, which are in the draft API of libzmq. Most packages of libzmq
+# (Homebrew, Debian, Fedora) are built without the draft API, so:
+#  1. a system libzmq is used if it has the draft API (zmq_join);
+#  2. else libzmq is built from WVT_ZMQ_SOURCE_DIR (an extracted release);
+#  3. else the libzmq release is downloaded and its SHA-256 checked.
+# libzmq is then a static library with only the draft API added: no CURVE,
+# no WebSocket, no TLS. AUTO disables ZMQ if all three fail (for example a
+# build without a network); ON stops with an error.
+# ---------------------------------------------------------------------------
+set(WVT_WITH_ZMQ AUTO CACHE STRING "Build ZMQ streaming over UDP (AUTO, ON, OFF)")
+set_property(CACHE WVT_WITH_ZMQ PROPERTY STRINGS AUTO ON OFF)
+set(WVT_ZMQ_SOURCE_DIR "" CACHE PATH "Extracted libzmq 4.3.x source to build (empty: use the system libzmq or download)")
+set(WVT_ZMQ_VERSION 4.3.5)
+set(WVT_ZMQ_URL "https://github.com/zeromq/libzmq/releases/download/v${WVT_ZMQ_VERSION}/zeromq-${WVT_ZMQ_VERSION}.tar.gz")
+set(WVT_ZMQ_SHA256 6653ef5910f17954861fe72332e68b03ca6e4d9c7160eb3a8de5a5a913bfab43)
+set(WVT_ZMQ_OK FALSE)
+set(WVT_ZMQ_WHY "")
+if(NOT WVT_WITH_ZMQ STREQUAL "OFF")
+  # wvt_zmq is the target that wvt and the checks link to get libzmq.
+  add_library(wvt_zmq INTERFACE)
+
+  # 1. A system libzmq with the draft API
+  if(PKG_CONFIG_FOUND AND NOT WVT_ZMQ_SOURCE_DIR)
+    pkg_check_modules(ZMQPC QUIET IMPORTED_TARGET libzmq)
+  endif()
+  if(ZMQPC_FOUND)
+    include(CheckCXXSourceCompiles)
+    set(CMAKE_REQUIRED_LIBRARIES PkgConfig::ZMQPC)
+    set(CMAKE_REQUIRED_DEFINITIONS -DZMQ_BUILD_DRAFT_API)
+    check_cxx_source_compiles("
+      #include <zmq.h>
+      int main() { void* s = zmq_socket(nullptr, ZMQ_DISH); return zmq_join(s, \"wvt\"); }"
+      WVT_SYSTEM_ZMQ_HAS_DRAFTS)
+    unset(CMAKE_REQUIRED_LIBRARIES)
+    unset(CMAKE_REQUIRED_DEFINITIONS)
+    if(WVT_SYSTEM_ZMQ_HAS_DRAFTS)
+      target_link_libraries(wvt_zmq INTERFACE PkgConfig::ZMQPC)
+      target_compile_definitions(wvt_zmq INTERFACE ZMQ_BUILD_DRAFT_API)
+      set(WVT_ZMQ_OK TRUE)
+      set(WVT_ZMQ_WHAT "system libzmq ${ZMQPC_VERSION} with the draft API")
+    else()
+      message(STATUS "wvt: the system libzmq ${ZMQPC_VERSION} has no draft API (RADIO/DISH); building libzmq ${WVT_ZMQ_VERSION}")
+    endif()
+  endif()
+
+  # 2. and 3. Build libzmq from a source folder, or from the downloaded release
+  if(NOT WVT_ZMQ_OK)
+    set(_zmq_src "${WVT_ZMQ_SOURCE_DIR}")
+    if(NOT _zmq_src)
+      set(_zmq_tgz "${CMAKE_BINARY_DIR}/_deps/zeromq-${WVT_ZMQ_VERSION}.tar.gz")
+      set(_zmq_src "${CMAKE_BINARY_DIR}/_deps/zeromq-${WVT_ZMQ_VERSION}")
+      if(NOT EXISTS "${_zmq_src}/CMakeLists.txt")
+        set(_zmq_hash "")
+        if(EXISTS "${_zmq_tgz}")
+          file(SHA256 "${_zmq_tgz}" _zmq_hash)
+        endif()
+        if(NOT _zmq_hash STREQUAL WVT_ZMQ_SHA256)
+          message(STATUS "wvt: downloading ${WVT_ZMQ_URL}")
+          file(DOWNLOAD "${WVT_ZMQ_URL}" "${_zmq_tgz}" STATUS _zmq_status TIMEOUT 120 INACTIVITY_TIMEOUT 30)
+          list(GET _zmq_status 0 _zmq_code)
+          if(_zmq_code EQUAL 0)
+            file(SHA256 "${_zmq_tgz}" _zmq_hash)
+          else()
+            list(GET _zmq_status 1 _zmq_msg)
+            file(REMOVE "${_zmq_tgz}")
+            set(WVT_ZMQ_WHY "the download of libzmq failed (${_zmq_msg}); set WVT_ZMQ_SOURCE_DIR to an extracted libzmq ${WVT_ZMQ_VERSION}")
+          endif()
+        endif()
+        if(EXISTS "${_zmq_tgz}" AND NOT WVT_ZMQ_WHY)
+          if(_zmq_hash STREQUAL WVT_ZMQ_SHA256)
+            file(ARCHIVE_EXTRACT INPUT "${_zmq_tgz}" DESTINATION "${CMAKE_BINARY_DIR}/_deps")
+          else()
+            file(REMOVE "${_zmq_tgz}")
+            set(WVT_ZMQ_WHY "the downloaded libzmq has the wrong SHA-256 (${_zmq_hash})")
+          endif()
+        endif()
+      endif()
+    endif()
+    if(NOT WVT_ZMQ_WHY AND NOT EXISTS "${_zmq_src}/CMakeLists.txt")
+      set(WVT_ZMQ_WHY "no libzmq source in ${_zmq_src}")
+    endif()
+    if(NOT WVT_ZMQ_WHY)
+      # Only the static library with the draft API. Normal variables set the
+      # options of libzmq (policy CMP0077), so the user's cache does not change.
+      set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+      set(CMAKE_POLICY_VERSION_MINIMUM 3.5)  # libzmq asks for CMake 2.8.12; CMake 4 removed that
+      set(ENABLE_DRAFTS ON)
+      set(BUILD_SHARED OFF)
+      set(BUILD_STATIC ON)
+      set(BUILD_TESTS OFF)
+      set(WITH_DOCS OFF)
+      set(WITH_PERF_TOOL OFF)
+      set(ENABLE_CPACK OFF)
+      set(ENABLE_CURVE OFF)
+      set(WITH_LIBSODIUM OFF)
+      set(ENABLE_WS OFF)
+      set(WITH_TLS OFF)
+      set(WITH_NSS OFF)
+      set(WITH_LIBBSD OFF)
+      set(ENABLE_PRECOMPILED OFF)
+      set(LIBZMQ_PEDANTIC OFF)
+      set(LIBZMQ_WERROR OFF)
+      add_subdirectory("${_zmq_src}" "${CMAKE_BINARY_DIR}/_deps/libzmq-build" EXCLUDE_FROM_ALL)
+      unset(CMAKE_POLICY_VERSION_MINIMUM)
+      # libzmq-static exports ZMQ_STATIC and ZMQ_BUILD_DRAFT_API.
+      target_link_libraries(wvt_zmq INTERFACE libzmq-static)
+      set(WVT_ZMQ_OK TRUE)
+      if(WVT_ZMQ_SOURCE_DIR)
+        set(WVT_ZMQ_WHAT "libzmq from ${WVT_ZMQ_SOURCE_DIR}, static, draft API")
+      else()
+        set(WVT_ZMQ_WHAT "libzmq ${WVT_ZMQ_VERSION}, static, draft API, built here")
+      endif()
+    endif()
+  endif()
+endif()
+if(WVT_ZMQ_OK)
+  target_link_libraries(wvt PRIVATE wvt_zmq)
+  target_compile_definitions(wvt PRIVATE WVT_HAVE_ZMQ)
+  message(STATUS "wvt: ZMQ streaming enabled (${WVT_ZMQ_WHAT})")
+elseif(WVT_WITH_ZMQ STREQUAL "ON")
+  message(FATAL_ERROR "WVT_WITH_ZMQ=ON but libzmq cannot be used: ${WVT_ZMQ_WHY}")
+elseif(WVT_WITH_ZMQ STREQUAL "OFF")
+  message(STATUS "wvt: ZMQ streaming disabled (WVT_WITH_ZMQ=OFF)")
+else()
+  message(STATUS "wvt: ZMQ streaming disabled (${WVT_ZMQ_WHY})")
+endif()
+
+# ---------------------------------------------------------------------------
 # Optional NVIDIA GPU acceleration (issue #3). AUTO builds the CUDA backend
 # when the CUDA toolkit (12.0 or later, with cuFFT) is found, ON requires it.
 # A CUDA build still runs on computers without a GPU: wvt checks at start.
@@ -720,6 +849,14 @@ if(WVT_SKIQ_SIM)
   target_link_libraries(skiq_check PRIVATE skiq_api_sim)
 endif()
 
+# ZMQ streaming self-test (issue #96), only when wvt has ZMQ
+if(WVT_ZMQ_OK)
+  add_executable(zmq_check tools/zmq_check.cpp)
+  target_include_directories(zmq_check PRIVATE src)
+  target_link_libraries(zmq_check PRIVATE wvt_zmq Threads::Threads)
+  target_compile_options(zmq_check PRIVATE ${WVT_WARNINGS})
+endif()
+
 # ---------------------------------------------------------------------------
 # CTest (issue #53): "ctest --test-dir build --output-on-failure" runs every
 # self-check. The checks need no hardware.
@@ -729,6 +866,9 @@ set(WVT_CHECKS siggen_check audio_check log_check segment_check gpu_check extrac
   clipboard_check session_check measure_check config_check skiq_check)
 if(WVT_BB_SIM)
   list(APPEND WVT_CHECKS bb_check)
+endif()
+if(WVT_ZMQ_OK)
+  list(APPEND WVT_CHECKS zmq_check)
 endif()
 foreach(_t IN LISTS WVT_CHECKS)
   add_test(NAME ${_t} COMMAND ${_t})
