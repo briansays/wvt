@@ -1,7 +1,7 @@
 # Plan: publish a live stream over ZMQ and UDP (issue #96)
 
-Status: phases 1 (build) and 2 (wire format) implemented (2026-11-03) on `zmq-udp-stream`. Phases
-3 to 8 are planned.
+Status: phases 1 (build), 2 (wire format) and 3 (publisher) implemented (2026-11-03) on
+`zmq-udp-stream`. Phases 4 to 8 are planned.
 
 ## 1. Goal
 
@@ -133,20 +133,33 @@ It ignores the reserved bytes and the unknown flags, so that a later version can
 
 ### Phase 3 — Publisher (`src/net/zmq_pub.h/.cpp`, new)
 
-- `class StreamPublisher { bool start(shared_ptr<SampleRing>, StreamSource, addr, err); void stop();
-  Status status() const; void noteRetune(int64_t pos, double fc); }`. `StreamSource` has the
-  format, rate, driver, description, and a function that returns the gain and AGC.
-- Its thread: RADIO socket, `zmq_connect(endpoint)`. For a group, `ZMQ_MULTICAST_HOPS` = TTL
-  (default 1). For unicast, the address is that of the subscriber.
-  It reads from `ring->written()` on, in blocks of at most 8000 bytes, with `ring->read()`. If a
-  read fails (overwritten), it skips to the newest samples. It splits a block at a retune position
-  and sets the retune flag on the next message. One info message each second. An end-of-stream
-  message at stop.
-- Status: messages/s, MB/s, samples skipped. A warning in the status bar above about 80 % of a
-  1 GbE link (approximately 25 MS/s `ci16`).
-- `LiveEngine` owns the publisher next to `rec_`: `startPublishing`, `stopPublishing`,
-  `publisher()`. The retune hook and `setCenterFreq` call `pub_.noteRetune` where they call
-  `rec_.noteRetune`. `stop()` stops it.
+- `StreamPublisher`: `start(ring, PublishSource, PublishConfig, err)`, `stop()`, `active()`,
+  `noteRetune(pos, fc)`, `setGain(db, agc)`, `status()`. `PublishSource` has the format, the
+  rate, the frequency, the gain and AGC, the driver and the description. `PublishConfig` has the
+  address and the multicast TTL (default 1).
+- The class has the same layout in every build (a private `Impl`), because `live.h` is in targets
+  with and without ZMQ. Without ZMQ, `start()` fails with *this wvt was built without ZMQ*.
+- `start()` parses the address, opens a RADIO socket (`ZMQ_SNDHWM` 10 000 messages, `ZMQ_SNDBUF`
+  4 MB, `ZMQ_LINGER` 200 ms, `ZMQ_MULTICAST_HOPS` = TTL for a group) and connects. Errors come back
+  from `start()`. It takes a random stream ID that is not 0, and starts at the newest sample of the
+  ring: index 0 of the stream.
+- Its thread reads the ring with `read()` (a lossy reader) into the ZMQ message after the header:
+  at most 2000 ci16 samples, and never across a retune position. If it is more than 3/4 of the ring
+  behind, it skips to 1/4 of the ring behind the newest sample. A failed read skips to the newest
+  sample. `status().skipped` counts the skipped samples; the subscriber sees them as a jump in the
+  index. When it has sent everything, it waits 5 ms.
+- The time of a message is the wall clock at `start()` + index / rate.
+- An info message each second. `stop()` sends what the ring has at that moment, then a data message
+  with the end flag and 0 samples.
+- RADIO drops a message without an error when its queue is full. Then the subscriber sees the gap.
+- `LiveEngine`: `startPublishing`, `stopPublishing`, `publisher()`. The retune hook and
+  `setCenterFreq` give the publisher the same ring position as `freshFrom_`. `setGain` passes the
+  gain. `stop()` stops the publisher after the recorder and before the device. `start()` (a restart
+  for a new rate or device option) publishes again to the same address, with a new stream ID.
+- `zmq_check`: a publisher streams 100 000 ci16 samples to a DISH on the loopback, with a retune
+  and a gain change half way: every sample, the order, the split at the retune, the gain and AGC
+  flag, the time, the info and end messages. Then a ring of 4096 samples gets 200 000 samples at
+  once: the samples that the subscriber lost are the samples that the publisher skipped.
 
 ### Phase 4 — Subscriber device (`src/device/sdr_zmq.cpp`, new)
 

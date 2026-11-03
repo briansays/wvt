@@ -1,7 +1,7 @@
 #pragma once
 // Live device streaming: owns the open SdrDevice, the SampleRing it fills,
-// the Recorder, and a spectrum thread that turns the newest samples into
-// waterfall rows for the UI.
+// the Recorder, the network stream publisher (issue #96), and a spectrum
+// thread that turns the newest samples into waterfall rows for the UI.
 #include <atomic>
 #include <condition_variable>
 #include <functional>
@@ -15,6 +15,7 @@
 #include "io/recorder.h"
 #include "common/sample_ring.h"
 #include "device/sdr_device.h"
+#include "net/zmq_pub.h"
 
 struct LiveParams {
     int nfft = 2048;
@@ -55,7 +56,9 @@ public:
     explicit LiveEngine(std::function<void()> wake);
     ~LiveEngine();
 
-    // Opens the device, starts streaming and the spectrum thread.
+    // Opens the device, starts streaming and the spectrum thread. If the
+    // engine published before (a restart for a new rate or option), it
+    // publishes again, with a new stream ID.
     bool start(const StreamConfig& cfg, std::string& err);
     void stop();
     bool running() const { return dev_ != nullptr; }
@@ -80,6 +83,11 @@ public:
     void stopRecording() { rec_.stop(); }
     Recorder& recorder() { return rec_; }
 
+    // Publishes the stream over ZMQ on UDP (issue #96), next to a recording.
+    bool startPublishing(const PublishConfig& cfg, std::string& err);
+    void stopPublishing() { pub_.stop(); }
+    const StreamPublisher& publisher() const { return pub_; }
+
 private:
     void spectrumLoop();
 
@@ -88,6 +96,7 @@ private:
     std::unique_ptr<SdrDevice> dev_;
     std::shared_ptr<SampleRing> ring_;
     Recorder rec_;
+    StreamPublisher pub_;
 
     std::thread th_;
     std::atomic<bool> quit_{false};

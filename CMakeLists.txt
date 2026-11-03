@@ -103,6 +103,8 @@ add_executable(wvt
   src/app/app_siggen.cpp
   src/app/app_chain.cpp
   src/device/live.cpp
+  src/net/zmq_wire.cpp
+  src/net/zmq_pub.cpp
   src/io/recorder.cpp
   src/device/sdr_device.cpp
   src/device/sdr_sim.cpp
@@ -826,7 +828,7 @@ target_compile_options(device_check PRIVATE ${WVT_WARNINGS})
 
 # BB60 backend self-test against the simulated device (only with WVT_BB_SIM)
 if(WVT_BB_SIM)
-  add_executable(bb_check tools/bb_check.cpp src/device/sdr_bb60.cpp src/device/live.cpp src/io/recorder.cpp src/device/sdr_device.cpp
+  add_executable(bb_check tools/bb_check.cpp src/device/sdr_bb60.cpp src/device/live.cpp src/net/zmq_wire.cpp src/net/zmq_pub.cpp src/io/recorder.cpp src/device/sdr_device.cpp
     src/device/sdr_sim.cpp src/device/sdr_siggen.cpp src/siggen/siggen.cpp src/siggen/siggen_out.cpp src/common/json.cpp src/dsp/engine.cpp src/io/iq_file.cpp
     src/dsp/dsp.cpp src/common/ui_util.cpp src/common/log.cpp)
   target_include_directories(bb_check PRIVATE src)
@@ -851,7 +853,7 @@ endif()
 
 # ZMQ streaming self-test (issue #96): the wire format in every build, and the
 # sockets when wvt has ZMQ
-add_executable(zmq_check tools/zmq_check.cpp src/net/zmq_wire.cpp)
+add_executable(zmq_check tools/zmq_check.cpp src/net/zmq_wire.cpp src/net/zmq_pub.cpp src/common/log.cpp)
 target_include_directories(zmq_check PRIVATE src)
 target_link_libraries(zmq_check PRIVATE Threads::Threads)
 target_compile_options(zmq_check PRIVATE ${WVT_WARNINGS})

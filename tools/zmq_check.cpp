@@ -5,14 +5,23 @@
 //  - With WVT_HAVE_ZMQ: the libzmq that wvt links has the draft RADIO and
 //    DISH sockets, and one message of the largest size that wvt sends goes
 //    through udp:// on the loopback.
+//  - With WVT_HAVE_ZMQ: the publisher (src/net/zmq_pub) streams a sample
+//    ring to a DISH on the loopback: every sample, the retune, the gain, the
+//    info and end messages; and with a ring that overflows, the samples that
+//    it skips are the samples that the subscriber sees as lost.
+#include <atomic>
 #include <chrono>
 #include <cmath>
+#include <memory>
+#include <thread>
 #include <cstdio>
 #include <cstring>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "common/sample_ring.h"
+#include "net/zmq_pub.h"
 #include "net/zmq_wire.h"
 
 #ifdef WVT_HAVE_ZMQ
@@ -393,6 +402,193 @@ void checkSockets() {
     zmq_close(dish);
     zmq_ctx_term(ctx);
 }
+
+// The test pattern: sample k of the ring is (k & 0x7fff, (k >> 15) & 0x7fff).
+void fillPattern(std::vector<int16_t>& buf, int64_t from, int64_t n) {
+    buf.resize((size_t)n * 2);
+    for (int64_t k = 0; k < n; ++k) {
+        buf[(size_t)k * 2] = (int16_t)((from + k) & 0x7fff);
+        buf[(size_t)k * 2 + 1] = (int16_t)(((from + k) >> 15) & 0x7fff);
+    }
+}
+
+bool matchesPattern(const StreamMessage& m) {
+    for (uint32_t k = 0; k < m.h.count; ++k) {
+        const int64_t i = (int64_t)m.h.index + k;
+        int16_t iq[2];
+        memcpy(iq, m.samples + (size_t)k * 4, 4);
+        if (iq[0] != (int16_t)(i & 0x7fff) || iq[1] != (int16_t)((i >> 15) & 0x7fff)) return false;
+    }
+    return true;
+}
+
+// A DISH on a free loopback port, and a thread that keeps every message
+// until it has seen `ends` end-of-stream messages or 10 s passed.
+struct Receiver {
+    void* ctx = zmq_ctx_new();
+    void* dish = zmq_socket(ctx, ZMQ_DISH);
+    std::string address;
+    std::vector<std::vector<uint8_t>> msgs;
+    std::thread th;
+
+    bool open() {
+        const int hwm = 100000, rcvbuf = 8 << 20, timeoutMs = 100;
+        zmq_setsockopt(dish, ZMQ_RCVHWM, &hwm, sizeof hwm);
+        zmq_setsockopt(dish, ZMQ_RCVBUF, &rcvbuf, sizeof rcvbuf);
+        zmq_setsockopt(dish, ZMQ_RCVTIMEO, &timeoutMs, sizeof timeoutMs);
+        for (int port = 15700; port < 15800 && address.empty(); ++port) {
+            const std::string a = "127.0.0.1:" + std::to_string(port);
+            if (zmq_bind(dish, ("udp://" + a).c_str()) == 0) address = a;
+        }
+        return !address.empty() && zmq_join(dish, kStreamGroup) == 0;
+    }
+    void run(int ends) {
+        th = std::thread([this, ends] {
+            int seen = 0;
+            const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+            while (seen < ends && std::chrono::steady_clock::now() < end) {
+                zmq_msg_t r;
+                zmq_msg_init(&r);
+                if (zmq_msg_recv(&r, dish, 0) >= 0) {
+                    const auto* p = (const uint8_t*)zmq_msg_data(&r);
+                    msgs.emplace_back(p, p + zmq_msg_size(&r));
+                    StreamMessage m;
+                    std::string why;
+                    if (parseStreamMessage(p, zmq_msg_size(&r), m, why) && (m.h.flags & kStreamFlagEnd)) ++seen;
+                }
+                zmq_msg_close(&r);
+            }
+        });
+    }
+    void join() {
+        if (th.joinable()) th.join();
+    }
+    ~Receiver() {
+        join();
+        const int linger = 0;
+        zmq_setsockopt(dish, ZMQ_LINGER, &linger, sizeof linger);
+        zmq_close(dish);
+        zmq_ctx_term(ctx);
+    }
+};
+
+void checkPublisher() {
+    printf("publisher\n");
+    Receiver rx;
+    check(rx.open(), "a DISH listens on " + rx.address);
+    rx.run(2);
+
+    // 1. A normal stream: 100 000 ci16 samples at 1 MS/s, a retune and a
+    //    gain change half way.
+    const int64_t total = 100000, half = 50000, chunk = 5000;
+    auto ring = std::make_shared<SampleRing>(1 << 18, 4);
+    PublishSource src;
+    src.fmt = SampleFormat::CI16;
+    src.rate = 1e6;
+    src.fc = 100e6;
+    src.gain = 30;
+    src.driver = "sim";
+    src.description = "zmq_check source";
+    StreamPublisher pub;
+    std::string err;
+    check(pub.start(ring, src, {rx.address, 1}, err), "the publisher starts (" + (err.empty() ? rx.address : err) + ")");
+    std::vector<int16_t> buf;
+    for (int64_t at = 0; at < total; at += chunk) {
+        if (at == half) {
+            pub.noteRetune(half, 101e6);
+            pub.setGain(40, true);
+        }
+        fillPattern(buf, at, chunk);
+        ring->push((const uint8_t*)buf.data(), chunk);
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    const uint32_t id1 = pub.status().streamId;
+    pub.stop();
+    const StreamPublisher::Status s1 = pub.status();
+    check(!s1.active && s1.error.empty(), "it stops without an error");
+    check(s1.samples == total && s1.skipped == 0, "it sent " + std::to_string(s1.samples) + " samples, skipped " +
+                                                      std::to_string(s1.skipped));
+
+    // 2. A ring of 4096 samples and 200 000 samples at once: the publisher
+    //    falls behind and skips.
+    const int64_t total2 = 200000;
+    auto small = std::make_shared<SampleRing>(4096, 4);
+    check(pub.start(small, src, {rx.address, 1}, err), "the publisher starts again on a small ring");
+    const uint32_t id2 = pub.status().streamId;
+    fillPattern(buf, 0, total2);
+    small->push((const uint8_t*)buf.data(), total2);
+    pub.stop();
+    const StreamPublisher::Status s2 = pub.status();
+    check(id2 != id1, "a new stream ID for the new start");
+    check(s2.samples + s2.skipped == total2,
+          "small ring: " + std::to_string(s2.samples) + " sent + " + std::to_string(s2.skipped) + " skipped = 200000");
+
+    rx.join();
+
+    // Check what arrived.
+    int infos = 0, ends = 0, data1 = 0, bad = 0, crossing = 0, outOfOrder = 0;
+    bool infoOk = true, patternOk = true, retuneOk = true, gainOk = true, timeOk = true, sizeOk = true;
+    int64_t got1 = 0, got2 = 0, lost2 = 0, end1 = -1, end2 = -1;
+    bool sawRetune = false;
+    uint64_t t0 = 0;
+    StreamTracker tr;
+    for (const auto& raw : rx.msgs) {
+        StreamMessage m;
+        std::string why;
+        if (!parseStreamMessage(raw.data(), raw.size(), m, why)) {
+            ++bad;
+            continue;
+        }
+        const bool first = m.h.streamId == id1;
+        if (m.h.kind == StreamKind::Info) {
+            ++infos;
+            infoOk = infoOk && m.info.driver == "sim" && m.info.description == "zmq_check source" && m.h.rate == 1e6;
+            continue;
+        }
+        if (m.h.flags & kStreamFlagEnd) {
+            ++ends;
+            (first ? end1 : end2) = (int64_t)m.h.index;
+            continue;
+        }
+        const StreamTracker::Result r = tr.next(m.h);
+        if (r.event == StreamTracker::Event::Late) ++outOfOrder;
+        sizeOk = sizeOk && m.h.count >= 1 && m.h.count <= 2000;
+        patternOk = patternOk && matchesPattern(m);
+        if (first) {
+            ++data1;
+            got1 += m.h.count;
+            if (r.event == StreamTracker::Event::Lost) ++outOfOrder;
+            const bool after = m.h.index >= (uint64_t)half;
+            if (m.h.index < (uint64_t)half && m.h.index + m.h.count > (uint64_t)half) ++crossing;
+            retuneOk = retuneOk && m.h.fc == (after ? 101e6 : 100e6) &&
+                       ((m.h.flags & kStreamFlagRetune) != 0) == (m.h.index == (uint64_t)half);
+            sawRetune = sawRetune || (m.h.flags & kStreamFlagRetune);
+            if (after) gainOk = gainOk && m.h.gain == 40 && (m.h.flags & kStreamFlagAgc);
+            if (m.h.index == 0) t0 = m.h.timeNs;
+            else if (t0) timeOk = timeOk && std::llabs((long long)(m.h.timeNs - t0) - (long long)(m.h.index * 1000)) <= 1;
+        } else {
+            got2 += m.h.count;
+            // Before the first message that arrived, and the gaps after it.
+            if (r.event == StreamTracker::Event::NewStream) lost2 += (int64_t)m.h.index;
+            if (r.event == StreamTracker::Event::Lost) lost2 += (int64_t)r.lost;
+        }
+    }
+    printf("  %zu messages: %d info, %d data in the first stream, %d end\n", rx.msgs.size(), infos, data1, ends);
+    check(bad == 0, "all messages parse");
+    check(infos >= 2 && infoOk, "an info message for each start, with the driver, the description and the rate");
+    check(sizeOk, "1 to 2000 samples in each data message");
+    check(got1 == total && outOfOrder == 0, "stream 1: all 100000 samples arrive in order (" + std::to_string(got1) + ")");
+    check(patternOk, "every sample has its value");
+    check(sawRetune && retuneOk && crossing == 0,
+          "the retune: the message at sample 50000 has the flag and 101 MHz, no message crosses it");
+    check(gainOk, "after the change: gain 40 dB and AGC");
+    check(t0 != 0 && timeOk, "the time of each message is the start time + index / rate");
+    check(ends == 2 && end1 == total && end2 == total2, "an end message for each stream, at its last sample");
+    check(got2 == s2.samples && lost2 == s2.skipped,
+          "small ring: the subscriber lost " + std::to_string(lost2) + " samples, the publisher skipped " +
+              std::to_string(s2.skipped));
+    printf("  (the small ring made the publisher skip %lld of 200000 samples)\n", (long long)s2.skipped);
+}
 #endif
 }  // namespace
 
@@ -405,8 +601,14 @@ int main() {
     checkTracker();
 #ifdef WVT_HAVE_ZMQ
     checkSockets();
+    checkPublisher();
 #else
-    printf("libzmq: not in this build (WVT_WITH_ZMQ), the socket test is skipped\n");
+    printf("libzmq: not in this build (WVT_WITH_ZMQ), the socket tests are skipped\n");
+    StreamPublisher pub;
+    std::string err;
+    check(!pub.start(std::make_shared<SampleRing>(4096, 4), {}, {"127.0.0.1:5600", 1}, err) &&
+              err.find("without ZMQ") != std::string::npos,
+          "the publisher reports that this build has no ZMQ");
 #endif
     printf("%s\n", failures ? "FAILED" : "all passed");
     return failures ? 1 : 0;

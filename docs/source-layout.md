@@ -63,7 +63,7 @@ folders.
 | File | Function |
 |---|---|
 | `src/app/app_live.cpp` | The live mode UI: device and recording toolbar, live spectrum, scrolling waterfall |
-| `src/device/live.*` | The live engine: the device, the sample ring, the recorder and the spectrum thread |
+| `src/device/live.*` | The live engine: the device, the sample ring, the recorder, the stream publisher and the spectrum thread |
 | `src/common/sample_ring.h` | The ring buffer between the device thread, the spectrum thread and the recorder |
 | `src/io/recorder.*` | The SigMF and raw recorder |
 | `src/device/sdr_device.*` | The device interface, the driver list, sample-rate checks |
@@ -75,6 +75,7 @@ folders.
 | `src/device/sdr_siggen.cpp` | The loopback device that streams the generator into the live view |
 | `src/device/sdr_tx.h` | The transmitter interface. `sdr_uhd.cpp` implements it for UHD |
 | `src/net/zmq_wire.*` | The network stream (issue #96): the message header, the info message, the stream address, the default address, the sample index tracker. No libzmq |
+| `src/net/zmq_pub.*` | The network stream publisher: a lossy reader of the sample ring that sends it on a ZMQ RADIO socket |
 
 ## Signal generator
 
