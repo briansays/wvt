@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "common/log.h"
+#include "net/zmq_wire.h"
 
 namespace {
 
@@ -76,7 +77,7 @@ std::string fmtNum(double v) {
 
 // ---- values ------------------------------------------------------------------
 
-enum class Kind { Folder, Name, Number, Whole, Choice, Bool, Text, Size, Bands };
+enum class Kind { Folder, Name, Number, Whole, Choice, Bool, Text, Size, Bands, Address };
 
 struct Value {
     std::string text;  // as written (quotes removed); choices in lower case
@@ -187,6 +188,13 @@ bool parseValue(const Spec& spec, const std::string& text, Value& v, std::string
             return true;
         case Kind::Text:
             return true;
+        case Kind::Address: {
+            StreamAddress a;
+            std::string why;
+            if (parseStreamAddress(text, a, why)) return true;
+            err = "wants a stream address: " + why;
+            return false;
+        }
         case Kind::Size: {
             const auto p = split(low, 'x');
             char *e1 = nullptr, *e2 = nullptr;
@@ -343,6 +351,13 @@ const std::vector<Key>& keys() {
          [](const WvtConfig& c) { return std::to_string(c.uiWidth) + "x" + std::to_string(c.uiHeight); }},
         {"log.folder", {Kind::Folder}, "(env WVT_LOG_DIR)", [](WvtConfig& c, const Value& v) { c.logFolder = v.text; },
          [](const WvtConfig& c) { return c.logFolder; }, "~/wvt/logs/", "$WVT_LOG_DIR, then $TMPDIR, then /tmp"},
+        // network stream
+        {"zmq.address", {Kind::Address}, "a.b.c.d[:port] or [iface;]group[:port]",
+         [](WvtConfig& c, const Value& v) { c.zmqAddress = v.text; }, [](const WvtConfig& c) { return c.zmqAddress; },
+         "192.168.1.20:5600", "this computer's address, port 5600 (else 127.0.0.1:5600)",
+         "network stream (--publish, Publish, the ZMQ stream device)"},
+        {"zmq.ttl", {Kind::Whole, 1, 255}, "multicast hops: 1 = the local network",
+         [](WvtConfig& c, const Value& v) { c.zmqTtl = (int)v.whole; }, [](const WvtConfig& c) { return std::to_string(c.zmqTtl); }},
         // transmit limits
         {"tx.max_gain_db", {Kind::Number, -100, 200}, "", [](WvtConfig& c, const Value& v) { c.txMaxGainDb = v.num; },
          [](const WvtConfig& c) { return std::isnan(c.txMaxGainDb) ? std::string() : fmtValue(c.txMaxGainDb); }, "60", "no limit",
@@ -799,6 +814,15 @@ bool configSameDevice(const DeviceInfo& listed, const std::string& driver, const
     if (listed.driver != driver || (listed.product.empty() && listed.args.empty())) return false;
     return args.empty() || listed.args == args || argsContain(listed.args, args) ||
            (!listed.serial.empty() && (sameText(args, listed.serial) || sameText(args, "serial=" + listed.serial)));
+}
+
+void configApplyZmqAddress(const WvtConfig& cfg, std::vector<DeviceInfo>& devices) {
+    if (cfg.zmqAddress.empty()) return;
+    for (auto& d : devices)
+        if (d.driver == "zmq") {
+            d.args = cfg.zmqAddress;
+            d.label = "ZMQ stream (" + cfg.zmqAddress + ")";
+        }
 }
 
 int configDefaultDevice(const WvtConfig& cfg, const std::vector<DeviceInfo>& devices) {

@@ -1,7 +1,7 @@
 # Plan: publish a live stream over ZMQ and UDP (issue #96)
 
-Status: phases 1 to 6 (build, wire format, publisher, subscriber device, command line, GUI)
-implemented (2026-11-03) on `zmq-udp-stream`. Phases 7 and 8 are planned.
+Status: phases 1 to 7 (build, wire format, publisher, subscriber device, command line, GUI,
+configuration file) implemented (2026-11-03) on `zmq-udp-stream`. Phase 8 is planned.
 
 ## 1. Goal
 
@@ -240,6 +240,12 @@ to a GUI subscriber, on the loopback.
 
 - `zmq.address` (empty: the default address, §3) and `zmq.ttl = 1`. They set the defaults of
   both sides.
+
+As built: `zmq.address` is the default of the **Publish** popup and the address of the **ZMQ
+stream** entry in the device list (and of `--device zmq` without an address, and of
+`--list-devices`). `--publish` still needs its address. `zmq.ttl` is the default of the popup and of
+`--publish-ttl`; `--show-config` names `--publish-ttl` as its source when it is given. A bad
+address is a warning with the reason, and the default stays.
 
 ### Phase 8 — Checks and docs
 

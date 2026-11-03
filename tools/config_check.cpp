@@ -225,6 +225,28 @@ int main() {
         check(warned(b, {"t.conf:3:", "on or off"}), "a bool that is not one" + list(b));
     }
 
+    printf("network stream\n");
+    {
+        const Parsed d = parse("");
+        check(d.cfg.zmqAddress.empty() && d.cfg.zmqTtl == 1, "defaults: no address (this computer's), TTL 1");
+        const Parsed p = parse("zmq.address = 192.168.1.20:5601\nzmq.ttl = 4\n");
+        check(p.warnings.empty() && p.cfg.zmqAddress == "192.168.1.20:5601" && p.cfg.zmqTtl == 4,
+              "zmq.address and zmq.ttl" + list(p));
+        const Parsed m = parse("zmq.address = \"en0;239.10.0.1\"\n");
+        check(m.warnings.empty() && m.cfg.zmqAddress == "en0;239.10.0.1", "a multicast group on an interface" + list(m));
+        const Parsed b = parse("zmq.address = localhost:5600\nzmq.ttl = 0\nzmq.address = 10.0.0.1:99999\n");
+        check(warned(b, {"t.conf:1:", "stream address"}) && warned(b, {"t.conf:3:", "stream address"}) &&
+                  b.cfg.zmqAddress.empty(),
+              "bad addresses: warnings, default kept" + list(b));
+        check(warned(b, {"t.conf:2:", "1 to 255"}) && b.cfg.zmqTtl == 1, "zmq.ttl 0: warning, default kept" + list(b));
+        std::vector<DeviceInfo> devs = {{"sim", "", "Simulator", "sim", ""}, {"zmq", "192.168.1.5:5600", "ZMQ stream (192.168.1.5:5600)", "zmq", ""}};
+        configApplyZmqAddress(d.cfg, devs);
+        check(devs[1].args == "192.168.1.5:5600", "no zmq.address: the device list keeps its address");
+        configApplyZmqAddress(p.cfg, devs);
+        check(devs[1].args == "192.168.1.20:5601" && devs[1].label == "ZMQ stream (192.168.1.20:5601)" && devs[0].args.empty(),
+              "zmq.address: the ZMQ stream entry receives there");
+    }
+
     printf("folders\n");
     {
         const Parsed p = parse("recording.folder = ~/rec/\nsnapshot.folder = /data/snaps\nsiggen.folder = rel/dir\n");

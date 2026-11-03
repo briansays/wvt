@@ -114,6 +114,7 @@ void App::pollScan() {
     if (!scanJob_.valid() || scanJob_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
     const bool first = !devicesScanned_;
     devices_ = scanJob_.get();
+    configApplyZmqAddress(cfg_, devices_);
     devicesScanned_ = true;
     LOG_INFO("app", "found %zu device entries", devices_.size());
     bool found = false;

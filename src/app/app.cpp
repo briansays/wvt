@@ -51,6 +51,8 @@ App::App(X11Window& win, const WvtConfig& cfg) : win_(win), cfg_(cfg) {
     recCfg_.cf32 = cfg.recordingCf32;
     recCfg_.maxSeconds = cfg.recordingMaxSeconds;
     snprintf(recPrefix_, sizeof recPrefix_, "%s", recCfg_.prefix.c_str());
+    snprintf(pubAddr_, sizeof pubAddr_, "%s", cfg.zmqAddress.c_str());  // empty: this computer's address
+    pubTtl_ = cfg.zmqTtl;
     sgPrevWorker_ = std::make_unique<Worker<SigPreviewReq, SigPreviewRes>>(
         [](const SigPreviewReq& r, const CancelFn& c, Progress*) { return computeSigPreview(r, c); }, wake, "siggen preview");
     sgFile_ = std::make_unique<FileGenJob>();

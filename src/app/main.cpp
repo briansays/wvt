@@ -478,6 +478,7 @@ int main(int argc, char** argv) {
     rc.sigmf = cfg.recordingSigmf;
     rc.cf32 = cfg.recordingCf32;
     rc.maxSeconds = cfg.recordingMaxSeconds;
+    pubCfg.ttl = cfg.zmqTtl;
     gc.fmt = cfg.siggenSample;
     extractCi16 = cfg.exportBandCi16;
     bool haveRecordFormat = false;  // --record-format also sets the generator file format
@@ -642,7 +643,7 @@ int main(int argc, char** argv) {
             "rtlsdr[:INDEX|SERIAL] | uhd[:ARGS] | bb[:SERIAL] | skiq[:SERIAL|#N] | zmq[:ADDR] | sim\n"
             "e.g. --device uhd  --device uhd:addr=192.168.10.2  --device rtlsdr:0  --device bb  --device skiq:#0\n"
             "zmq receives the stream of another wvt (--publish) on ADDR, an address of this computer\n"
-            "or a multicast group (default: this computer's address, port 5600)",
+            "or a multicast group (default: zmq.address, else this computer's address, port 5600)",
             [&](const char* v) {
                 const std::string s = v;
                 const size_t c = s.find(':');
@@ -724,7 +725,9 @@ int main(int argc, char** argv) {
         return true;
     });
     cli.action(nullptr, "--list-devices", "print attached devices and GPUs, and exit", [&](const char*) {
-        for (const auto& d : enumerateDevices()) {
+        auto devices = enumerateDevices();
+        configApplyZmqAddress(cfg, devices);
+        for (const auto& d : devices) {
             const SdrProfile* p = configProfileFor(cfg, d);
             printf("%-8s %-28s %s%s\n", d.driver.c_str(), d.args.c_str(), d.label.c_str(),
                    p ? ("   [config sdr." + std::to_string(p->index) + "]").c_str() : "");
@@ -770,7 +773,7 @@ int main(int argc, char** argv) {
                 pubCfg.address = v;
                 return havePublish = true;
             });
-    cli.add(nullptr, "--publish-ttl", "N", "multicast hops (default 1: the local network only)", [&](const char* v) {
+    cli.add(nullptr, "--publish-ttl", "N", "multicast hops (default zmq.ttl, 1: the local network only)", [&](const char* v) {
         long long n;
         if (!whole("--publish-ttl", v, 1, 255, n)) return false;
         pubCfg.ttl = (int)n;
@@ -1106,6 +1109,7 @@ int main(int argc, char** argv) {
         if (haveRecordFormat) eff.siggenSigmf = rc.sigmf;
         eff.siggenSample = gc.fmt;
         eff.exportBandCi16 = extractCi16;
+        eff.zmqTtl = pubCfg.ttl;
         eff.txMaxGainDb = txc.limits.maxGain;
         eff.txAllow.clear();
         for (const TxBand& b : txc.limits.allow) eff.txAllow.emplace_back(b.lo, b.hi);
@@ -1121,6 +1125,7 @@ int main(int argc, char** argv) {
         source("siggen.format", nullptr, "--record-format");
         source("siggen.sample", nullptr, "--gen-sample");
         source("export.band_sample", nullptr, "--extract-format");
+        source("zmq.ttl", nullptr, "--publish-ttl");
         for (const char* k : {"tx.max_gain_db", "tx.allow"}) {
             const bool tx = std::string(k) == "tx.allow";
             const bool env = envVar(tx ? "WVT_TX_ALLOW" : "WVT_TX_MAX_GAIN") && *envVar(tx ? "WVT_TX_ALLOW" : "WVT_TX_MAX_GAIN");
@@ -1259,6 +1264,7 @@ int main(int argc, char** argv) {
     }
     // A zmq stream (issue #96) has the tuning of its source.
     if (haveDevice && dev.driver == "zmq") {
+        if (dev.args.empty()) dev.args = cfg.zmqAddress;  // empty: this computer's address
         if (ov.haveFc || ov.haveRate || !devGiven.empty()) {
             LOG_ERROR("main", "--device zmq takes the frequency, rate and gain from the source: "
                               "drop -c, -r, --gain and the other device options");

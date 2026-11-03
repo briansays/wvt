@@ -69,6 +69,12 @@ struct WvtConfig {
     int uiWidth = 1600, uiHeight = 950;
     std::string logFolder;  // empty: $WVT_LOG_DIR, then $TMPDIR, then /tmp
 
+    // Network stream (issue #96): the default address of both sides, the
+    // publisher's (to the subscriber) and the subscriber's (where it
+    // receives); empty = this computer's address (defaultStreamAddress).
+    std::string zmqAddress;
+    int zmqTtl = 1;  // multicast hops
+
     // Transmit limits; they only make the other limits stricter
     double txMaxGainDb = NAN;                         // NaN = no limit from the file
     std::vector<std::pair<double, double>> txAllow;  // bands in Hz; empty = no limit from the file
@@ -109,6 +115,8 @@ bool configSameDevice(const DeviceInfo& listed, const std::string& driver, const
 // one that profile N matches (sdr.default = N) or that the type fits
 // (sdr.default = b205). -1 when sdr.default is empty or nothing fits.
 int configDefaultDevice(const WvtConfig& cfg, const std::vector<DeviceInfo>& devices);
+// The ZMQ stream entry of a device list receives on zmq.address, when it is set.
+void configApplyZmqAddress(const WvtConfig& cfg, std::vector<DeviceInfo>& devices);
 
 // Copies the fields that the profile sets into c, except those named in
 // `keep` (fields set on the command line: "fc", "rate", "gain", "agc", "port",

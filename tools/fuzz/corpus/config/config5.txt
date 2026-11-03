@@ -1,0 +1,4 @@
+zmq.address = en0;239.10.0.1:5600
+zmq.ttl = 3
+zmq.address = "192.168.1.20"
+zmq.address = localhost:99999
