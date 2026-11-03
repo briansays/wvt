@@ -52,7 +52,7 @@ public:
 
     // Starts with the newest sample of the ring. The sample index of the
     // stream counts from there.
-    bool start(std::shared_ptr<SampleRing> ring, const PublishSource& src, const PublishConfig& cfg, std::string& err);
+    bool start(const std::shared_ptr<SampleRing>& ring, const PublishSource& src, const PublishConfig& cfg, std::string& err);
     // Sends what is in the ring now, then an end-of-stream message.
     void stop();
     bool active() const;

@@ -243,7 +243,7 @@ StreamPublisher::Status StreamPublisher::status() const {
 
 #ifdef WVT_HAVE_ZMQ
 
-bool StreamPublisher::start(std::shared_ptr<SampleRing> ring, const PublishSource& src, const PublishConfig& cfg,
+bool StreamPublisher::start(const std::shared_ptr<SampleRing>& ring, const PublishSource& src, const PublishConfig& cfg,
                             std::string& err) {
     stop();
     Impl& d = *d_;
@@ -281,7 +281,7 @@ bool StreamPublisher::start(std::shared_ptr<SampleRing> ring, const PublishSourc
     d.cfg = cfg;
     d.src = src;
     d.addr = addr;
-    d.ring = std::move(ring);
+    d.ring = ring;
     {
         std::lock_guard<std::mutex> lk(d.m);
         d.st = Status{};
@@ -318,7 +318,7 @@ void StreamPublisher::stop() {
 
 #else  // no ZMQ in this build
 
-bool StreamPublisher::start(std::shared_ptr<SampleRing>, const PublishSource&, const PublishConfig&, std::string& err) {
+bool StreamPublisher::start(const std::shared_ptr<SampleRing>&, const PublishSource&, const PublishConfig&, std::string& err) {
     err = "this wvt was built without ZMQ (WVT_WITH_ZMQ)";
     return false;
 }
