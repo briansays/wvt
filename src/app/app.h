@@ -39,7 +39,7 @@ public:
     // A recording, or a session file (issue #76), which opens its recording
     // and puts back the state it saved.
     bool openFile(const std::string& path, const CliOverrides& o = {});
-    // Writes the file viewer's state as a session (File > Save File Session, --session-out).
+    // Writes the file viewer's state as a session (File > Save file session, --session-out).
     bool saveSession(const std::string& path, bool overwrite, std::string& err) const;
     void frame();
     bool busy() const;
@@ -94,6 +94,8 @@ private:
     void drawToolbar();
     void drawOverview(float h);
     void drawLeft();
+    // No file and not live: what to do first, in place of empty plots.
+    void drawEmptyState(float height);
     void drawRight();
     void drawStatusBar();
     void handleShortcuts();
@@ -201,6 +203,10 @@ private:
     void drawPoints(MeasPlot frame);  // the markers on this plot (I = the I/Q plot), lines for the others
     void placePoint(MeasPlot frame, double x, double y);
     void clearPoints();
+    // Shift+P: a point marker on the strongest peak of the spectrum in view
+    // that has no marker yet (a keyboard path to P1 and P2). Runs inside the
+    // spectrum plot, which sets keyPeakPoint_.
+    void placePeakPoint();
     bool pointSeries(MeasPlot p, const std::vector<double>*& xs, const std::vector<double>*& ys) const;
     double pointValue(int k) const;  // NaN when not known
     std::string pointValueText(MeasPlot p, double v) const;
@@ -292,7 +298,7 @@ private:
     SnapArea snapArea_[kSnapPlots];
     bool snapOpen_ = false;
 
-    // File > Save File Session
+    // File > Save file session
     bool sessOpen_ = false, sessOverwrite_ = false, sessMsgErr_ = false;
     char sessPath_[2048] = {};
     std::string sessMsg_;
@@ -333,6 +339,7 @@ private:
     bool pointsShown_ = false;
     PointMarker pts_[2];
     int nextPt_ = 0;         // the marker the next placement replaces
+    bool keyPeakPoint_ = false;  // Shift+P was pressed: placePeakPoint in the next spectrum plot
     double ptSecPerPx_ = 0;  // of the time plots: how near a sample must be to read its value
     struct PtCache {         // a trace value, kept while the marker is out of the view
         double v = NAN;

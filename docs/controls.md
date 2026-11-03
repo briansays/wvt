@@ -28,6 +28,7 @@
 | Show or hide the time markers | `T` |
 | Show or hide the frequency markers | `F` |
 | Put a point marker at the pointer | `M` |
+| Put a point marker on the strongest spectrum peak in view; again for the next peak | `Shift+P` |
 | Clear the point markers | `Shift+M` |
 | Zoom to the time markers | `Z` |
 | Enable or disable the channel filter | `C` |

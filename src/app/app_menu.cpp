@@ -30,6 +30,7 @@ const Key kFileKeys[] = {
     {"F", "Frequency markers"},
     {"M", "Put a point marker (P1, P2) at the pointer on a plot"},
     {"Shift+M", "Clear the point markers"},
+    {"Shift+P", "Put a point marker on the strongest spectrum peak in view (again: the next peak)"},
     {"C", "Channel filter on / off"},
     {"B", "Bookmark the view"},
     {"Esc", "Cancel a region selection"},
@@ -85,7 +86,7 @@ void App::drawMenuBar() {
         ImGui::SetItemTooltip("Type or paste the path in the File box and press Enter");
         if (ImGui::MenuItem("Export region...", "Ctrl+E", exOpen_, !liveMode_ && file_)) toggleExport();
         if (ImGui::MenuItem("Save plot snapshots...")) openSnapshot();
-        if (ImGui::MenuItem("Save File Session...", nullptr, false, !liveMode_ && file_)) openSaveSession();
+        if (ImGui::MenuItem("Save file session...", nullptr, false, !liveMode_ && file_)) openSaveSession();
         ImGui::SetItemTooltip("Save the recording, the view, the plot settings and the channel in a file.\n"
                               "To open it again, type its path in the File box.");
         ImGui::Separator();
@@ -103,6 +104,8 @@ void App::drawMenuBar() {
             ImGui::MenuItem("Point markers", nullptr, &pointsShown_);
             ImGui::SetItemTooltip("P1 and P2: press M or Alt+click on a plot to put one at the pointer.\n"
                                   "The status bar shows P2 minus P1 in time, frequency and value.");
+            if (ImGui::MenuItem("Point at the next spectrum peak", "Shift+P", false, file_ && wf_)) keyPeakPoint_ = true;
+            ImGui::SetItemTooltip("Put P1 (then P2) on the strongest peak of the spectrum in view that has no marker");
             if (ImGui::MenuItem("Clear point markers", "Shift+M", false, pts_[0].set() || pts_[1].set())) clearPoints();
         }
         ImGui::MenuItem("Relative frequency", nullptr, &relFreq_);

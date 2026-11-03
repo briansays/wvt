@@ -194,6 +194,25 @@ void App::placePoint(MeasPlot frame, double x, double y) {
     pointsShown_ = true;
 }
 
+void App::placePeakPoint() {
+    if (liveMode_ || !wf_ || wf_->specF.size() != wf_->specAvg.size() || wf_->specF.size() < 2) return;
+    const std::vector<double>& f = wf_->specF;
+    const std::vector<double>& p = wf_->specAvg;
+    // The marker that this one replaces is free to move; the other one keeps
+    // its peak, so a second Shift+P finds the next strongest peak.
+    const int k = !pts_[0].set() ? 0 : !pts_[1].set() ? 1 : nextPt_;
+    const double guard = std::max((fmax_ - fmin_) / 100, 3 * std::fabs(f[1] - f[0]));
+    ptrdiff_t best = -1;
+    for (size_t i = 0; i < f.size(); ++i) {
+        if (f[i] < fmin_ || f[i] > fmax_) continue;
+        bool taken = false;
+        for (int j = 0; j < 2; ++j)
+            if (j != k && pts_[j].plot == MeasPlot::Spectrum && std::fabs(pts_[j].f - f[i]) < guard) taken = true;
+        if (!taken && (best < 0 || p[i] > p[(size_t)best])) best = (ptrdiff_t)i;
+    }
+    if (best >= 0) placePoint(MeasPlot::Spectrum, f[(size_t)best], p[(size_t)best]);
+}
+
 // M, or Alt+click, on the hovered plot.
 void App::pointInput(MeasPlot frame) {
     if (liveMode_ || !file_ || exSelecting_ || !ImPlot::IsPlotHovered()) return;

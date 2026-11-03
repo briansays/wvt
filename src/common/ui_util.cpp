@@ -99,6 +99,23 @@ bool InputSI(const char* label, double* v, const char* unit, float width, int si
     return false;
 }
 
+bool InputSIOptional(const char* label, double* v, const char* unit, float width, const char* hint) {
+    char buf[64];
+    if (*v < 0) buf[0] = 0;
+    else snprintf(buf, sizeof buf, "%s", fmtSI(*v, unit, 9).c_str());
+    ImGui::SetNextItemWidth(width);
+    const bool enter = ImGui::InputTextWithHint(label, hint, buf, sizeof buf,
+                                                ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll |
+                                                    ImGuiInputTextFlags_CharsNoBlank);
+    if (!enter && !ImGui::IsItemDeactivatedAfterEdit()) return false;
+    double nv = -1;
+    if (buf[0] && !parseSI(buf, nv)) return false;
+    if (nv < 0) nv = -1;
+    if (nv == *v) return false;
+    *v = nv;
+    return true;
+}
+
 int formatAxisSI(double value, char* buf, int size, void* user) {
     const AxisFmt* a = (const AxisFmt*)user;
     double lo = *a->lo - a->offset, hi = *a->hi - a->offset;
@@ -116,6 +133,40 @@ int formatAxisSI(double value, char* buf, int size, void* user) {
 int formatValueSI(double value, char* buf, int size, void* unit) {
     std::string s = fmtSI(value, (const char*)unit, 4);
     return snprintf(buf, size, "%s", s.c_str());
+}
+
+void setupSpacedTicks(int axis, const AxisFmt& a, float pixels) {
+    const double lo = *a.lo, hi = *a.hi, span = hi - lo;
+    if (!(span > 0) || !std::isfinite(span) || pixels < 1) return;
+    // The widest label: the formatter gives every tick the same decimals.
+    char buf[64];
+    float labelW = 0;
+    for (double v : {lo, hi, (lo + hi) / 2}) {
+        formatAxisSI(v, buf, sizeof buf, (void*)&a);
+        labelW = std::max(labelW, ImGui::CalcTextSize(buf).x);
+    }
+    const float slot = labelW + ImGui::GetFontSize() * 1.5f;  // a gap of 1.5 em between labels
+    const int maxTicks = std::max(2, (int)(pixels / slot));
+    const double raw = span / maxTicks;
+    const double mag = std::pow(10.0, std::floor(std::log10(raw)));
+    double step = mag * 10;
+    for (double m : {1.0, 2.0, 5.0})
+        if (mag * m >= raw) {
+            step = mag * m;
+            break;
+        }
+    // Round values in the axis's own units (after the offset), at least half
+    // a label from each end, so that no label is cut by the plot edge.
+    const double margin = span * (labelW * 0.5f) / pixels;
+    double ticks[64];
+    int n = 0;
+    const double first = std::ceil((lo + margin - a.offset) / step);
+    for (int i = 0; i < 64; ++i) {
+        const double v = (first + i) * step;
+        if (v > hi - margin - a.offset + step * 1e-9) break;
+        ticks[n++] = v + a.offset;
+    }
+    if (n >= 1) ImPlot::SetupAxisTicks((ImAxis)axis, ticks, n);
 }
 
 bool ScrollbarH(const char* id, double total, double& start, double span, float width, float height) {
@@ -190,7 +241,15 @@ void SetupStyle(float scale) {
     s.FramePadding = ImVec2(5, 3);
     s.ItemSpacing = ImVec2(6, 4);
     s.ScrollbarSize = 14;
+    // Fields, checkboxes and buttons get a border with 3:1 against the window
+    // and the popups (WCAG 1.4.11): their fill alone is 1.3:1.
+    s.FrameBorderSize = 1;
     ImVec4* c = s.Colors;
+    c[ImGuiCol_Border] = ImVec4(0.40f, 0.42f, 0.46f, 1.f);
+    c[ImGuiCol_BorderShadow] = ImVec4(0, 0, 0, 0);
+    // Secondary text (readouts, hints, the status bar): 5.1:1 on a field,
+    // 6.6:1 on the window (WCAG 1.4.3); ImGui's 0.5 grey was 3.5:1 and 4.4:1.
+    c[ImGuiCol_TextDisabled] = ImVec4(0.62f, 0.62f, 0.62f, 1.f);
     c[ImGuiCol_WindowBg] = ImVec4(0.09f, 0.10f, 0.11f, 1.f);
     c[ImGuiCol_ChildBg] = ImVec4(0.09f, 0.10f, 0.11f, 1.f);
     c[ImGuiCol_FrameBg] = ImVec4(0.16f, 0.18f, 0.20f, 1.f);
@@ -272,6 +331,30 @@ void colorbar(const char* id, float dbMin, float dbMax, float height, int cmap) 
     ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(colorbarPadX(), ImPlot::GetStyle().PlotPadding.y));
     ImPlot::ColormapScale(id, dbMin, dbMax, ImVec2(colorbarWidth(), height), "%g dB", 0, cmap);
     ImPlot::PopStyleVar();
+}
+
+void textElided(const std::string& text, float maxW) {
+    const std::string shown = elideMiddle(text, maxW);
+    ImGui::TextUnformatted(shown.c_str());
+    if (shown != text && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("%s", text.c_str());
+}
+
+void traceKey(const ImVec4& col, const char* name) {
+    const float h = ImGui::GetTextLineHeight(), w = ImGui::GetFontSize() * 1.2f;
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    ImGui::GetWindowDrawList()->AddLine(ImVec2(p.x, p.y + h * 0.5f), ImVec2(p.x + w, p.y + h * 0.5f), ImGui::GetColorU32(col),
+                                        std::max(2.f, h * 0.15f));
+    ImGui::Dummy(ImVec2(w, h));
+    ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+    ImGui::TextUnformatted(name);
+}
+
+void spectrumKey(const char* title, bool peak) {
+    ImGui::BeginGroup();
+    ImGui::TextDisabled("%s", title);
+    traceKey(kColSpecAvg, "average");
+    if (peak) traceKey(kColSpecPeak, "peak");
+    ImGui::EndGroup();
 }
 
 std::string elideMiddle(const std::string& text, float maxW) {

@@ -1,4 +1,4 @@
-// File sessions (issue #76): File > Save File Session writes the state of
+// File sessions (issue #76): File > Save file session writes the state of
 // the file viewer to a .wvtsession.json file; the File box (or the command
 // line) opens one like a recording and puts that state back.
 #include <algorithm>
@@ -192,7 +192,7 @@ void App::drawSessionWindow() {
     if (!sessOpen_) return;
     const float fs = ImGui::GetFontSize();
     ImGui::SetNextWindowSize(ImVec2(fs * 34, 0), ImGuiCond_Appearing);
-    if (ImGui::Begin("Save File Session###session", &sessOpen_, ImGuiWindowFlags_NoSavedSettings)) {
+    if (ImGui::Begin("Save file session###session", &sessOpen_, ImGuiWindowFlags_NoSavedSettings)) {
         ImGui::TextWrapped("Saves the recording, its format, rate and segment, the view, the plot settings, the channel, "
                            "the markers and the bookmarks. To open it again, type its path in the File box.");
         ImGui::Spacing();
