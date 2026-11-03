@@ -72,6 +72,7 @@ folders.
 | `src/device/sdr_bb60.cpp` | The Signal Hound BB60 backend (`bb_api`) |
 | `src/device/sdr_skiq.cpp` | The Epiq Sidekiq backend (`libsidekiq`) |
 | `src/device/sdr_sim.cpp` | The simulated device |
+| `src/device/sdr_zmq.cpp` | The network stream receiver (issue #96): a ZMQ DISH socket that receives the stream of another wvt |
 | `src/device/sdr_siggen.cpp` | The loopback device that streams the generator into the live view |
 | `src/device/sdr_tx.h` | The transmitter interface. `sdr_uhd.cpp` implements it for UHD |
 | `src/net/zmq_wire.*` | The network stream (issue #96): the message header, the info message, the stream address, the default address, the sample index tracker. No libzmq |

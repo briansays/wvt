@@ -1,7 +1,7 @@
 # Plan: publish a live stream over ZMQ and UDP (issue #96)
 
-Status: phases 1 (build), 2 (wire format) and 3 (publisher) implemented (2026-11-03) on
-`zmq-udp-stream`. Phases 4 to 8 are planned.
+Status: phases 1 to 4 (build, wire format, publisher, subscriber device) implemented (2026-11-03)
+on `zmq-udp-stream`. Phases 5 to 8 are planned.
 
 ## 1. Goal
 
@@ -163,25 +163,35 @@ It ignores the reserved bytes and the unknown flags, so that a later version can
 
 ### Phase 4 — Subscriber device (`src/device/sdr_zmq.cpp`, new)
 
-- Driver `zmq`. `StreamConfig::args` is the address. `openZmqDevice`: DISH socket,
-  `zmq_bind(endpoint)`, `zmq_join("wvt")`. For a group, `ZMQ_MULTICAST_LOOP` is on (two wvt on
-  one computer). For unicast, the address must be on this computer. If the bind fails, the error
-  says so: *192.168.1.50 is not an address of this computer: type an address of this computer,
-  and send to it from the source*, or *port 5600 is in use (another subscriber?)*.
-- It waits up to 3 s for a data message to get the rate, the format and the frequency, because
-  `LiveEngine` needs them before `start()`. Error: *no stream on 127.0.0.1:5600 in 3 s (is the
-  source publishing to this address?)*, and for a group, *does the network pass multicast?*.
-- Its thread receives messages with a 100 ms timeout and calls `data_`. It uses the
-  `SampleTracker`: a jump calls `gap_(lost, "network loss")`; a frequency change or the retune flag
-  calls the retune hook (`usesRetuneMark()` = true) before the samples, so a recording on the
-  subscriber starts its new capture at the correct sample. A new stream ID with a different rate or
-  format, or an end-of-stream message, sets `fatalError()`. If no message comes for 2 s, the status
-  shows *waiting for the source*.
-- `setCenterFreq` and `setGain` return false: *the source sets the frequency*. `gainRange()` uses
-  the gain from the header (display only). `description()`: *ZMQ 239.10.0.1:5600: USRP B205mini
-  serial 31A2B3C* (from the info message).
-- `sdrDrivers()` adds `zmq`. `enumerateDevices()` adds one entry *ZMQ stream* with the default
-  address (from the configuration file, if it sets one). `checkSampleRate("zmq")` accepts all.
+- Driver `zmq`, only with ZMQ. `StreamConfig::args` is the address; empty is the default address.
+  `sdrDrivers()` lists it, and `enumerateDevices()` adds one entry, *ZMQ stream (192.168.1.113:5600)*,
+  with the default address. `checkSampleRate` accepts every rate for it: the source sets the rate.
+- `open`: DISH socket (`ZMQ_RCVHWM` 20 000 messages, `ZMQ_RCVBUF` 8 MB, receive timeout 100 ms,
+  `ZMQ_MULTICAST_LOOP` for a group), `zmq_bind`, `zmq_join("wvt")`. Then it waits up to 3 s for a
+  data message, because `LiveEngine` needs the rate and the format before `start()`. It keeps that
+  message, and `start()` delivers it first, so no samples are lost between open and start.
+- libzmq binds a `udp://` endpoint later, on its I/O thread: `zmq_bind` returns 0 and a bind error
+  is never reported, and libzmq allows a second socket on the port. So, for unicast, `open` first
+  binds a plain UDP socket without `SO_REUSEADDR` and closes it. Errors: *192.0.2.1 is not an
+  address of this computer: type an address of this computer, and send to it from the source*,
+  *port 5600 is in use (another subscriber?)*, *no stream on 127.0.0.1:5600 in 3 s (is the source
+  publishing to this address?)* (for a group also *Does the network pass multicast?*).
+- Its thread: a jump in the index calls `gap_(lost, "network loss")`. A new frequency or the retune
+  flag calls the retune hook (`usesRetuneMark()` = true) before the samples. Late and repeated
+  messages are dropped. Messages that are not a wvt stream are ignored and logged (at most every
+  5 s). The end message of the stream sets `fatalError()` = *the source stopped publishing*. A new
+  stream ID with another rate or format sets *the source started again with another rate (2 MS/s):
+  click Start again*; with the same rate and format, the stream goes on after a gap of unknown size.
+- `notes()`: *waiting for the source: no message for N s* after 2 s without a message.
+- `setCenterFreq` and `setGain` fail: *the source sets the frequency (this wvt receives the stream
+  on 127.0.0.1:5600)*. `gainRange()` is the gain of the source (display only). `description()`:
+  *ZMQ 127.0.0.1:5600: wvt simulator*, with the description from the info message.
+- `zmq_check`, with ZMQ, now links the live engine. A live engine with the simulator publishes, and
+  a second live engine opens the `zmq` device: the rate, frequency, format and description; a
+  SigMF recording on the subscriber over a retune of the source (two captures, no gaps); the gain;
+  no loss on the loopback; and the errors above, a second source with another rate, the source
+  that stops, and a restart of the source at another rate. Then the same on a multicast group
+  (passed on the development Mac), skipped where multicast does not work.
 
 ### Phase 5 — Command line (`src/app/cli.cpp`, `main.cpp`)
 
@@ -270,6 +280,11 @@ It ignores the reserved bytes and the unknown flags, so that a later version can
   the address of that computer. The tooltips and `docs/live.md` say so.
 - With unicast, one subscriber can listen on an address and port. A second subscriber on the
   same computer needs another port, or both use a multicast group.
+- Multicast first did not work on the development Mac, even with plain sockets: a network
+  permission blocked it. After the owner fixed the permission (2026-11-03), the multicast part of
+  `zmq_check` passed. macOS can block multicast for a program that does not have the *Local
+  Network* permission, so `docs/live.md` must say so. Where multicast does not work, the multicast
+  part of `zmq_check` skips.
 - Multicast on macOS can need an interface (`en0;239.10.0.1:5600`) when there is more than one
   network.
 - FetchContent needs the network at configure time. Builds without a network need

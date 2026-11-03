@@ -585,6 +585,7 @@ if(NOT WVT_WITH_ZMQ STREQUAL "OFF")
   endif()
 endif()
 if(WVT_ZMQ_OK)
+  target_sources(wvt PRIVATE src/device/sdr_zmq.cpp)
   target_link_libraries(wvt PRIVATE wvt_zmq)
   target_compile_definitions(wvt PRIVATE WVT_HAVE_ZMQ)
   message(STATUS "wvt: ZMQ streaming enabled (${WVT_ZMQ_WHAT})")
@@ -851,14 +852,17 @@ if(WVT_SKIQ_SIM)
   target_link_libraries(skiq_check PRIVATE skiq_api_sim)
 endif()
 
-# ZMQ streaming self-test (issue #96): the wire format in every build, and the
-# sockets when wvt has ZMQ
+# ZMQ streaming self-test (issue #96): the wire format in every build; with
+# ZMQ also the sockets, the publisher, and a zmq device in a live engine
 add_executable(zmq_check tools/zmq_check.cpp src/net/zmq_wire.cpp src/net/zmq_pub.cpp src/common/log.cpp)
 target_include_directories(zmq_check PRIVATE src)
 target_link_libraries(zmq_check PRIVATE Threads::Threads)
 target_compile_options(zmq_check PRIVATE ${WVT_WARNINGS})
 if(WVT_ZMQ_OK)
-  target_link_libraries(zmq_check PRIVATE wvt_zmq)
+  target_sources(zmq_check PRIVATE src/device/sdr_zmq.cpp src/device/live.cpp src/io/recorder.cpp src/device/sdr_device.cpp
+    src/device/sdr_sim.cpp src/device/sdr_siggen.cpp src/siggen/siggen.cpp src/siggen/siggen_out.cpp src/common/json.cpp
+    src/dsp/engine.cpp src/io/iq_file.cpp src/dsp/dsp.cpp src/common/ui_util.cpp)
+  target_link_libraries(zmq_check PRIVATE wvt_zmq wvt_gpu imgui_implot)
   target_compile_definitions(zmq_check PRIVATE WVT_HAVE_ZMQ)
 endif()
 

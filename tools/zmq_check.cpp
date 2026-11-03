@@ -9,6 +9,12 @@
 //    ring to a DISH on the loopback: every sample, the retune, the gain, the
 //    info and end messages; and with a ring that overflows, the samples that
 //    it skips are the samples that the subscriber sees as lost.
+//  - With WVT_HAVE_ZMQ: a live engine with the simulator publishes, and a
+//    second live engine receives with the zmq device: the parameters, the
+//    source's retune and gain, a SigMF recording on the subscriber, no loss
+//    on the loopback, and the errors (another rate, the source stops, the
+//    port in use, an address of another computer, no stream).
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -25,7 +31,14 @@
 #include "net/zmq_wire.h"
 
 #ifdef WVT_HAVE_ZMQ
+#include <unistd.h>
 #include <zmq.h>
+
+#include <cstdlib>
+#include <functional>
+
+#include "common/json.h"
+#include "device/live.h"
 #endif
 
 namespace {
@@ -589,6 +602,157 @@ void checkPublisher() {
               std::to_string(s2.skipped));
     printf("  (the small ring made the publisher skip %lld of 200000 samples)\n", (long long)s2.skipped);
 }
+
+bool waitFor(const std::function<bool()>& ok, double seconds) {
+    const auto end = std::chrono::steady_clock::now() + std::chrono::duration<double>(seconds);
+    while (!ok()) {
+        if (std::chrono::steady_clock::now() >= end) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return true;
+}
+
+bool contains(const std::string& s, const char* what) { return s.find(what) != std::string::npos; }
+
+void checkSubscriber() {
+    printf("subscriber (the zmq device in a live engine)\n");
+    std::string err;
+    LiveEngine src({}), sub({});
+    StreamConfig sc;
+    sc.driver = "sim";
+    sc.fc = 100e6;
+    sc.rate = 1e6;
+    sc.gain = 30;
+    check(src.start(sc, err), "the source (simulator, 1 MS/s, 100 MHz) starts" + (err.empty() ? "" : ": " + err));
+
+    // A free port: the subscriber binds, so try a few.
+    StreamConfig rc;
+    rc.driver = "zmq";
+    std::string addr;
+    for (int port = 15800; port < 15820; ++port) {
+        addr = "127.0.0.1:" + std::to_string(port);
+        if (!src.startPublishing({addr, 1}, err)) break;
+        rc.args = addr;
+        if (sub.start(rc, err)) break;
+        src.stopPublishing();
+        if (!contains(err, "in use")) break;
+    }
+    check(sub.running(), "the subscriber opens on " + addr + (err.empty() ? "" : " (" + err + ")"));
+    if (!sub.running()) return;
+    LiveEngine::Stats st = sub.stats();
+    check(st.rate == 1e6 && st.fc == 100e6 && st.fmt == SampleFormat::CI16,
+          "it has the rate, the frequency and the format of the source");
+    check(waitFor([&] { return contains(sub.stats().description, "wvt simulator"); }, 2.5),
+          "its description has the source's: " + sub.stats().description);
+
+    // A recording on the subscriber, over a retune of the source.
+    const char* tmp = getenv("TMPDIR");
+    RecordConfig recCfg;
+    recCfg.prefix = std::string(tmp && *tmp ? tmp : "/tmp") + "/zmq_check_" + std::to_string(getpid());
+    check(sub.startRecording(recCfg, err), "a SigMF recording starts on the subscriber" + (err.empty() ? "" : ": " + err));
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    check(src.setCenterFreq(101e6, err), "the source tunes to 101 MHz");
+    check(waitFor([&] { return sub.stats().fc == 101e6; }, 2), "the subscriber follows to 101 MHz");
+    check(!sub.setCenterFreq(102e6, err) && contains(err, "source sets"), "the subscriber cannot tune: " + err);
+    check(src.setGain(false, 40, err), "the source sets 40 dB");
+    check(waitFor([&] { return sub.gainRange().min == 40; }, 2), "the subscriber shows the source's gain");
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    sub.stopRecording();
+    const Recorder::Status rs = sub.recorder().status();
+    JsonValue meta;
+    std::string text;
+    if (FILE* f = fopen(rs.metaPath.c_str(), "rb")) {
+        char b[4096];
+        size_t n = 0;
+        while ((n = fread(b, 1, sizeof b, f)) > 0) text.append(b, n);
+        fclose(f);
+    }
+    bool capsOk = false;
+    if (parseJson(text, meta, err)) {
+        const JsonValue* caps = meta.get("captures");
+        capsOk = caps && caps->arr.size() == 2 && caps->arr[0].number("core:frequency") == 100e6 &&
+                 caps->arr[1].number("core:frequency") == 101e6 && caps->arr[1].number("core:sample_start") > 0;
+    }
+    check(rs.samples > 500000 && rs.dropped == 0 && rs.gaps == 0,
+          "the recording has " + std::to_string(rs.samples) + " samples, none lost");
+    check(capsOk, "its metadata has two captures: 100 MHz, then 101 MHz");
+    remove(rs.dataPath.c_str());
+    remove(rs.metaPath.c_str());
+
+    st = sub.stats();
+    const int64_t sent = src.publisher().status().samples;
+    check(st.dropped == 0 && st.gapEvents == 0, "no samples lost on the loopback");
+    check(st.received > 1000000 && st.received <= sent && st.received >= sent - 100000,
+          "received " + std::to_string(st.received) + " of the " + std::to_string(sent) + " samples sent");
+
+    // A second subscriber on the same port.
+    LiveEngine sub2({});
+    check(!sub2.start(rc, err) && contains(err, "in use"), "a second subscriber on the port: " + err);
+
+    // Another stream with another rate to the same address.
+    StreamPublisher other;
+    auto ring = std::make_shared<SampleRing>(1 << 16, 4);
+    PublishSource os;
+    os.rate = 2e6;
+    os.fc = 100e6;
+    check(other.start(ring, os, {addr, 1}, err), "a second source at 2 MS/s sends to the same address");
+    std::vector<int16_t> zeros(2 * 2000);
+    for (int i = 0; i < 20; ++i) {
+        ring->push((const uint8_t*)zeros.data(), 2000);
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(waitFor([&] { return contains(sub.stats().error, "another rate"); }, 2),
+          "the subscriber stops: " + sub.stats().error);
+    other.stop();
+    sub.stop();
+
+    // The source stops publishing.
+    check(sub.start(rc, err), "the subscriber starts again");
+    src.stopPublishing();
+    check(waitFor([&] { return contains(sub.stats().error, "stopped publishing"); }, 2),
+          "the source stops: " + sub.stats().error);
+    sub.stop();
+
+    // A restart of the source publishes again, with a new stream ID.
+    check(src.startPublishing({addr, 1}, err), "the source publishes again");
+    const uint32_t id1 = src.publisher().status().streamId;
+    sc.rate = 2e6;
+    check(src.start(sc, err) && src.publisher().active() && src.publisher().status().streamId != id1,
+          "after a restart at 2 MS/s it publishes again, with a new stream ID");
+    check(sub.start(rc, err) && sub.stats().rate == 2e6, "the subscriber opens at 2 MS/s");
+    sub.stop();
+
+    // Multicast: both sides use the group. Skipped where the computer has no
+    // multicast route (some CI containers).
+    src.stopPublishing();
+    StreamConfig mc = rc;
+    mc.args = "239.10.0.1:" + std::to_string(15830 + getpid() % 100);
+    if (src.startPublishing({mc.args, 1}, err) && sub.start(mc, err)) {
+        check(sub.stats().rate == 2e6, "multicast " + mc.args + ": the subscriber receives the stream");
+        check(waitFor([&] { return sub.stats().received > 200000; }, 2), "multicast: samples arrive");
+        sub.stop();
+    } else {
+        printf("  [SKIP] multicast %s: %s\n", mc.args.c_str(), err.c_str());
+    }
+    src.stop();
+
+    // Errors at open.
+    rc.args = "192.0.2.1:5600";  // TEST-NET-1: not on this computer
+    check(!sub.start(rc, err) && contains(err, "not an address of this computer"), "192.0.2.1: " + err);
+    rc.args = "localhost:5600";
+    check(!sub.start(rc, err) && contains(err, "not an IPv4"), "localhost: " + err);
+    rc.args = addr;  // nobody publishes now
+    const auto t0 = std::chrono::steady_clock::now();
+    check(!sub.start(rc, err) && contains(err, "no stream"), "no source: " + err);
+    const double waited = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    check(waited > 2.5 && waited < 4, "after 3 s (" + std::to_string(waited).substr(0, 4) + " s)");
+
+    const std::vector<std::string> drivers = sdrDrivers();
+    check(std::find(drivers.begin(), drivers.end(), "zmq") != drivers.end(), "zmq is in the driver list");
+    bool listed = false;
+    for (const DeviceInfo& d : enumerateDevices("zmq")) listed = listed || (d.driver == "zmq" && d.args == defaultStreamAddress());
+    check(listed, "the device list has a ZMQ stream on the default address");
+}
 #endif
 }  // namespace
 
@@ -602,6 +766,7 @@ int main() {
 #ifdef WVT_HAVE_ZMQ
     checkSockets();
     checkPublisher();
+    checkSubscriber();
 #else
     printf("libzmq: not in this build (WVT_WITH_ZMQ), the socket tests are skipped\n");
     StreamPublisher pub;
