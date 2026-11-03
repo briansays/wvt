@@ -1,6 +1,7 @@
 # Plan: publish a live stream over ZMQ and UDP (issue #96)
 
-Status: phase 1 (build) implemented (2026-11-03) on `zmq-udp-stream`. Phases 2 to 8 are planned.
+Status: phases 1 (build) and 2 (wire format) implemented (2026-11-03) on `zmq-udp-stream`. Phases
+3 to 8 are planned.
 
 ## 1. Goal
 
@@ -63,7 +64,7 @@ Data message (header 64 bytes, then the samples):
 | 0 | `char[4]` | magic `WVTZ` |
 | 4 | `u8` | version (1) |
 | 5 | `u8` | kind (1 = data, 2 = info) |
-| 6 | `u8` | sample format (`SampleFormat`: cu8, ci16) |
+| 6 | `u8` | sample format: 1 cu8, 2 ci16, 3 cf32 (wire codes, not the `SampleFormat` values) |
 | 7 | `u8` | flags: bit 0 AGC, bit 1 retune at the first sample, bit 2 end of stream |
 | 8 | `u32` | stream ID: random, new for each start of the source |
 | 12 | `u32` | sample count in this message |
@@ -72,13 +73,26 @@ Data message (header 64 bytes, then the samples):
 | 32 | `f64` | sample rate, S/s |
 | 40 | `f64` | gain (dB; BB60: reference level, dBm) |
 | 48 | `u64` | time of the first sample, ns since 1970 (UTC) |
-| 56 | `u8[8]` | reserved, zero |
+| 56 | `u8[8]` | reserved: 0 when sent, ignored when read |
 
-Info message: the same first 16 bytes, then the driver (`rtlsdr`, `uhd`...) and the description
-(`"USRP B205mini serial 31A2B3C"`) as length-prefixed strings.
+Info message (one each second): the same 64-byte header with kind 2 and 0 samples, so it also has
+the stream parameters. Then the driver (`rtlsdr`, `uhd`...) and the description (`"USRP B205mini
+serial 31A2B3C"`), each a `u16` length and the bytes, at most 1000 bytes each. The sender cuts a
+longer string before a whole UTF-8 character. The receiver changes control characters to `?`.
 
-The parser rejects a message if the magic, the version, the kind or the format is unknown, if the
-count does not agree with the payload size, or if the rate or frequency is not finite and positive.
+The parser rejects a message if:
+
+- it is shorter than 64 bytes, or the magic is not `WVTZ`;
+- the version is not 1 (a later version must change the version number to change the layout);
+- the kind or the sample format is unknown;
+- the rate is not finite or not in (0, 10 GS/s], the frequency is not finite or not in
+  [0, 1 THz], or the gain is not finite or more than 1000 in size;
+- a data message does not have exactly `count` samples after the header (a message without
+  samples is allowed: the end-of-stream message);
+- an info message has samples, a string longer than 1000 bytes, or bytes after its strings.
+
+It ignores the reserved bytes and the unknown flags, so that a later version can add fields.
+`fuzz_zmq_wire` fuzzes the parser.
 
 ## 5. Implementation
 
@@ -98,16 +112,24 @@ count does not agree with the payload size, or if the rate or frequency is not f
 
 ### Phase 2 — Wire format (`src/net/zmq_wire.h/.cpp`, new; no libzmq)
 
-- `struct StreamHeader`, `packData`, `packInfo`, `parse` (returns false with a reason).
-- `parseStreamAddress("192.168.1.20:5600")` to an endpoint `udp://192.168.1.20:5600` and a
-  `multicast` flag. A multicast group can have an interface: `en0;239.10.0.1:5600` (the libzmq
-  `udp://iface;group:port` form). It rejects a host name, a port outside 1-65535, and IPv6 (for
-  now).
-- `defaultStreamAddress()`: the first IPv4 address of an interface that is up, is not the
-  loopback (`getifaddrs`), with port 5600. If there is none,
-  `127.0.0.1:5600`. The configuration file replaces it.
-- `SampleTracker`: given the expected index and a header, returns *in order*, *lost N*, *late
-  (drop)* or *new stream*. The subscriber uses it, and the self-check tests it without sockets.
+- `StreamHeader`, `packStreamHeader` (the publisher writes the header into the ZMQ message and the
+  samples after it), `packStreamInfo`, `parseStreamMessage` (returns false with a reason).
+  `streamBytesPerSample` and `streamMaxSamples`: 4000 cu8, 2000 ci16 or 1000 cf32 samples in a
+  message. cf32 is for the signal generator device.
+- `parseStreamAddress` gives a `StreamAddress` (`ip`, `port`, `multicast`, `iface`) and its
+  `endpoint()`, for example `udp://127.0.0.1:5600`. Without a port, 5600. An interface
+  (`en0;239.10.0.1:5600`, the libzmq `udp://iface;group:port` form) only for a group. It rejects
+  host names, IPv6, port 0 and ports above 65535, 0.x.x.x, and 240.0.0.0 and above (reserved and
+  broadcast).
+- `defaultStreamAddress` = `pickStreamAddress(streamInterfaces())`. `streamInterfaces` reads
+  `getifaddrs`. `pickStreamAddress` (tested without the OS) takes the first interface that is up,
+  is not the loopback and is not point-to-point (a VPN). It prefers one that runs (on Linux, an
+  unused `docker0` does not run), and an address that is not link-local (169.254.x.x). If there is
+  none, `127.0.0.1:5600`.
+- `StreamTracker::next` gives *First*, *InOrder*, *Lost N*, *Late* (drop: late, repeated, or over
+  the expected index) or *NewStream* (another stream ID).
+- `zmq_check` now builds in every configuration. It tests all of this, and the socket test only
+  with ZMQ.
 
 ### Phase 3 — Publisher (`src/net/zmq_pub.h/.cpp`, new)
 

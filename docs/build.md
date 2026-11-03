@@ -215,7 +215,7 @@ libzmq shows one CMake warning about its old `cmake_minimum_required`. You can i
 
 - With `AUTO`, if the download fails (for example, a computer without a network), wvt builds
   without ZMQ and CMake tells you why.
-- The self-check `zmq_check` is built only with ZMQ.
+- Without ZMQ, the self-check `zmq_check` tests the message format only.
 
 Output: `wvt: ZMQ streaming enabled (libzmq 4.3.5, static, draft API, built here)`.
 
@@ -390,9 +390,9 @@ cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
 | `device_check` | Self-check for the device list and the sample rate rules |
 | `bb_check` | Self-check for the BB60 backend, with the simulated device. Only with `WVT_BB_SIM=ON` |
 | `skiq_check` | Self-check for the Sidekiq logic. With `WVT_SKIQ_SIM=ON`, also for the backend with the simulated card |
-| `zmq_check` | Self-check for the ZMQ stream. Only with ZMQ ([`WVT_WITH_ZMQ`](#wvt_with_zmq)) |
+| `zmq_check` | Self-check for the network stream format. With ZMQ ([`WVT_WITH_ZMQ`](#wvt_with_zmq)), also for the sockets |
 | `gpu_check` | Compares the GPU results with the CPU results, and measures the speed |
-| `fuzz_json`, `fuzz_chain`, `fuzz_meta`, `fuzz_parse_si` | The fuzz targets. Only with `WVT_FUZZ=ON` |
+| `fuzz_json`, `fuzz_chain`, `fuzz_meta`, `fuzz_parse_si`, `fuzz_config`, `fuzz_zmq_wire` | The fuzz targets. Only with `WVT_FUZZ=ON` |
 
 `ctest --test-dir build --output-on-failure` runs all the self-checks.
 

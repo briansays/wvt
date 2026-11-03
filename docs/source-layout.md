@@ -14,6 +14,7 @@ The source files are in folders in `src/`, one folder for each function:
 | `src/gpu/` | The GPU interface and the CUDA, Metal and stub backends |
 | `src/siggen/` | The signal generator and its outputs |
 | `src/audio/` | The audio demodulator, the audio sessions and the sound output |
+| `src/net/` | The network stream (issue #96): the message format, the stream address |
 
 An include names the folder, relative to `src/`, for example `#include "common/log.h"`. `src/` is
 the only include folder for the project files. `src/common/` does not include files from other
@@ -73,6 +74,7 @@ folders.
 | `src/device/sdr_sim.cpp` | The simulated device |
 | `src/device/sdr_siggen.cpp` | The loopback device that streams the generator into the live view |
 | `src/device/sdr_tx.h` | The transmitter interface. `sdr_uhd.cpp` implements it for UHD |
+| `src/net/zmq_wire.*` | The network stream (issue #96): the message header, the info message, the stream address, the default address, the sample index tracker. No libzmq |
 
 ## Signal generator
 
@@ -110,6 +112,7 @@ folders.
 | `tools/bb_sim/` | A simulated BB60D behind the `bb_api` calls that wvt uses |
 | `tools/skiq_check.cpp` | The self-check for the Sidekiq logic and backend |
 | `tools/skiq_sim/` | A simulated Sidekiq card behind the `libsidekiq` calls that wvt uses |
+| `tools/zmq_check.cpp` | The self-check for the network stream format, and with ZMQ for the sockets |
 | `tools/gpu_check.cpp` | The GPU self-check and benchmark |
 | `tools/run-clang-tidy.sh` | Runs clang-tidy on the wvt sources, as CI does (`.clang-tidy`, `tools/.clang-tidy`) |
 | `tools/fuzz/` | The libFuzzer targets for the parsers, and their seed inputs in `corpus/` |

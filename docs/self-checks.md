@@ -39,6 +39,7 @@ code if a check fails.
 | `build/session_check` | File sessions: write and read back, the recording after a folder move, session files and recordings told apart, no replace without asking, bad values |
 | `build/config_check` | The configuration file parser: comments, quotes, numbers in base units and the refused SI suffixes, folders, unknown keys and bad values with their line numbers, duplicates, SDR profiles and the file search order |
 | `build/measure_check` | Point measurements: the nearest sample, the snap to a peak or a valley, which differences apply, the plot names |
+| `build/zmq_check` | The network stream: the message header and the info message, the rejection of bad messages, the stream address, the default address, the sample index tracker. With ZMQ, also one message through RADIO and DISH on the loopback |
 | `build/device_check` | The device list entries from a UHD search, device arguments and the sample rate rules |
 | `build/clipboard_check` | The system clipboard, both ways, with a second X client: UTF-8, Latin-1, large texts in parts. It needs an X server (for example `xvfb-run -a build/clipboard_check`); without one it is skipped |
 | `build/bb_check` | The BB60 backend with the simulated device: open, rates, bandwidths, streaming, overload, unplug, and the capture segments of a recording across retunes. Only with `-DWVT_BB_SIM=ON` |
@@ -88,12 +89,13 @@ libFuzzer). Refer to [`WVT_FUZZ`](build.md#wvt_fuzz).
 | `fuzz_meta` | `guessMeta`: file names (gqrx and the rate and frequency in a name) and SigMF metadata files |
 | `fuzz_parse_si` | `parseSI`, the number parser of the command line and the input fields (`2.4M`, `915 MHz`) |
 | `fuzz_config` | `parseConfig`, the configuration file parser |
+| `fuzz_zmq_wire` | `parseStreamMessage`, the parser of the network stream messages (any computer can send to the port of a subscriber), and `parseStreamAddress` |
 
 To build them and run them on their seed inputs (`tools/fuzz/corpus/`):
 
 ```sh
 cmake -S . -B build-fuzz -DWVT_FUZZ=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
-cmake --build build-fuzz -j --target fuzz_json fuzz_chain fuzz_meta fuzz_parse_si fuzz_config
+cmake --build build-fuzz -j --target fuzz_json fuzz_chain fuzz_meta fuzz_parse_si fuzz_config fuzz_zmq_wire
 ctest --test-dir build-fuzz -R '^fuzz_' --output-on-failure
 ```
 
