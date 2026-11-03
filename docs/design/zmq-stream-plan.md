@@ -1,7 +1,7 @@
 # Plan: publish a live stream over ZMQ and UDP (issue #96)
 
-Status: phases 1 to 5 (build, wire format, publisher, subscriber device, command line) implemented
-(2026-11-03) on `zmq-udp-stream`. Phases 6 to 8 are planned.
+Status: phases 1 to 6 (build, wire format, publisher, subscriber device, command line, GUI)
+implemented (2026-11-03) on `zmq-udp-stream`. Phases 7 and 8 are planned.
 
 ## 1. Goal
 
@@ -208,7 +208,7 @@ It ignores the reserved bytes and the unknown flags, so that a later version can
 As built: wvt refuses `-c`, `-r` and every other device option with `--device zmq`, a `--publish`
 to the address that `--device zmq` receives on (the stream would come back), `--publish` with
 `--audio-out`, and `--publish` without `--device`. With `--no-gui --record --publish`, the run ends
-when the recording ends. Until phase 6, `--publish` needs `--no-gui`. CTest runs two wvt programs on
+when the recording ends. CTest runs two wvt programs on
 the loopback (`tools/zmq_cli.cmake`: the subscriber records 1 s, all samples, no gap) and the
 refusals.
 
@@ -227,6 +227,14 @@ refusals.
   tuning. The status bar shows the publish rate in MB/s and the skipped samples. **Publish** is
   disabled when the source is a `zmq` stream to the same address (a loop).
 - `--publish` in the GUI starts publishing when the device starts.
+
+As built: before a `zmq` device starts, the tuning fields are replaced by the text *Frequency,
+rate and gain come from the source*; once it streams, they show the source's values, disabled.
+The status bar names device loss *network loss* for a `zmq` stream. The publish row shows the
+address before publishing, `PUB address rate` while publishing, and the publisher's error if it
+stops by itself. A restart of the device (a new rate or option) publishes again, with a new
+stream ID. Checked under Xvfb: a GUI publisher to a headless subscriber, and a headless publisher
+to a GUI subscriber, on the loopback.
 
 ### Phase 7 — Configuration file (`src/app/config.cpp`, `docs/config.md`)
 

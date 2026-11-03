@@ -1363,11 +1363,6 @@ int main(int argc, char** argv) {
         }
         return runHeadless(dev, haveRecord ? &rc : nullptr, havePublish ? &pubCfg : nullptr);
     }
-    if (havePublish) {
-        // The Publish button and --publish in the window come with the GUI part of issue #96.
-        LOG_ERROR("main", "--publish needs --no-gui in this version");
-        return 2;
-    }
 
     {
         std::string gpuErr;
@@ -1407,7 +1402,10 @@ int main(int argc, char** argv) {
         if (haveDevice) {
             LOG_INFO("main", "starting device %s%s%s", dev.driver.c_str(), dev.args.empty() ? "" : ":", dev.args.c_str());
             // App logs the reason when these fail.
-            if (app.startDevice(dev) && haveRecord) app.startRecording(rc);
+            if (app.startDevice(dev)) {
+                if (haveRecord) app.startRecording(rc);
+                if (havePublish) app.startPublishing(pubCfg);
+            }
         } else if (!path.empty()) {
             LOG_INFO("main", "opening %s", path.c_str());
             if (haveSeg) app.setSegment(seg0, seg1);
