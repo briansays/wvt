@@ -1,6 +1,7 @@
 # Build folders (build/, build-asan/, build-tsan/, build-fuzz/ ...)
 /build*/
 /cmake-build-*/
+docs/build
 
 # Log files that wvt and the build write
 *.log
