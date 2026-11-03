@@ -1,7 +1,7 @@
 #pragma once
 // File sessions (issue #76): the state of the file viewer in a JSON file
 // (.wvtsession.json), so that a person can go back to the same recording,
-// view, plot settings and channel later. File > Save File Session writes
+// view, plot settings and channel later. File > Save file session writes
 // one; the File box (or the command line) opens one like a recording.
 //
 // This module only reads and writes the file; the App maps its state to

@@ -20,7 +20,7 @@ window.
 ## Save a session
 
 1. Open a recording, and set the view and the plots as you want them.
-2. Select **File → Save File Session...**.
+2. Select **File → Save file session...**.
 3. Make sure that the path is correct. The default is the name of the recording with
    `.wvtsession.json`, in the folder of the recording.
 4. Click **Save**.

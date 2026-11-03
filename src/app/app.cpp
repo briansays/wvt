@@ -494,6 +494,8 @@ void App::frame() {
         ImGui::BeginChild("##live", ImVec2(0, bodyH), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
         drawLiveLeft();
         ImGui::EndChild();
+    } else if (!file_) {
+        drawEmptyState(bodyH);
     } else {
         ImGui::BeginChild("##left", ImVec2(leftW, bodyH), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
         drawLeft();
@@ -532,6 +534,31 @@ void App::frame() {
     hoverF_ = nextHoverF_;
     liveHoverAgo_ = liveNextHoverAgo_;
     submitRequests();
+}
+
+void App::drawEmptyState(float height) {
+    ImGui::BeginChild("##empty", ImVec2(0, height), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
+    const char* title = "No recording open";
+    const char* body = "Type or paste the path of an IQ recording in the File box and press Enter.\n"
+                       "SigMF files and gqrx names set the format and the rate; for a raw file, set them above.";
+    const ImGuiStyle& st = ImGui::GetStyle();
+    const float bodyW = ImGui::CalcTextSize(body).x;
+    const float blockH = ImGui::GetTextLineHeightWithSpacing() * 4 + ImGui::GetFrameHeight();
+    const ImVec2 avail = ImGui::GetContentRegionAvail();
+    const float x = std::max(0.f, (avail.x - bodyW) * 0.5f);
+    ImGui::SetCursorPos(ImVec2(x, std::max(0.f, (avail.y - blockH) * 0.4f)));
+    ImGui::BeginGroup();
+    ImGui::TextUnformatted(title);
+    ImGui::Spacing();
+    ImGui::TextDisabled("%s", body);
+    ImGui::Spacing();
+    if (ImGui::Button("Open file...")) focusPath_ = true;
+    ImGui::SetItemTooltip("Put the cursor in the File box");
+    ImGui::SameLine(0, st.ItemSpacing.x * 2);
+    if (ImGui::Button("Stream from a device")) enterLive();
+    ImGui::SetItemTooltip("Switch the source to Device (also: Source in the menu bar)");
+    ImGui::EndGroup();
+    ImGui::EndChild();
 }
 
 // ---------------------------------------------------------------------------
@@ -597,13 +624,13 @@ void App::drawToolbar() {
     const float segW = fieldW(9);
     label("Segment", segW * 2 + st.ItemInnerSpacing.x);
     const char* segTip = "Load only this part of the file, in seconds of file time.\n"
-                         "-1 = file start / end (-1 to -1 = the whole file).\n"
+                         "Empty = the file start / end (both empty = the whole file).\n"
                          "Set it before Open, or change it after; press Enter to apply.";
     double seg0 = segT0_, seg1 = segT1_;
-    bool segEdit = InputSI("##seg0", &seg0, "s", segW);
+    bool segEdit = InputSIOptional("##seg0", &seg0, "s", segW, "start");
     ImGui::SetItemTooltip("From: %s", segTip);
     ImGui::SameLine(0, st.ItemInnerSpacing.x);
-    segEdit |= InputSI("##seg1", &seg1, "s", segW);
+    segEdit |= InputSIOptional("##seg1", &seg1, "s", segW, "end");
     ImGui::SetItemTooltip("To: %s", segTip);
     if (segEdit) setSegment(seg0, seg1);
     if (file_) {
@@ -934,14 +961,15 @@ void App::drawLeft() {
         ImPlot::SetupAxis(ImAxis_X1, nullptr, ImPlotAxisFlags_NoLabel);
         ImPlot::SetupAxisFormat(ImAxis_X1, formatAxisSI, &fFmt_);
         ImPlot::SetupAxisLinks(ImAxis_X1, &fmin_, &fmax_);
+        setupSpacedTicks(ImAxis_X1, fFmt_, avail.x - cbW - ImGui::GetFontSize() * 4);
         ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, fc_ - fs_, fc_ + fs_);
         ImPlot::SetupAxis(ImAxis_Y1, "dBFS");
         if (wf_ && !wf_->specF.empty()) {
             if (showPeak_) {
-                ImPlot::SetNextLineStyle(ImVec4(0.9f, 0.4f, 0.3f, 0.6f));
+                ImPlot::SetNextLineStyle(kColSpecPeak);
                 ImPlot::PlotLine("peak", wf_->specF.data(), wf_->specPeak.data(), (int)wf_->specF.size());
             }
-            ImPlot::SetNextLineStyle(ImVec4(0.6f, 0.85f, 1.f, 1.f));
+            ImPlot::SetNextLineStyle(kColSpecAvg);
             ImPlot::PlotLine("avg", wf_->specF.data(), wf_->specAvg.data(), (int)wf_->specF.size());
         }
         logViewSpectrum();
@@ -950,6 +978,10 @@ void App::drawLeft() {
         drawFreqMarkers();
         drawPoints(MeasPlot::Spectrum);
         pointInput(MeasPlot::Spectrum);
+        if (keyPeakPoint_) {
+            keyPeakPoint_ = false;
+            placePeakPoint();
+        }
         if (std::isfinite(hoverF_)) {
             ImPlot::SetNextLineStyle(kColHover);
             ImPlot::PlotInfLines("##hf", &hoverF_, 1, ImPlotItemFlags_NoFit);
@@ -963,9 +995,7 @@ void App::drawLeft() {
         ImPlot::EndPlot();
     }
     ImGui::SameLine();
-    ImGui::BeginGroup();
-    ImGui::TextDisabled("Spectrum\nof view");
-    ImGui::EndGroup();
+    spectrumKey("Spectrum\nof view", showPeak_);
 
     // splitter between spectrum and waterfall
     ImGui::InvisibleButton("##hsplit", ImVec2(avail.x, 6));
@@ -982,6 +1012,7 @@ void App::drawLeft() {
         ImPlot::SetupAxis(ImAxis_X1, nullptr, ImPlotAxisFlags_NoLabel | lock);
         ImPlot::SetupAxisFormat(ImAxis_X1, formatAxisSI, &fFmt_);
         ImPlot::SetupAxisLinks(ImAxis_X1, &fmin_, &fmax_);
+        setupSpacedTicks(ImAxis_X1, fFmt_, avail.x - cbW - ImGui::GetFontSize() * 4);
         ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, fc_ - fs_, fc_ + fs_);
         ImPlot::SetupAxis(ImAxis_Y1, nullptr, ImPlotAxisFlags_Invert | lock);
         ImPlot::SetupAxisFormat(ImAxis_Y1, formatAxisSI, &tFmt_);
@@ -1335,7 +1366,7 @@ void App::drawStatusBar() {
     snprintf(rest, sizeof rest, "%s | %.0f fps", win_.usingGL() ? "GLX" : "software", ImGui::GetIO().Framerate);
     const std::string lead = computingText();
     ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(elideMiddle(s, statusLeftW(lead, rest, false)).c_str());
+    textElided(s, statusLeftW(lead, rest, false));
     drawStatusRight(lead, rest, false);
 }
 
@@ -1407,6 +1438,7 @@ void App::handleShortcuts() {
     if (ImGui::IsKeyPressed(ImGuiKey_T, false)) tMarkers_ = !tMarkers_;
     if (ImGui::IsKeyPressed(ImGuiKey_F, false)) fMarkers_ = !fMarkers_;
     if (io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_M, false)) clearPoints();  // M alone: on a plot (pointInput)
+    if (io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_P, false)) keyPeakPoint_ = true;
     if (ImGui::IsKeyPressed(ImGuiKey_C, false)) demod_.chanEnable = !demod_.chanEnable;
     if (ImGui::IsKeyPressed(ImGuiKey_B, false)) addBookmark();
     if (tMarkers_ && ImGui::IsKeyPressed(ImGuiKey_Z, false)) setView(std::min(tm1_, tm2_), std::max(tm1_, tm2_));

@@ -142,6 +142,9 @@ between two pulse edges, the time between two pulses, or the change in frequency
   the trace (I or Q) that is nearer to the pointer.
 - On the waterfall, the marker keeps the time and the frequency of the pointer. On the spectrum, it
   keeps the frequency.
+- Without a pointer, press `Shift+P` (or use **View → Point at the next spectrum peak**): the marker
+  goes on the strongest peak of the spectrum in view. Press it again to put the other marker on the
+  next strongest peak, for the frequency and level difference between two signals.
 - To move a marker, drag it. On a time plot, it moves along the trace.
 - To remove the markers, press `Shift+M`, or use **View → Clear point markers**. **View → Point
   markers** shows or hides them.

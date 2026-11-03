@@ -23,6 +23,7 @@ is correct.
 | [Point measurements](point-measurement-plan.md) | #80 | Implemented |
 | [Run-time configuration file](config-file-plan.md) | #88 | Implemented |
 | [ZMQ stream over UDP](zmq-stream-plan.md) | #96 | Implemented |
+| [UI accessibility review](ui-accessibility-review.md) | — | Implemented |
 
 ```{toctree}
 :hidden:
@@ -43,4 +44,5 @@ sidekiq-integration-plan
 point-measurement-plan
 config-file-plan
 zmq-stream-plan
+ui-accessibility-review
 ```

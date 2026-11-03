@@ -950,14 +950,15 @@ void App::drawLiveLeft() {
         ImPlot::SetupAxis(ImAxis_X1, nullptr, ImPlotAxisFlags_NoLabel);
         ImPlot::SetupAxisFormat(ImAxis_X1, formatAxisSI, &fFmt_);
         ImPlot::SetupAxisLinks(ImAxis_X1, &fmin_, &fmax_);
+        setupSpacedTicks(ImAxis_X1, fFmt_, plotW - ImGui::GetFontSize() * 4);
         ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, fc_ - fs_, fc_ + fs_);
         ImPlot::SetupAxis(ImAxis_Y1, "dBFS");
         if (!liveSpecF_.empty()) {
             if (showPeak_) {
-                ImPlot::SetNextLineStyle(ImVec4(0.9f, 0.4f, 0.3f, 0.6f));
+                ImPlot::SetNextLineStyle(kColSpecPeak);
                 ImPlot::PlotLine("peak", liveSpecF_.data(), livePeakDb_.data(), (int)liveSpecF_.size());
             }
-            ImPlot::SetNextLineStyle(ImVec4(0.6f, 0.85f, 1.f, 1.f));
+            ImPlot::SetNextLineStyle(kColSpecAvg);
             ImPlot::PlotLine("avg", liveSpecF_.data(), liveAvgDb_.data(), (int)liveSpecF_.size());
         }
         drawChannelOverlay(false);
@@ -976,7 +977,7 @@ void App::drawLiveLeft() {
         ImPlot::EndPlot();
     }
     ImGui::SameLine();
-    ImGui::TextDisabled("Live\nspectrum");
+    spectrumKey("Live\nspectrum", showPeak_);
 
     ImGui::InvisibleButton("##lhsplit", ImVec2(avail.x, 6));
     if (ImGui::IsItemHovered() || ImGui::IsItemActive()) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
@@ -995,6 +996,7 @@ void App::drawLiveLeft() {
         ImPlot::SetupAxis(ImAxis_X1, nullptr, ImPlotAxisFlags_NoLabel);
         ImPlot::SetupAxisFormat(ImAxis_X1, formatAxisSI, &fFmt_);
         ImPlot::SetupAxisLinks(ImAxis_X1, &fmin_, &fmax_);
+        setupSpacedTicks(ImAxis_X1, fFmt_, plotW - ImGui::GetFontSize() * 4);
         ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, fc_ - fs_, fc_ + fs_);
         ImPlot::SetupAxis(ImAxis_Y1, "ago", ImPlotAxisFlags_Invert);
         ImPlot::SetupAxisFormat(ImAxis_Y1, formatValueSI, (void*)"s");
@@ -1077,7 +1079,7 @@ void App::drawLiveStatusBar() {
     char fps[64];
     snprintf(fps, sizeof fps, "%s | %.0f fps", win_.usingGL() ? "GLX" : "software", ImGui::GetIO().Framerate);
     ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(elideMiddle(s, statusLeftW(right + " | ", fps, true)).c_str());
+    textElided(s, statusLeftW(right + " | ", fps, true));
     drawStatusRight(right + " | ", fps, true);
 }
 
