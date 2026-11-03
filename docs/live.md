@@ -3,7 +3,7 @@
 wvt streams from an RTL-SDR v3, a USRP, a Signal Hound BB60 or an Epiq Solutions Sidekiq. The USRP
 can be the USB B200 family, or a network USRP such as the N310, X310 or X410. It shows the spectrum and a scrolling
 waterfall in real time, and it records the stream to SigMF or raw IQ files. wvt opens these files
-directly.
+directly. It can also [send the stream over the network](#stream-over-the-network) to another wvt.
 
 ## Install the device libraries
 
@@ -155,7 +155,8 @@ it analyzes.
 2. Select the device. wvt looks for devices in the background, on USB and on the network. Until
    the search is done, the list shows *Scanning...*. To search again, click **Rescan**.
 3. For a USRP that is not in the list, type its device arguments in **Args** and press Enter. For
-   example, type `addr=192.168.40.2`.
+   example, type `addr=192.168.40.2`. For **ZMQ stream**, type the address in **Address**
+   (refer to [Stream over the network](#stream-over-the-network)).
 4. Set the center frequency, the sample rate and the gain.
 5. Click **Start**.
 
@@ -358,6 +359,125 @@ wvt --device uhd -c 915M -r 10M --record ~/caps/ism --record-duration 30 --no-gu
 | `--record-duration T` | Stop after `T` seconds |
 | `--no-gui` | Record without a window |
 
+## Stream over the network
+
+A wvt that streams from a device can publish the stream over the network. Another wvt receives it
+as the device **ZMQ stream**, and shows it as if the device were attached. Use it to put the SDR on a
+remote computer, for example a computer without a display next to the antenna, and to look at the
+stream on your desktop.
+
+The stream goes one way, from the publisher to the subscriber, over UDP. It uses the ZMQ RADIO and
+DISH sockets, so wvt must be built with ZMQ (see [`WVT_WITH_ZMQ`](build.md#wvt_with_zmq)). Each
+message has a header with the sample format, the rate, the center frequency, the gain and the
+sample index, so the subscriber takes these values from the stream.
+
+### The address
+
+The publisher sends to an address. The subscriber receives on the same address.
+
+- **Unicast** (one subscriber): the address of the subscriber's computer, for example
+  `192.168.1.50:5600`. Use this address on both sides. Use unicast when one computer receives.
+- **Multicast** (any number of subscribers): a group from `224.0.0.0` to `239.255.255.255`, for
+  example `239.10.0.1:5600`. Use the same group on all computers. To use one network interface,
+  put its name or address first: `en0;239.10.0.1:5600`.
+
+The port is 5600 when you do not give one. The default address is the address of this computer
+(of the first interface that is up and is not the loopback, a VPN link or a link-local address),
+else `127.0.0.1:5600`. The configuration file can set
+another default with [`zmq.address`](config.md#network-stream).
+
+### Publish
+
+On the device row, click **Publish**. Its ⚙ button sets the **Address** (the subscriber, or a
+multicast group) and, for a group, the **TTL** (the number of router hops; 1 keeps the stream on
+the local network). While wvt publishes, the row shows the address and the data rate.
+
+- Publishing does not change the device, the spectrum or a recording. You can record and publish
+  at the same time.
+- If the network is slower than the stream, the publisher skips samples and shows the number. The
+  subscriber sees each skip as a gap.
+- If you change the sample rate or a device option, the device restarts and wvt publishes again.
+
+On a computer without a display, use `--publish` with `--no-gui`. Press Ctrl+C to stop:
+
+```sh
+# On the computer with the SDR: send to the subscriber at 192.168.1.50
+wvt --device uhd -c 915M -r 10M --gain 40 --publish 192.168.1.50:5600 --no-gui
+
+# Publish and record at the same time; the run stops after 60 s
+wvt --device rtlsdr -c 100.1M -r 2.4M --publish 239.10.0.1 --record ~/caps/fm --record-duration 60 --no-gui
+```
+
+### Receive
+
+1. In the **Device** list, select **ZMQ stream**.
+2. In **Address**, type the address to receive on: an address of this computer, or the multicast
+   group of the publisher. Press Enter.
+3. Click **Start**. wvt waits up to 3 s for the stream.
+
+The frequency, the rate and the gain come from the publisher, so these fields are read-only. If the
+publisher retunes, the subscriber retunes at the same sample. **Record** works as for a device: a
+SigMF recording has the frequency changes of the publisher, and an annotation for each gap. The
+status bar shows lost messages as *network loss*.
+
+From the command line:
+
+```sh
+wvt --device zmq:192.168.1.50:5600                       # receive on this computer's address
+wvt --device zmq:239.10.0.1 --record ~/caps/remote --record-duration 30 --no-gui
+```
+
+With `--device zmq`, wvt does not accept `-c`, `-r`, `--gain` or the other device options.
+
+To try it on one computer, start two wvt windows. Publish from the first one to `127.0.0.1:5600`,
+and receive on `127.0.0.1:5600` in the second one.
+
+### Messages
+
+| Message | Cause | What to do |
+|---|---|---|
+| *no stream on ADDR in 3 s* | Nothing arrives on the address | Start publishing first. Check that the publisher sends to this address, and the firewall |
+| *port N is in use* | Another program receives on the port | Stop the other subscriber, or use another port on both sides |
+| *X is not an address of this computer* | A unicast address of another computer | Type an address of this computer. The publisher sends to it |
+| *the source stopped publishing* | The publisher stopped | Start publishing again, then click **Start** |
+| *the source started again with another rate* | The publisher changed its rate | Click **Start** |
+| *waiting for the source* | No message for more than 2 s | Check the publisher and the network |
+
+### Bandwidth
+
+The stream has the native samples of the device, and a header of 64 bytes for each 8000 bytes of
+samples:
+
+| Device and rate | Samples | Data rate |
+|---|---|---|
+| RTL-SDR, 2.4 MS/s | `cu8` | 4.8 MB/s (39 Mbit/s) |
+| USRP, 10 MS/s | `ci16` | 40 MB/s (323 Mbit/s) |
+| USRP, 25 MS/s | `ci16` | 100 MB/s (806 Mbit/s) |
+| USRP, 56 MS/s | `ci16` | 224 MB/s (1.8 Gbit/s) |
+
+- 1 Gbit Ethernet carries up to approximately 25 MS/s of `ci16`. Above that, use 10 Gbit Ethernet.
+- A message is larger than an Ethernet frame, so the network sends it in parts (IP fragments).
+  If one part is lost, the subscriber loses the full message.
+- Wi-Fi is not good for multicast: many access points send multicast at a low rate. Use unicast
+  over Wi-Fi.
+
+### Network notes
+
+- **Firewall:** the subscriber's computer must accept UDP on the port (5600 by default), for
+  example `sudo ufw allow 5600/udp` on Ubuntu.
+- **macOS:** wvt needs the *Local Network* permission (System Settings → Privacy & Security → Local
+  Network) to send to and receive from other computers and multicast groups. On a Mac with
+  multicast routed to Wi-Fi, two programs on the same computer did not always receive a multicast
+  stream. Use unicast, or put the interface first, for example `lo0;239.10.0.1:5600` on one Mac.
+- **Multicast across switches:** a switch with IGMP snooping sends a group only to the ports that
+  joined it. Without an IGMP querier on the network, some switches stop sending the group after a
+  few minutes.
+- **Security:** the stream has no encryption and no authentication. Any computer on the network
+  can receive a multicast stream, or send a stream to a subscriber. Use it only on a network that
+  you trust.
+
+For the design and the message format, refer to [the ZMQ stream design record](design/zmq-stream-plan.md).
+
 ## How it works
 
 The device thread writes the samples into a ring buffer, in the native format of the device. Two
@@ -367,6 +487,8 @@ types of reader use this buffer:
   during the copy, the spectrum thread skips them.
 - The recorder reads all samples. If the recorder is behind, the device thread does not write over
   the samples that the recorder did not read. It drops the new block and records the gap.
+- The network publisher copies the samples like the spectrum thread. If it is behind, it skips to
+  new samples, and the sample index of its messages tells the subscriber how many it skipped.
 
 Thus a slow disk does not stop the spectrum, and each loss in a recording has an annotation. The
 buffer holds approximately 2 s of samples, from 16 MB to 1 GB.

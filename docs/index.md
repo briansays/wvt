@@ -10,7 +10,8 @@ wvt has these other functions:
 
 - **Live devices:** wvt streams from an RTL-SDR v3, a USRP (B200 family, N3xx, X3xx, X4xx), a Signal Hound BB60 or an Epiq
   Sidekiq. It shows the
-  spectrum and the waterfall in real time, and it records the stream to a file.
+  spectrum and the waterfall in real time, and it records the stream to a file. It can send the
+  stream over the network to another wvt.
 - **Signal generator:** wvt makes CW, pulsed, swept and recorded waveforms. It writes them to a
   file, shows them in the live view, or transmits them with a USRP.
 - **Audio:** wvt demodulates one channel and plays it through the speakers or writes it to a WAV

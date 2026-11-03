@@ -1,7 +1,8 @@
 # Plan: publish a live stream over ZMQ and UDP (issue #96)
 
-Status: phases 1 to 7 (build, wire format, publisher, subscriber device, command line, GUI,
-configuration file) implemented (2026-11-03) on `zmq-udp-stream`. Phase 8 is planned.
+Status: implemented (2026-11-03) on `zmq-udp-stream`, in eight phases: build, wire format,
+publisher, subscriber device, command line, GUI, configuration file, docs. The user page is
+[Stream over the network](../live.md#stream-over-the-network).
 
 ## 1. Goal
 

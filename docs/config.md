@@ -137,7 +137,7 @@ If a key is in the file two times, wvt uses the last line, with a warning.
 
 | Key | Default | Function |
 |---|---|---|
-| `zmq.address` | This computer's address, port 5600 (else `127.0.0.1:5600`) | The default address of the [network stream](live.md) on this computer. The publisher (**Publish**) sends to it; the **ZMQ stream** device receives on it. `a.b.c.d[:port]`, or a multicast group `[iface;]group[:port]` |
+| `zmq.address` | This computer's address, port 5600 (else `127.0.0.1:5600`) | The default address of the [network stream](live.md#stream-over-the-network) on this computer. The publisher (**Publish**) sends to it; the **ZMQ stream** device receives on it. `a.b.c.d[:port]`, or a multicast group `[iface;]group[:port]` |
 | `zmq.ttl` | `1` | Multicast hops, 1 to 255. `1` keeps the stream on the local network. `--publish-ttl` changes it |
 
 On the computer that publishes, set `zmq.address` to the address of the subscriber. On the
