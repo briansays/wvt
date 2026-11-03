@@ -27,54 +27,101 @@
 #include "common/log.h"
 #include "app/platform_x11.h"
 #include "common/ui_util.h"
+#include "net/zmq_wire.h"
 
 extern const unsigned char g_embedded_font[];
 extern const size_t g_embedded_font_size;
 
 static volatile sig_atomic_t g_interrupted = 0;
 
-// Records from a device without a window. Prints progress once a second.
-static int runHeadless(const StreamConfig& dev, const RecordConfig& rc) {
+// Records and / or publishes (issue #96) from a device without a window.
+// Prints progress once a second. With a recording, the run ends when the
+// recording ends (--record-duration); publishing ends with it.
+static int runHeadless(const StreamConfig& dev, const RecordConfig* rc, const PublishConfig* pub) {
     LiveEngine live(nullptr);
     std::string err;
+    const char* tag = rc ? "record" : "stream";
     if (!live.start(dev, err)) {
-        LOG_ERROR("record", "%s", err.c_str());
+        LOG_ERROR(tag, "%s", err.c_str());
         return 1;
     }
     auto st = live.stats();
-    logStatus("record", "streaming from %s, %s at %s", st.description.c_str(), fmtSI(st.rate, "S/s", 6).c_str(),
+    logStatus(tag, "streaming from %s, %s at %s", st.description.c_str(), fmtSI(st.rate, "S/s", 6).c_str(),
             fmtSI(st.fc, "Hz", 9).c_str());
-    if (!st.notes.empty()) LOG_WARN("record", "%s", st.notes.c_str());
-    if (!live.startRecording(rc, err)) {
+    if (!st.notes.empty()) LOG_WARN(tag, "%s", st.notes.c_str());
+    if (pub && !live.startPublishing(*pub, err)) {
+        LOG_ERROR("stream", "%s", err.c_str());
+        return 1;
+    }
+    if (rc && !live.startRecording(*rc, err)) {
         LOG_ERROR("record", "%s", err.c_str());
         return 1;
     }
     signal(SIGINT, [](int) { g_interrupted = 1; });
     signal(SIGTERM, [](int) { g_interrupted = 1; });
-    logStatus("record", "recording to %s (Ctrl+C to stop)", live.recorder().status().dataPath.c_str());
+    if (pub) {
+        const auto ps = live.publisher().status();
+        logStatus("stream", "publishing to %s, stream ID %08x, TTL %d (Ctrl+C to stop)", ps.address.c_str(),
+                ps.streamId, pub->ttl);
+    }
+    if (rc) logStatus("record", "recording to %s (Ctrl+C to stop)", live.recorder().status().dataPath.c_str());
     auto next = std::chrono::steady_clock::now();
-    while (!g_interrupted && live.recorder().active()) {
+    int tick = 0;
+    while (!g_interrupted) {
+        if (rc && !live.recorder().active()) break;
+        if (pub && !live.publisher().active()) break;
         next += std::chrono::milliseconds(200);
         std::this_thread::sleep_until(next);
         if (!live.stats().error.empty()) break;
-        static int tick = 0;
         if (++tick % 5 == 0) {
-            auto rs = live.recorder().status();
-            logProgress("record", "%s  %s  buffer %.0f%%  gaps %d   ", fmtSI(rs.seconds, "s", 4).c_str(),
-                    fmtSI((double)rs.bytes, "B", 4).c_str(), rs.ringFill * 100, rs.gaps);
+            std::string line;
+            if (rc) {
+                auto rs = live.recorder().status();
+                char b[160];
+                snprintf(b, sizeof b, "%s  %s  buffer %.0f%%  gaps %d", fmtSI(rs.seconds, "s", 4).c_str(),
+                        fmtSI((double)rs.bytes, "B", 4).c_str(), rs.ringFill * 100, rs.gaps);
+                line += b;
+            }
+            if (pub) {
+                auto ps = live.publisher().status();
+                char b[160];
+                snprintf(b, sizeof b, "%ssent %s  %s/s  skipped %s", rc ? "  |  " : "",
+                        fmtSI((double)ps.samples, "S", 4).c_str(), fmtSI(ps.bytesPerSec, "B", 3).c_str(),
+                        fmtSI((double)ps.skipped, "S", 3).c_str());
+                line += b;
+            }
+            logProgress(tag, "%s   ", line.c_str());
         }
     }
     std::string devErr = live.stats().error;
-    live.stopRecording();
-    auto rs = live.recorder().status();
+    if (rc) live.stopRecording();
+    live.stopPublishing();
     live.stop();
     logProgressEnd();
-    logStatus("record", "wrote %s (%s, %s%s)", rs.dataPath.c_str(), fmtSI(rs.seconds, "s", 5).c_str(),
-            fmtSI((double)rs.bytes, "B", 4).c_str(), rs.gaps ? (", " + std::to_string(rs.gaps) + " gaps").c_str() : "");
-    if (!rs.metaPath.empty()) logStatus("record", "metadata %s", rs.metaPath.c_str());
-    if (!devErr.empty()) LOG_ERROR("record", "device error: %s", devErr.c_str());
-    if (rs.failed) LOG_ERROR("record", "recording failed: %s", rs.stopReason.c_str());
-    return rs.failed || !devErr.empty() ? 1 : 0;
+    int failed = 0;
+    if (rc) {
+        auto rs = live.recorder().status();
+        logStatus("record", "wrote %s (%s, %s%s)", rs.dataPath.c_str(), fmtSI(rs.seconds, "s", 5).c_str(),
+                fmtSI((double)rs.bytes, "B", 4).c_str(),
+                rs.gaps ? (", " + std::to_string(rs.gaps) + " gaps").c_str() : "");
+        if (!rs.metaPath.empty()) logStatus("record", "metadata %s", rs.metaPath.c_str());
+        if (rs.failed) {
+            LOG_ERROR("record", "recording failed: %s", rs.stopReason.c_str());
+            failed = 1;
+        }
+    }
+    if (pub) {
+        auto ps = live.publisher().status();
+        logStatus("stream", "sent %lld samples in %lld messages to %s%s", (long long)ps.samples,
+                (long long)ps.messages, ps.address.c_str(),
+                ps.skipped ? (", skipped " + std::to_string(ps.skipped) + " (the network was too slow)").c_str() : "");
+        if (!ps.error.empty()) failed = 1;  // the publisher logged why
+    }
+    if (!devErr.empty()) {
+        LOG_ERROR(tag, "device error: %s", devErr.c_str());
+        failed = 1;
+    }
+    return failed;
 }
 
 // Writes a generated waveform to a file and exits.
@@ -389,6 +436,8 @@ int main(int argc, char** argv) {
     };
     StreamConfig dev;
     bool haveDevice = false, haveRecord = false, noGui = false, haveGain = false;
+    PublishConfig pubCfg;  // --publish (issue #96)
+    bool havePublish = false;
     std::vector<std::string> devGiven;  // device fields set by options; an SDR profile leaves them (issue #88)
     RecordConfig rc;
     WaveformParams gp;
@@ -590,8 +639,10 @@ int main(int argc, char** argv) {
 
     cli.section("live devices (-c and -r set the tuning):");
     cli.add(nullptr, "--device", "DEV",
-            "rtlsdr[:INDEX|SERIAL] | uhd[:ARGS] | bb[:SERIAL] | skiq[:SERIAL|#N] | sim\n"
-            "e.g. --device uhd  --device uhd:addr=192.168.10.2  --device rtlsdr:0  --device bb  --device skiq:#0",
+            "rtlsdr[:INDEX|SERIAL] | uhd[:ARGS] | bb[:SERIAL] | skiq[:SERIAL|#N] | zmq[:ADDR] | sim\n"
+            "e.g. --device uhd  --device uhd:addr=192.168.10.2  --device rtlsdr:0  --device bb  --device skiq:#0\n"
+            "zmq receives the stream of another wvt (--publish) on ADDR, an address of this computer\n"
+            "or a multicast group (default: this computer's address, port 5600)",
             [&](const char* v) {
                 const std::string s = v;
                 const size_t c = s.find(':');
@@ -706,7 +757,25 @@ int main(int argc, char** argv) {
         if (!parseSI(v, rc.maxSeconds) || rc.maxSeconds <= 0) return bad("bad --record-duration");
         return true;
     });
-    cli.add(nullptr, "--no-gui", nullptr, "record without opening a window (Ctrl+C stops)", flag(noGui));
+    cli.add(nullptr, "--no-gui", nullptr, "record or publish without opening a window (Ctrl+C stops)", flag(noGui));
+
+    cli.section("network stream (needs --device):");
+    cli.add(nullptr, "--publish", "ADDR",
+            "send the live stream over ZMQ on UDP to ADDR: the subscriber's address a.b.c.d[:PORT],\n"
+            "or a multicast group [IFACE;]GROUP[:PORT] (default port 5600); receive it with --device zmq",
+            [&](const char* v) {
+                StreamAddress a;
+                std::string err;
+                if (!parseStreamAddress(v, a, err)) return bad("--publish: %s", err.c_str());
+                pubCfg.address = v;
+                return havePublish = true;
+            });
+    cli.add(nullptr, "--publish-ttl", "N", "multicast hops (default 1: the local network only)", [&](const char* v) {
+        long long n;
+        if (!whole("--publish-ttl", v, 1, 255, n)) return false;
+        pubCfg.ttl = (int)n;
+        return true;
+    });
 
     cli.section("signal generator (-c sets the center frequency, -r the sample rate):");
     cli.add(nullptr, "--siggen", nullptr, "open the signal generator window", flag(openGen));
@@ -1173,7 +1242,7 @@ int main(int argc, char** argv) {
         return runTx(gp, txc, genSeconds);
     }
     // --no-gui --record without --device records from the configuration file's sdr.default.
-    if (!haveDevice && noGui && haveRecord && !cfg.sdrDefault.empty()) {
+    if (!haveDevice && noGui && (haveRecord || havePublish) && !cfg.sdrDefault.empty()) {
         // Scan only the driver that sdr.default names (UHD probes the network).
         const char* only = configSdrDriver(cfg.sdrDefault);
         for (const SdrProfile& p : cfg.sdrs)
@@ -1186,6 +1255,23 @@ int main(int argc, char** argv) {
             LOG_INFO("config", "sdr.default %s: %s", cfg.sdrDefault.c_str(), devices[(size_t)i].label.c_str());
         } else {
             LOG_WARN("config", "sdr.default %s: no such device found", cfg.sdrDefault.c_str());
+        }
+    }
+    // A zmq stream (issue #96) has the tuning of its source.
+    if (haveDevice && dev.driver == "zmq") {
+        if (ov.haveFc || ov.haveRate || !devGiven.empty()) {
+            LOG_ERROR("main", "--device zmq takes the frequency, rate and gain from the source: "
+                              "drop -c, -r, --gain and the other device options");
+            return 2;
+        }
+        StreamAddress in, out;
+        std::string err;
+        const std::string inText = dev.args.empty() ? defaultStreamAddress() : dev.args;
+        if (havePublish && parseStreamAddress(inText, in, err) && parseStreamAddress(pubCfg.address, out, err) &&
+            in.ip == out.ip && in.port == out.port) {
+            LOG_ERROR("main", "--publish %s would send the stream back to this wvt (--device zmq receives on %s)",
+                      pubCfg.address.c_str(), in.text().c_str());
+            return 2;
         }
     }
     // The configuration file's profile for the device; the options win over it.
@@ -1250,6 +1336,14 @@ int main(int argc, char** argv) {
         LOG_ERROR("main", "--extract and --extract-band need --extract-out");
         return 2;
     }
+    if (havePublish && !haveDevice) {
+        LOG_ERROR("main", "--publish needs --device");
+        return 2;
+    }
+    if (havePublish && !audioOut.empty()) {
+        LOG_ERROR("main", "--publish does not go with --audio-out");
+        return 2;
+    }
     if (!audioOut.empty()) {
         if (haveDevice) return runAudioLive(dev, ap, audioOut, rc.maxSeconds);
         if (path.empty()) {
@@ -1263,11 +1357,16 @@ int main(int argc, char** argv) {
         return 2;
     }
     if (noGui) {
-        if (!haveRecord) {
-            LOG_ERROR("main", "--no-gui needs --record");
+        if (!haveRecord && !havePublish) {
+            LOG_ERROR("main", "--no-gui needs --record or --publish");
             return 2;
         }
-        return runHeadless(dev, rc);
+        return runHeadless(dev, haveRecord ? &rc : nullptr, havePublish ? &pubCfg : nullptr);
+    }
+    if (havePublish) {
+        // The Publish button and --publish in the window come with the GUI part of issue #96.
+        LOG_ERROR("main", "--publish needs --no-gui in this version");
+        return 2;
     }
 
     {

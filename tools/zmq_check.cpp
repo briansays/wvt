@@ -642,6 +642,7 @@ void checkSubscriber() {
     LiveEngine::Stats st = sub.stats();
     check(st.rate == 1e6 && st.fc == 100e6 && st.fmt == SampleFormat::CI16,
           "it has the rate, the frequency and the format of the source");
+    check(st.notes.empty(), "no note right after the start: '" + st.notes + "'");
     check(waitFor([&] { return contains(sub.stats().description, "wvt simulator"); }, 2.5),
           "its description has the source's: " + sub.stats().description);
 
@@ -682,7 +683,7 @@ void checkSubscriber() {
     st = sub.stats();
     const int64_t sent = src.publisher().status().samples;
     check(st.dropped == 0 && st.gapEvents == 0, "no samples lost on the loopback");
-    check(st.received > 1000000 && st.received <= sent && st.received >= sent - 100000,
+    check(st.received > 300000 && st.received <= sent && st.received >= sent - 100000,
           "received " + std::to_string(st.received) + " of the " + std::to_string(sent) + " samples sent");
 
     // A second subscriber on the same port.

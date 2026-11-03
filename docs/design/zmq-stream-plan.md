@@ -1,7 +1,7 @@
 # Plan: publish a live stream over ZMQ and UDP (issue #96)
 
-Status: phases 1 to 4 (build, wire format, publisher, subscriber device) implemented (2026-11-03)
-on `zmq-udp-stream`. Phases 5 to 8 are planned.
+Status: phases 1 to 5 (build, wire format, publisher, subscriber device, command line) implemented
+(2026-11-03) on `zmq-udp-stream`. Phases 6 to 8 are planned.
 
 ## 1. Goal
 
@@ -205,6 +205,13 @@ It ignores the reserved bytes and the unknown flags, so that a later version can
 - `--publish-ttl N` (default 1).
 - `--device zmq:192.168.1.50:5600` subscribes (on the computer with that address). `--device zmq` alone uses the default address. `-c`, `-r` and `--gain` are not allowed with it.
 
+As built: wvt refuses `-c`, `-r` and every other device option with `--device zmq`, a `--publish`
+to the address that `--device zmq` receives on (the stream would come back), `--publish` with
+`--audio-out`, and `--publish` without `--device`. With `--no-gui --record --publish`, the run ends
+when the recording ends. Until phase 6, `--publish` needs `--no-gui`. CTest runs two wvt programs on
+the loopback (`tools/zmq_cli.cmake`: the subscriber records 1 s, all samples, no gap) and the
+refusals.
+
 ### Phase 6 — GUI (`src/app/app_live.cpp`, `app.h`)
 
 - Device row: for `zmq`, an **Address** field in the place of **Args**. It starts with the
@@ -287,6 +294,11 @@ It ignores the reserved bytes and the unknown flags, so that a later version can
   part of `zmq_check` skips.
 - Multicast on macOS can need an interface (`en0;239.10.0.1:5600`) when there is more than one
   network.
+- On the development Mac (multicast routed to Wi-Fi, `en0`), two wvt programs on the same group did
+  not always meet. Without an interface, a group used for the first time failed often (the
+  subscriber received nothing in 3 s) and some runs had gaps. With an interface, one run in four
+  failed. On `lo0;GROUP` and on unicast, every run passed with no gap. `docs/live.md` should
+  recommend unicast for one subscriber, and an interface for multicast.
 - FetchContent needs the network at configure time. Builds without a network need
   `WVT_ZMQ_SOURCE_DIR` or `WVT_WITH_ZMQ=OFF`.
 - The draft API of libzmq can change between versions. wvt pins 4.3.5.

@@ -894,6 +894,19 @@ add_test(NAME tx_dry_run COMMAND wvt --no-log-file --gen cw -c 915M -r 1M --tx-g
   --tx-allow 902M:928M --tx-dry-run)
 add_test(NAME tx_dry_run_refused COMMAND wvt --no-log-file --gen cw -c 927.8M -r 1M --tx-allow 902M:928M --tx-dry-run)
 set_tests_properties(tx_dry_run_refused PROPERTIES WILL_FAIL TRUE)
+# The network stream options (issue #96): the refusals need no ZMQ; the
+# two-program test on the loopback does.
+add_test(NAME zmq_cli_no_tuning COMMAND wvt --no-log-file --no-config --device zmq -c 915M --no-gui --record x)
+add_test(NAME zmq_cli_no_loop COMMAND wvt --no-log-file --no-config --device zmq:127.0.0.1:15999
+  --publish 127.0.0.1:15999 --no-gui)
+add_test(NAME zmq_cli_bad_address COMMAND wvt --no-log-file --no-config --device sim --publish 10.0.0.300 --no-gui)
+set_tests_properties(zmq_cli_no_tuning PROPERTIES PASS_REGULAR_EXPRESSION "takes the frequency, rate and gain")
+set_tests_properties(zmq_cli_no_loop PROPERTIES PASS_REGULAR_EXPRESSION "back to this wvt")
+set_tests_properties(zmq_cli_bad_address PROPERTIES PASS_REGULAR_EXPRESSION "--publish: ")
+if(WVT_ZMQ_OK)
+  add_test(NAME zmq_cli_loopback COMMAND ${CMAKE_COMMAND} -DWVT=$<TARGET_FILE:wvt>
+    -DDIR=${CMAKE_BINARY_DIR}/zmq_cli_loopback -P ${CMAKE_SOURCE_DIR}/tools/zmq_cli.cmake)
+endif()
 
 # ---------------------------------------------------------------------------
 # libFuzzer targets for the parsers of user-supplied text (issue #53), clang

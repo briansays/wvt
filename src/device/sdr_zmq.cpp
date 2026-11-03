@@ -117,6 +117,7 @@ public:
             if (ok && m.h.kind == StreamKind::Data && !(m.h.flags & kStreamFlagEnd)) {
                 // The stream starts with this message; start() delivers it.
                 first_.assign(p, p + n);
+                setLastMsg();  // notes() can run before run() starts
                 fmt_ = m.h.fmt;
                 rate_ = m.h.rate;
                 fc_ = m.h.fc;
