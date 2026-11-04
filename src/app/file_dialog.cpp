@@ -1,5 +1,6 @@
 // Native file dialogs: see file_dialog.h.
 #include "app/file_dialog.h"
+#include "common/log.h"  // envVar
 
 #include <climits>
 #include <cstdlib>
@@ -25,7 +26,7 @@ namespace filedlg {
 namespace {
 
 std::string home() {
-    const char* h = getenv("HOME");
+    const char* h = envVar("HOME");
     return h && *h ? h : "/";
 }
 
@@ -126,7 +127,7 @@ bool available(std::string* why) {
 #else
     // zenity runs as a program: look for it once.
     static const bool found = [] {
-        const char* path = getenv("PATH");
+        const char* path = envVar("PATH");
         std::string dirs = path ? path : "/usr/bin:/bin";
         size_t a = 0;
         while (a <= dirs.size()) {
