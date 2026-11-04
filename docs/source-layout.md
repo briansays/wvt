@@ -31,6 +31,7 @@ folders.
 | `src/app/sw_renderer.*` | The software rasterizer for ImGui draw data |
 | `src/app/app.*` | The UI: toolbar, linked plots, parameter panels |
 | `src/app/app_menu.cpp` | The menu bar, the keyboard help and the About window |
+| `src/app/file_dialog.*`, `file_dialog_mac.m` | The open, save and folder dialogs through Native File Dialog, and the **Browse...** button |
 | `src/common/ui_util.*` | SI-unit inputs and formatters, the scrollbar widget, forms, the gear button, the color bar, the style |
 | `src/common/log.*` | The logger |
 | `src/common/build_info.h` | The git commit and version tag. `cmake/build_info.cmake` writes the definitions at each build |
@@ -123,7 +124,7 @@ folders.
 
 | Folder | Contents |
 |---|---|
-| `third_party/` | Dear ImGui 1.91.9, ImPlot 0.16, miniaudio 0.11.25 and stb_image_write 1.16 |
+| `third_party/` | Dear ImGui 1.91.9, ImPlot 0.16, miniaudio 0.11.25, stb_image_write 1.16 and Native File Dialog (commit 67345b8, with the changes in `WVT_PATCHES.md`) |
 | `scripts/` | `build.sh`, the build script (see [The build script](build.md#the-build-script)) |
 | `cmake/` | `embed.cmake`, which puts the UI font in the binary, and `build_info.cmake` (the git commit and tag) |
 | `docs/` | These pages. `docs/design/` has the design records |

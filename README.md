@@ -80,5 +80,6 @@ wvt is released under the [MIT License](LICENSE).
 
 The bundled third-party code in [`third_party/`](third_party) keeps its own licenses:
 [Dear ImGui](third_party/imgui/LICENSE.txt) (MIT), [ImPlot](third_party/implot/LICENSE) (MIT),
-[miniaudio](third_party/miniaudio/LICENSE) (public domain or MIT-0) and
-[stb_image_write](third_party/stb/stb_image_write.h) (public domain or MIT).
+[miniaudio](third_party/miniaudio/LICENSE) (public domain or MIT-0),
+[stb_image_write](third_party/stb/stb_image_write.h) (public domain or MIT) and
+[Native File Dialog](third_party/nativefiledialog/LICENSE) (zlib).

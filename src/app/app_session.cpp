@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include "app/app.h"
+#include "app/file_dialog.h"
 #include "common/log.h"
 #include "implot.h"
 #include "io/session.h"
@@ -194,11 +195,24 @@ void App::drawSessionWindow() {
     ImGui::SetNextWindowSize(ImVec2(fs * 34, 0), ImGuiCond_Appearing);
     if (ImGui::Begin("Save file session###session", &sessOpen_, ImGuiWindowFlags_NoSavedSettings)) {
         ImGui::TextWrapped("Saves the recording, its format, rate and segment, the view, the plot settings, the channel, "
-                           "the markers and the bookmarks. To open it again, type its path in the File box.");
+                           "the markers and the bookmarks. To open it again, use File > Open file... or type its "
+                           "path in the File box.");
         ImGui::Spacing();
         ImGui::TextUnformatted("File");
-        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::SetNextItemWidth(-(filedlg::buttonWidth("Browse...") + ImGui::GetStyle().ItemInnerSpacing.x));
         ImGui::InputText("##sesspath", sessPath_, sizeof sessPath_);
+        ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+        if (filedlg::button("Browse...##sesspath", "Choose where to save the session in a file browser")) {
+            std::string path, err;
+            const filedlg::Result r = filedlg::saveFile("", sessPath_, path, err);
+            if (r == filedlg::Result::Ok) {
+                snprintf(sessPath_, sizeof sessPath_, "%s", path.c_str());
+                sessMsg_.clear();
+            } else if (r == filedlg::Result::Error) {
+                sessMsg_ = "File browser: " + err;
+                sessMsgErr_ = true;
+            }
+        }
         ImGui::Checkbox("Replace an existing file", &sessOverwrite_);
         if (!sessMsg_.empty()) {
             ImGui::PushTextWrapPos(0);

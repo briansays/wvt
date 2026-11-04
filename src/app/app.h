@@ -91,6 +91,14 @@ private:
     Session sessionFromState() const;
     void openSaveSession();
     void drawSessionWindow();
+    // A file dialog for a recording or a session, then openFile() (file_dialog.h).
+    // Without a dialog it puts the cursor in the File box instead.
+    void browseOpenFile();
+    void reportBrowseError(const std::string& err);
+    void chainNoteError(const std::string& msg);  // the chain window's note line (app_chain.cpp)
+    // A button that replaces the folder of a path prefix (the recording
+    // prefixes) from a folder dialog, keeping the file name part.
+    void browsePrefixFolder(const char* label, char* prefix, size_t size);
     void drawToolbar();
     void drawOverview(float h);
     void drawLeft();

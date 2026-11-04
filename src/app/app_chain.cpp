@@ -6,6 +6,7 @@
 #include <string>
 
 #include "app/app.h"
+#include "app/file_dialog.h"
 #include "io/recorder.h"
 #include "common/ui_util.h"
 
@@ -70,6 +71,11 @@ void App::addChainItem(const std::string& path, bool fromViewer, bool markers) {
     sgChainNoteErr_ = false;
     p.chain.push_back(c);
     sgChainSel_ = (int)p.chain.size() - 1;
+}
+
+void App::chainNoteError(const std::string& msg) {
+    sgChainNote_ = msg;
+    sgChainNoteErr_ = true;
 }
 
 void App::drawSigGenChain() {
@@ -174,7 +180,7 @@ void App::drawSigGenChain() {
     if (beginForm("##chainadd", 8.5f)) {
         row("Add", "A SigMF (.sigmf-meta / .sigmf-data) or raw IQ file. Enter or Add reads its metadata.\n"
                    "The first recording also sets the generator's rate and center frequency.");
-        const float addW = ImGui::CalcTextSize("Add").x + st.FramePadding.x * 2;
+        const float addW = filedlg::buttonWidth("Add") + filedlg::buttonWidth("Browse...") + st.ItemInnerSpacing.x;
         ImGui::SetNextItemWidth(-(addW + st.ItemInnerSpacing.x));
         bool add = ImGui::InputText("##chainaddpath", sgChainAdd_, sizeof sgChainAdd_, ImGuiInputTextFlags_EnterReturnsTrue);
         ImGui::SameLine(0, st.ItemInnerSpacing.x);
@@ -182,6 +188,22 @@ void App::drawSigGenChain() {
         if (add) {
             addChainItem(trimmed(sgChainAdd_));
             sgChainAdd_[0] = 0;
+        }
+        ImGui::SameLine(0, st.ItemInnerSpacing.x);
+        if (filedlg::button("Browse...##chainadd", "Choose one or more recordings in a file browser and add them, in order")) {
+            std::vector<std::string> paths;
+            std::string err;
+            const std::string start = sgChainAdd_[0]               ? std::string(sgChainAdd_)
+                                      : !p.chain.empty()           ? p.chain.back().path
+                                      : !sgLastFile_.empty()       ? sgLastFile_
+                                                                   : std::string(sgPrefix_);
+            const filedlg::Result r = filedlg::openFiles("", start, paths, err);
+            if (r == filedlg::Result::Ok) {
+                for (const std::string& path : paths) addChainItem(path);
+                sgChainAdd_[0] = 0;
+            } else if (r == filedlg::Result::Error) {
+                chainNoteError("File browser: " + err);
+            }
         }
         const bool viewerFile = file_ && !liveMode_;
         if (!sgLastFile_.empty() || viewerFile) {
@@ -227,11 +249,23 @@ void App::drawSigGenChain() {
 
         row("Chain file", "Save the chain (recordings, settings, loop count, rate and center) to a .wvtchain.json\n"
                           "file, or load one. Recordings next to the chain file are stored relative to it.");
-        const float bw = ImGui::CalcTextSize("Load").x + ImGui::CalcTextSize("Save").x + st.FramePadding.x * 4;
-        ImGui::SetNextItemWidth(-(bw + st.ItemInnerSpacing.x * 2));
+        const float bw = filedlg::buttonWidth("Load") + filedlg::buttonWidth("Save...") + filedlg::buttonWidth("Browse...");
+        ImGui::SetNextItemWidth(-(bw + st.ItemInnerSpacing.x * 3));
         ImGui::InputTextWithHint("##chainfile", "~/caps/my.wvtchain.json", sgChainFile_, sizeof sgChainFile_);
         ImGui::SameLine(0, st.ItemInnerSpacing.x);
-        if (ImGui::Button("Load##chainfile")) {
+        bool loadChainFile = ImGui::Button("Load##chainfile");
+        ImGui::SameLine(0, st.ItemInnerSpacing.x);
+        if (filedlg::button("Browse...##chainfile", "Choose a chain file in a file browser and load it")) {
+            std::string path, err;
+            const filedlg::Result r = filedlg::openFile("json", sgChainFile_[0] ? sgChainFile_ : sgPrefix_, path, err);
+            if (r == filedlg::Result::Ok) {
+                snprintf(sgChainFile_, sizeof sgChainFile_, "%s", path.c_str());
+                loadChainFile = true;
+            } else if (r == filedlg::Result::Error) {
+                chainNoteError("File browser: " + err);
+            }
+        }
+        if (loadChainFile) {
             WaveformParams q = p;
             std::string err;
             const bool txOn = tx_ && tx_->running();
@@ -251,8 +285,24 @@ void App::drawSigGenChain() {
             }
         }
         ImGui::SameLine(0, st.ItemInnerSpacing.x);
-        ImGui::BeginDisabled(p.chain.empty() || !sgChainFile_[0]);
-        if (ImGui::Button("Save##chainfile")) {
+        // With an empty path, Save asks where in a file browser.
+        const bool askWhere = !sgChainFile_[0] && filedlg::available();
+        ImGui::BeginDisabled(p.chain.empty() || (!sgChainFile_[0] && !askWhere));
+        bool saveChainFile = ImGui::Button(askWhere ? "Save...##chainfile" : "Save##chainfile");
+        ImGui::EndDisabled();
+        tooltipAlways(p.chain.empty() ? "Add recordings first"
+                      : askWhere      ? "Choose where to save the chain in a file browser"
+                                      : "Save the chain to the path in the box");
+        if (saveChainFile && askWhere) {
+            std::string path, err;
+            const std::string dir = filedlg::prefixFolder(sgPrefix_);
+            const std::string start = (dir.empty() ? std::string("~") : dir) + "/my.wvtchain.json";
+            const filedlg::Result r = filedlg::saveFile("", start, path, err);
+            if (r == filedlg::Result::Ok) snprintf(sgChainFile_, sizeof sgChainFile_, "%s", path.c_str());
+            else if (r == filedlg::Result::Error) chainNoteError("File browser: " + err);
+            saveChainFile = r == filedlg::Result::Ok;
+        }
+        if (saveChainFile) {
             std::string path = trimmed(sgChainFile_), err;
             if (path.find(".json") == std::string::npos) path += ".wvtchain.json";
             if (saveChain(path, p, err)) {
@@ -264,7 +314,6 @@ void App::drawSigGenChain() {
                 sgChainNoteErr_ = true;
             }
         }
-        ImGui::EndDisabled();
         ImGui::EndTable();
     }
 

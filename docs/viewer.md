@@ -5,7 +5,14 @@ area of the window shows.
 
 ## Open a file
 
-Give the file on the command line, or type its path in the file row and click **Open**:
+Give the file on the command line, or use one of these procedures:
+
+- Click **File > Open file...** or **Browse...** in the file row, and select the file in the
+  dialog. On Linux, the dialog needs the `zenity` program. Refer to
+  [WVT_WITH_NFD](build.md#wvt_with_nfd).
+- Type the path in the file row and click **Open**.
+
+On the command line:
 
 ```sh
 wvt recording.sigmf-meta

@@ -8,6 +8,7 @@
 
 #include "app/app.h"
 #include "common/build_info.h"
+#include "app/file_dialog.h"
 #include "gpu/gpu.h"
 #include "app/platform_x11.h"
 #include "common/ui_util.h"
@@ -79,16 +80,19 @@ void App::drawMenuBar() {
     if (!ImGui::BeginMenuBar()) return;
     const bool rec = liveRecording();
     if (ImGui::BeginMenu("File")) {
+        const bool browse = filedlg::available();
         if (ImGui::MenuItem("Open file...", nullptr, false, !rec)) {
             if (liveMode_) leaveLive();
-            focusPath_ = true;
+            browseOpenFile();
         }
-        ImGui::SetItemTooltip("Type or paste the path in the File box and press Enter");
+        ImGui::SetItemTooltip(browse ? "Choose a recording or a session file in a file browser.\n"
+                                       "Or type or paste its path in the File box."
+                                     : "Type or paste the path in the File box and press Enter");
         if (ImGui::MenuItem("Export region...", "Ctrl+E", exOpen_, !liveMode_ && file_)) toggleExport();
         if (ImGui::MenuItem("Save plot snapshots...")) openSnapshot();
         if (ImGui::MenuItem("Save file session...", nullptr, false, !liveMode_ && file_)) openSaveSession();
         ImGui::SetItemTooltip("Save the recording, the view, the plot settings and the channel in a file.\n"
-                              "To open it again, type its path in the File box.");
+                              "To open it again, use Open file... or type its path in the File box.");
         ImGui::Separator();
         if (ImGui::MenuItem("Quit", "Ctrl+Q")) quit_ = true;
         ImGui::EndMenu();

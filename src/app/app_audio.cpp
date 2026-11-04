@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "app/app.h"
+#include "app/file_dialog.h"
 #include "common/ui_util.h"
 #include "common/log.h"
 #include "app/platform_x11.h"
@@ -412,7 +413,10 @@ void App::drawAudioWindow() {
     ImGui::SeparatorText("WAV (48 kHz, 16-bit mono)");
     if (beginForm("##auwav", 7.5f)) {
         row("File prefix", "Date, time, frequency and mode are added to the name");
+        ImGui::SetNextItemWidth(-(filedlg::buttonWidth("Folder...") + ImGui::GetStyle().ItemInnerSpacing.x));
         ImGui::InputText("##auprefix", auPrefix_, sizeof auPrefix_);
+        ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+        browsePrefixFolder("Folder...##auprefix", auPrefix_, sizeof auPrefix_);
         ImGui::EndTable();
     }
     const double chanHz = fc_ + au_.offset;

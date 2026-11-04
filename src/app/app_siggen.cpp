@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "app/app.h"
+#include "app/file_dialog.h"
 #include "common/ui_util.h"
 #include "common/log.h"
 #include "app/platform_x11.h"
@@ -508,11 +509,23 @@ void App::drawSigGenPlayback() {
     const float half = (ImGui::GetContentRegionAvail().x - st.ItemInnerSpacing.x) / 2;
 
     row("Recording", "A SigMF (.sigmf-meta / .sigmf-data) or raw IQ file. Enter or Load reads it and its metadata.");
-    const float loadW = ImGui::CalcTextSize("Load").x + st.FramePadding.x * 2;
+    const float loadW = filedlg::buttonWidth("Load") + filedlg::buttonWidth("Browse...") + st.ItemInnerSpacing.x;
     ImGui::SetNextItemWidth(-(loadW + st.ItemInnerSpacing.x));
     bool load = ImGui::InputText("##sgplaypath", sgPlayPath_, sizeof sgPlayPath_, ImGuiInputTextFlags_EnterReturnsTrue);
     ImGui::SameLine(0, st.ItemInnerSpacing.x);
     load |= ImGui::Button("Load##sgplay");
+    ImGui::SameLine(0, st.ItemInnerSpacing.x);
+    if (filedlg::button("Browse...##sgplay", "Choose the recording in a file browser")) {
+        std::string path, err;
+        const std::string start = sgPlayPath_[0] ? sgPlayPath_ : !sgLastFile_.empty() ? sgLastFile_ : sgPrefix_;
+        const filedlg::Result r = filedlg::openFile("", start, path, err);
+        if (r == filedlg::Result::Ok) {
+            snprintf(sgPlayPath_, sizeof sgPlayPath_, "%s", path.c_str());
+            load = true;
+        } else if (r == filedlg::Result::Error) {
+            reportBrowseError(err);
+        }
+    }
     if (load) setPlaybackFile(sgPlayPath_);
 
     // Shortcuts: the generator's last file, and the viewer's file and time markers.
@@ -737,8 +750,11 @@ void App::drawSigGenFile() {
     ImGui::BeginDisabled(active);
     if (beginForm("##sgfile", 8.5f)) {
         row("Save to");
+        ImGui::SetNextItemWidth(-(filedlg::buttonWidth("Folder...") + ImGui::GetStyle().ItemInnerSpacing.x));
         ImGui::InputText("##sgprefix", sgPrefix_, sizeof sgPrefix_);
         tooltipAlways("Path prefix. Date, time, frequency and rate are appended, and missing folders are created.");
+        ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+        browsePrefixFolder("Folder...##sgprefix", sgPrefix_, sizeof sgPrefix_);
 
         row("Samples");
         int fi = 0;
