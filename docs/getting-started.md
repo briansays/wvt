@@ -24,6 +24,9 @@ Install the compiler, CMake and the X11 and OpenGL packages for your system:
 | Arch | `sudo pacman -S base-devel cmake libx11 mesa` |
 | macOS | Install [XQuartz](https://www.xquartz.org) and the Xcode Command Line Tools |
 
+On Linux, also install `zenity` (for example, `sudo apt install zenity`) to choose files in a
+dialog. Without it, you type the paths. Refer to [WVT_WITH_NFD](build.md#wvt_with_nfd).
+
 On macOS, the build links `/opt/X11/lib/libX11` and `libGL` from XQuartz. Thus the binary is a
 real X11 client. On Apple silicon, use the ARM Homebrew (`/opt/homebrew`) for CMake and the
 optional libraries, so that the binary is native ARM. The Intel Homebrew (`/usr/local`) makes an

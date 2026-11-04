@@ -8,6 +8,7 @@
 #include <cstring>
 
 #include "app/app.h"
+#include "app/file_dialog.h"
 #include "common/log.h"
 #include "common/ui_util.h"
 
@@ -248,10 +249,23 @@ void App::drawExportWindow() {
                 exPlan_ = planExtract(c);
             }
         }
-        row("File", "Output path without the extension. Edit it to choose your own name.");
+        row("File", "Output path without the extension. Edit it, or use Browse..., to choose your own name.");
+        ImGui::SetNextItemWidth(-(filedlg::buttonWidth("Browse...") + ImGui::GetStyle().ItemInnerSpacing.x));
         if (ImGui::InputText("##expath", exPath_, sizeof exPath_)) {
             exPathAuto_ = false;
             exPlanAt_ = 0;
+        }
+        ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+        if (filedlg::button("Browse...##expath", "Choose the folder and name in a file browser.\nThe extension is set by the output format.")) {
+            std::string path, err;
+            const filedlg::Result r = filedlg::saveFile("", exPath_, path, err);
+            if (r == filedlg::Result::Ok) {
+                snprintf(exPath_, sizeof exPath_, "%s", path.c_str());
+                exPathAuto_ = false;
+                exPlanAt_ = 0;
+            } else if (r == filedlg::Result::Error) {
+                reportBrowseError(err);
+            }
         }
         if (!exPathAuto_) {
             row("");

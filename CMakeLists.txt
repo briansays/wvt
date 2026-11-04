@@ -23,7 +23,7 @@ elseif(WVT_SANITIZE)
   message(FATAL_ERROR "WVT_SANITIZE must be address, thread or empty (got '${WVT_SANITIZE}')")
 endif()
 if(WVT_SAN_FLAGS)
-  add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX,OBJCXX>:${WVT_SAN_FLAGS};-fno-omit-frame-pointer;-g>")
+  add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:${WVT_SAN_FLAGS};-fno-omit-frame-pointer;-g>")
   add_link_options(${WVT_SAN_FLAGS})
   message(STATUS "wvt: sanitizers enabled (${WVT_SANITIZE}: ${WVT_SAN_FLAGS})")
 endif()
@@ -127,10 +127,40 @@ add_executable(wvt
   src/io/snapshot.cpp
   src/dsp/measure.cpp
   src/app/app_measure.cpp
+  src/app/file_dialog.cpp
   ${FONT_CPP})
 target_include_directories(wvt PRIVATE src third_party/stb ${PLATFORM_INCLUDES})
 target_link_libraries(wvt PRIVATE imgui_implot ${PLATFORM_LIBS} Threads::Threads)
 target_compile_options(wvt PRIVATE ${WVT_WARNINGS})
+
+# Native open / save / folder dialogs through Native File Dialog
+# (third_party/nativefiledialog, with the changes in its WVT_PATCHES.md):
+# the Cocoa panels on macOS, and on Linux the zenity program, so nothing is
+# needed at build time. Without it, or without zenity at run time, the Browse
+# buttons are disabled and paths are typed as before.
+option(WVT_WITH_NFD "Build the native file dialogs (Native File Dialog)" ON)
+if(WVT_WITH_NFD)
+  set(NFD_DIR ${CMAKE_SOURCE_DIR}/third_party/nativefiledialog/src)
+  if(APPLE)
+    enable_language(OBJC)
+    # Upstream uses setAllowedFileTypes:, deprecated since macOS 12.
+    add_library(nfd STATIC ${NFD_DIR}/nfd_common.c ${NFD_DIR}/nfd_cocoa.m)
+    target_compile_options(nfd PRIVATE -Wno-deprecated-declarations)
+    target_link_libraries(nfd PUBLIC "-framework AppKit")
+    target_sources(wvt PRIVATE src/app/file_dialog_mac.m)
+    set(_nfd_what "Cocoa")
+  else()
+    add_library(nfd STATIC ${NFD_DIR}/nfd_common.c ${NFD_DIR}/nfd_zenity.c)
+    set(_nfd_what "zenity, found at run time")
+  endif()
+  # SYSTEM: the folder is named src/, which .clang-tidy's header filter would check.
+  target_include_directories(nfd SYSTEM PUBLIC ${NFD_DIR}/include)
+  target_link_libraries(wvt PRIVATE nfd)
+  target_compile_definitions(wvt PRIVATE WVT_HAVE_NFD)
+  message(STATUS "wvt: native file dialogs enabled (${_nfd_what})")
+else()
+  message(STATUS "wvt: native file dialogs disabled (WVT_WITH_NFD=OFF)")
+endif()
 
 # The git commit and version tag for the About window and the log file
 # header (issue #61). Read at every build, not only at configure time.

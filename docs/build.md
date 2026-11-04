@@ -79,6 +79,7 @@ scripts/build.sh -- -DCMAKE_CUDA_ARCHITECTURES=89  # extra CMake arguments
 | [`WVT_WITH_ZMQ`](#wvt_with_zmq) | `AUTO`, `ON`, `OFF` | `AUTO` | All |
 | [`WVT_ZMQ_SOURCE_DIR`](#wvt_zmq_source_dir) | A folder | Empty | All |
 | [`WVT_WITH_AUDIO`](#wvt_with_audio) | `AUTO`, `ON`, `OFF` | `AUTO` | All |
+| [`WVT_WITH_NFD`](#wvt_with_nfd) | `ON`, `OFF` | `ON` | All |
 | [`WVT_WITH_CUDA`](#wvt_with_cuda) | `AUTO`, `ON`, `OFF` | `AUTO` | Linux |
 | [`WVT_CUDA_STATIC`](#wvt_cuda_static) | `ON`, `OFF` | `ON` | Linux |
 | [`CMAKE_CUDA_ARCHITECTURES`](#cmake_cuda_architectures) | A list of GPU architectures | Refer to the section | Linux |
@@ -243,6 +244,24 @@ Enables or disables audio playback through the bundled miniaudio library.
 - With `OFF`, the audio window cannot play sound. The demodulator and the WAV export still work.
 
 Output: `wvt: audio playback enabled (miniaudio)`.
+
+### WVT_WITH_NFD
+
+Enables or disables the file dialogs through the bundled Native File Dialog library
+(`third_party/nativefiledialog`). With the dialogs, each path box has a **Browse...** or
+**Folder...** button, and **File > Open file...** opens a dialog.
+
+- On macOS, the build links AppKit. The dialogs are the macOS open and save panels.
+- On Linux, the build does not need development packages. At run time, wvt runs the `zenity`
+  program for the dialogs (for example, `sudo apt install zenity`). If wvt does not find `zenity`,
+  the buttons are disabled and their tooltips tell you to install it.
+- With `OFF`, or without `zenity`, you type the paths in the boxes.
+
+A dialog stops the window until you close it. Streams, recordings, audio and transmissions
+continue.
+
+Output: `wvt: native file dialogs enabled (Cocoa)` or
+`wvt: native file dialogs enabled (zenity, found at run time)`.
 
 ### WVT_WITH_CUDA
 

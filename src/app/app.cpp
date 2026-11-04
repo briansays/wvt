@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstring>
 
+#include "app/file_dialog.h"
 #include "imgui_internal.h"
 #include "io/session.h"
 #include "common/log.h"
@@ -142,6 +143,36 @@ bool App::openFile(const std::string& path, const CliOverrides& o) {
     // A session file names a recording and the state to show it in (issue #76).
     if (isSessionFile(path)) return openSession(expandHome(path));
     return openFileOnly(path, o);
+}
+
+void App::browseOpenFile() {
+    if (!filedlg::available()) {
+        focusPath_ = true;
+        return;
+    }
+    std::string path, err;
+    // Start in the open file's folder, or the recordings folder (else home).
+    const std::string start = pathBuf_[0] ? pathBuf_ : recPrefix_;
+    switch (filedlg::openFile("", start, path, err)) {
+        case filedlg::Result::Ok: openFile(path); break;
+        case filedlg::Result::Error: reportBrowseError(err); break;
+        case filedlg::Result::Cancel: break;
+    }
+}
+
+void App::browsePrefixFolder(const char* label, char* prefix, size_t size) {
+    if (!filedlg::button(label, "Choose the folder in a file browser (the name part is kept)")) return;
+    std::string folder, err;
+    switch (filedlg::pickFolder(filedlg::prefixFolder(prefix), folder, err)) {
+        case filedlg::Result::Ok: snprintf(prefix, size, "%s", filedlg::withFolder(prefix, folder).c_str()); break;
+        case filedlg::Result::Error: reportBrowseError(err); break;
+        case filedlg::Result::Cancel: break;
+    }
+}
+
+void App::reportBrowseError(const std::string& err) {
+    LOG_WARN("app", "file browser: %s", err.c_str());
+    status_ = "File browser: " + err;
 }
 
 bool App::openFileOnly(const std::string& path, const CliOverrides& o) {
@@ -539,8 +570,11 @@ void App::frame() {
 void App::drawEmptyState(float height) {
     ImGui::BeginChild("##empty", ImVec2(0, height), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
     const char* title = "No recording open";
-    const char* body = "Type or paste the path of an IQ recording in the File box and press Enter.\n"
-                       "SigMF files and gqrx names set the format and the rate; for a raw file, set them above.";
+    const bool browse = filedlg::available();
+    const char* body = browse ? "Choose an IQ recording with Open file..., or type or paste its path in the File box.\n"
+                                "SigMF files and gqrx names set the format and the rate; for a raw file, set them above."
+                              : "Type or paste the path of an IQ recording in the File box and press Enter.\n"
+                                "SigMF files and gqrx names set the format and the rate; for a raw file, set them above.";
     const ImGuiStyle& st = ImGui::GetStyle();
     const float bodyW = ImGui::CalcTextSize(body).x;
     const float blockH = ImGui::GetTextLineHeightWithSpacing() * 4 + ImGui::GetFrameHeight();
@@ -552,8 +586,8 @@ void App::drawEmptyState(float height) {
     ImGui::Spacing();
     ImGui::TextDisabled("%s", body);
     ImGui::Spacing();
-    if (ImGui::Button("Open file...")) focusPath_ = true;
-    ImGui::SetItemTooltip("Put the cursor in the File box");
+    if (ImGui::Button("Open file...")) browseOpenFile();
+    ImGui::SetItemTooltip(browse ? "Choose a recording or a session file in a file browser" : "Put the cursor in the File box");
     ImGui::SameLine(0, st.ItemSpacing.x * 2);
     if (ImGui::Button("Stream from a device")) enterLive();
     ImGui::SetItemTooltip("Switch the source to Device (also: Source in the menu bar)");
@@ -582,6 +616,8 @@ void App::drawToolbar() {
     ImGui::SameLine(0, st.ItemInnerSpacing.x);
     if (ImGui::Button("Open")) openFile(pathBuf_);
     ImGui::SetItemTooltip("Open the path typed in the File box (Enter also works).\nSigMF .sigmf-meta/.sigmf-data, gqrx names and common extensions are auto-detected.");
+    ImGui::SameLine(0, st.ItemInnerSpacing.x);
+    if (filedlg::button("Browse...##file", "Choose a recording or a session file in a file browser")) browseOpenFile();
 
     // The sample format and its rarely changed details, in one drop-down.
     std::string fmtSummary = formatName(fp_.fmt);

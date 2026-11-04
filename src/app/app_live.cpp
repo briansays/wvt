@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "app/app.h"
+#include "app/file_dialog.h"
 #include "common/log.h"
 #include "app/platform_x11.h"
 #include "net/zmq_wire.h"
@@ -668,7 +669,10 @@ void App::drawRecordBar() {
         ImGui::BeginDisabled(rec);
         if (beginForm("##recform", 5.5f, 30)) {
             row("Record to", "Path prefix for recordings. Date, time, frequency and rate are appended,\ne.g. ~/wvt-recordings/wvt_20261016_142233_915.000MHz_2.4MSps.sigmf-data.\nMissing folders are created.");
+            ImGui::SetNextItemWidth(-(filedlg::buttonWidth("Folder...") + ImGui::GetStyle().ItemInnerSpacing.x));
             ImGui::InputText("##recprefix", recPrefix_, sizeof recPrefix_);
+            ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+            browsePrefixFolder("Folder...##recprefix", recPrefix_, sizeof recPrefix_);
             row("Format", "SigMF: .sigmf-data + .sigmf-meta with rate, frequency, retunes and dropped-sample notes.\nRaw: bare samples; rate and frequency are in the file name.");
             int fmt = recCfg_.sigmf ? 0 : 1;
             const char* fmts[] = {"SigMF", "Raw"};

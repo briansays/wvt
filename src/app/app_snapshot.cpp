@@ -7,6 +7,7 @@
 #include <cmath>
 
 #include "app/app.h"
+#include "app/file_dialog.h"
 #include "imgui_internal.h"
 #include "implot_internal.h"
 #include "common/log.h"
@@ -96,6 +97,13 @@ void App::drawSnapshotWindow() {
     ImGui::TextUnformatted("Folder");
     ImGui::SetNextItemWidth(ImGui::GetFontSize() * 26);
     ImGui::InputText("##snapdir", snapDir_, sizeof snapDir_);
+    ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+    if (filedlg::button("Browse...##snapdir", "Choose the folder in a file browser")) {
+        std::string folder, err;
+        const filedlg::Result r = filedlg::pickFolder(snapDir_, folder, err);
+        if (r == filedlg::Result::Ok) snprintf(snapDir_, sizeof snapDir_, "%s", filedlg::withFolder("", folder).c_str());
+        else if (r == filedlg::Result::Error) snapErr_ = "File browser: " + err;
+    }
     const std::string dir = expandHome(snapDir_);
     const std::string base = snapshotBase(liveMode_ || !file_ ? "" : file_->path());
     const int n = nextSnapshotIndex(dir, base);
