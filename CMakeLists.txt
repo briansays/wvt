@@ -106,6 +106,7 @@ add_executable(wvt
   src/device/live.cpp
   src/net/zmq_wire.cpp
   src/net/zmq_pub.cpp
+  src/net/zmq_format.cpp
   src/io/recorder.cpp
   src/device/sdr_device.cpp
   src/device/sdr_sim.cpp
@@ -885,14 +886,16 @@ endif()
 
 # ZMQ streaming self-test (issue #96): the wire format in every build; with
 # ZMQ also the sockets, the publisher, and a zmq device in a live engine
-add_executable(zmq_check tools/zmq_check.cpp src/net/zmq_wire.cpp src/net/zmq_pub.cpp src/common/log.cpp)
+add_executable(zmq_check tools/zmq_check.cpp src/net/zmq_wire.cpp src/net/zmq_pub.cpp src/net/zmq_format.cpp
+  src/common/paths.cpp src/io/iq_file.cpp src/common/json.cpp src/common/log.cpp)
 target_include_directories(zmq_check PRIVATE src)
+target_compile_definitions(zmq_check PRIVATE WVT_CONFIG_EXAMPLES="${CMAKE_SOURCE_DIR}/config")
 target_link_libraries(zmq_check PRIVATE Threads::Threads)
 target_compile_options(zmq_check PRIVATE ${WVT_WARNINGS})
 if(WVT_ZMQ_OK)
   target_sources(zmq_check PRIVATE src/device/sdr_zmq.cpp src/device/live.cpp src/io/recorder.cpp src/device/sdr_device.cpp
-    src/device/sdr_sim.cpp src/device/sdr_siggen.cpp src/siggen/siggen.cpp src/siggen/siggen_out.cpp src/common/json.cpp
-    src/dsp/engine.cpp src/io/iq_file.cpp src/dsp/dsp.cpp src/common/ui_util.cpp)
+    src/device/sdr_sim.cpp src/device/sdr_siggen.cpp src/siggen/siggen.cpp src/siggen/siggen_out.cpp
+    src/dsp/engine.cpp src/dsp/dsp.cpp src/common/ui_util.cpp)
   target_link_libraries(zmq_check PRIVATE wvt_zmq wvt_gpu imgui_implot)
   target_compile_definitions(zmq_check PRIVATE WVT_HAVE_ZMQ)
 endif()
@@ -958,7 +961,9 @@ if(WVT_FUZZ)
   set(_fuzz_parse_si src/common/ui_util.cpp src/common/log.cpp)
   set(_fuzz_config src/app/config.cpp src/common/paths.cpp src/net/zmq_wire.cpp)
   set(_fuzz_zmq_wire src/net/zmq_wire.cpp)
-  foreach(_f json chain meta parse_si config zmq_wire)
+  set(_fuzz_zmq_format src/net/zmq_format.cpp src/net/zmq_wire.cpp src/common/paths.cpp src/io/iq_file.cpp src/common/json.cpp
+    src/common/log.cpp)
+  foreach(_f json chain meta parse_si config zmq_wire zmq_format)
     add_executable(fuzz_${_f} tools/fuzz/fuzz_${_f}.cpp ${_fuzz_${_f}})
     target_include_directories(fuzz_${_f} PRIVATE src tools/fuzz)
     target_compile_options(fuzz_${_f} PRIVATE ${_fuzz_flags} ${WVT_WARNINGS})
@@ -970,5 +975,5 @@ if(WVT_FUZZ)
     file(GLOB _seeds "${CMAKE_SOURCE_DIR}/tools/fuzz/corpus/${_f}/*")
     add_test(NAME fuzz_${_f}_seeds COMMAND fuzz_${_f} ${_seeds})
   endforeach()
-  message(STATUS "wvt: libFuzzer targets enabled (fuzz_json, fuzz_chain, fuzz_meta, fuzz_parse_si, fuzz_config, fuzz_zmq_wire)")
+  message(STATUS "wvt: libFuzzer targets enabled (fuzz_json, fuzz_chain, fuzz_meta, fuzz_parse_si, fuzz_config, fuzz_zmq_wire, fuzz_zmq_format)")
 endif()

@@ -14,7 +14,7 @@ The source files are in folders in `src/`, one folder for each function:
 | `src/gpu/` | The GPU interface and the CUDA, Metal and stub backends |
 | `src/siggen/` | The signal generator and its outputs |
 | `src/audio/` | The audio demodulator, the audio sessions and the sound output |
-| `src/net/` | The network stream (issue #96): the message format, the stream address |
+| `src/net/` | The network stream (issue #96): the message format, the stream address; the message formats from `zmq_*.ini` files (issue #101) |
 
 An include names the folder, relative to `src/`, for example `#include "common/log.h"`. `src/` is
 the only include folder for the project files. `src/common/` does not include files from other
@@ -79,6 +79,7 @@ folders.
 | `src/device/sdr_tx.h` | The transmitter interface. `sdr_uhd.cpp` implements it for UHD |
 | `src/net/zmq_wire.*` | The network stream (issue #96): the message header, the info message, the stream address, the default address, the sample index tracker. No libzmq |
 | `src/net/zmq_pub.*` | The network stream publisher: a lossy reader of the sample ring that sends it on a ZMQ RADIO socket |
+| `src/net/zmq_format.*` | The message formats from `zmq_*.ini` files (issue #101): the INI reader, the format checks, the list of formats in the config folder, and the decoder with the sample conversions. No libzmq |
 
 ## Signal generator
 

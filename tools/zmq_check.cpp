@@ -2,6 +2,9 @@
 //  - The wire format (src/net/zmq_wire): the header, the info message, the
 //    rejection of bad messages, the stream address, the default address and
 //    the sample index tracker. These need no libzmq and run in every build.
+//  - The message formats from files (src/net/zmq_format, issue #101): the
+//    example files in config/, the built-in format as a file, the field
+//    types, the sample conversions and the errors of bad files. No libzmq.
 //  - With WVT_HAVE_ZMQ: the libzmq that wvt links has the draft RADIO and
 //    DISH sockets, and one message of the largest size that wvt sends goes
 //    through udp:// on the loopback.
@@ -27,8 +30,15 @@
 #include <vector>
 
 #include "common/sample_ring.h"
+#include "net/zmq_format.h"
 #include "net/zmq_pub.h"
 #include "net/zmq_wire.h"
+
+#include <sys/stat.h>
+#include <unistd.h>
+
+#include <complex>
+#include <cstdlib>
 
 #ifdef WVT_HAVE_ZMQ
 #include <unistd.h>
@@ -343,6 +353,265 @@ void checkTracker() {
     t.reset();
     r = at(100, 8);
     check(r.event == E::First, "after reset: first again");
+}
+
+// ---- message formats (issue #101) -----------------------------------------
+
+#ifndef WVT_CONFIG_EXAMPLES
+#define WVT_CONFIG_EXAMPLES "config"
+#endif
+
+// Parses a format from text; err gets the error.
+bool formatFrom(const std::string& text, StreamFormat& f, std::string& err, std::vector<std::string>* warn = nullptr) {
+    std::vector<std::string> w;
+    f = StreamFormat{};
+    err.clear();
+    const bool ok = parseStreamFormat(text, "test.ini", f, w, err);
+    if (warn) *warn = std::move(w);
+    return ok;
+}
+
+bool decodes(const StreamFormat& f, const std::vector<uint8_t>& msg, StreamMessage& m, std::vector<uint8_t>& scratch,
+             std::string* whyOut = nullptr, FormatExtra* extraOut = nullptr) {
+    FormatExtra extra;
+    std::string why;
+    const bool ok = decodeStreamMessage(f, msg.data(), msg.size(), m, extra, scratch, why);
+    if (whyOut) *whyOut = why;
+    if (extraOut) *extraOut = extra;
+    return ok;
+}
+
+void putBE(std::vector<uint8_t>& v, size_t at, uint64_t x, int n) {
+    for (int i = 0; i < n; ++i) v[at + (size_t)i] = (uint8_t)(x >> (8 * (n - 1 - i)));
+}
+
+int16_t i16At(const uint8_t* p, size_t i) {
+    int16_t v = 0;
+    memcpy(&v, p + 2 * i, 2);
+    return v;
+}
+
+void checkFormats() {
+    printf("message formats (issue #101)\n");
+    std::string err, why;
+    std::vector<std::string> warn;
+    StreamMessage m;
+    std::vector<uint8_t> scratch;
+
+    // The built-in format is always there.
+    const auto none = scanStreamFormats("");
+    check(none.size() == 1 && none[0].ok() && none[0].format.builtin && none[0].format.id == "wvt",
+          "no config folder: only the built-in format");
+    check(findStreamFormat(none, "WVT") == &none[0] && !findStreamFormat(none, "other"), "find by id, any case");
+
+    // The examples in config/.
+    const auto list = scanStreamFormats(WVT_CONFIG_EXAMPLES);
+    bool allOk = list.size() == 5;
+    std::string bad;
+    for (const auto& e : list) {
+        if (!e.ok() || !e.warnings.empty()) {
+            allOk = false;
+            bad += " " + e.format.id + ": " + e.error + (e.warnings.empty() ? "" : e.warnings[0]);
+        }
+    }
+    check(allOk, "the 4 example files load without errors or warnings" + bad);
+    const auto* gr = findStreamFormat(list, "gnuradio_sub_cf32");
+    const auto* raw = findStreamFormat(list, "raw_pull_ci16");
+    const auto* ex = findStreamFormat(list, "example_header");
+    const auto* wf = findStreamFormat(list, "wvt_ci16");
+    check(gr && raw && ex && wf && list[1].format.id == "example_header", "ids from the file names, sorted");
+    if (!gr || !raw || !ex || !wf) return;
+    check(gr->format.socket == FormatSocket::Sub && gr->format.tcp && !gr->format.bind && gr->format.frame == 0 &&
+              gr->format.address == "127.0.0.1:5555" && gr->format.name == "GNU Radio PUB Sink (cf32)",
+          "GNU Radio: sub, tcp, connect, the last frame, the address and the name");
+    check(raw->format.socket == FormatSocket::Pull && raw->format.fixedRate == 1e6 && raw->format.fixedFc == 433.92e6,
+          "raw PULL: pull, the rate and frequency from [stream]");
+
+    // The built-in format and the same format as a file decode a ci16 message the same.
+    {
+        StreamHeader h = sampleHeader();
+        h.count = 5;
+        h.flags = 0;
+        std::vector<uint8_t> msg = dataMessage(h);
+        for (size_t i = 0; i < 10; ++i) {
+            const auto v = (int16_t)(1000 * (int)i - 4000);
+            memcpy(msg.data() + kStreamHeaderBytes + 2 * i, &v, 2);
+        }
+        StreamMessage a, b;
+        std::vector<uint8_t> s1, s2;
+        FormatExtra xa, xb;
+        const bool okA = decodes(builtinStreamFormat(), msg, a, s1, nullptr, &xa);
+        const bool okB = decodes(wf->format, msg, b, s2, &why, &xb);
+        check(okA && okB && a.h.fc == b.h.fc && a.h.rate == b.h.rate && a.h.gain == b.h.gain && a.h.index == b.h.index &&
+                  a.h.count == b.h.count && a.h.timeNs == b.h.timeNs && a.h.fmt == b.h.fmt && xa.hasIndex && xb.hasIndex &&
+                  a.sampleBytes == b.sampleBytes && memcmp(a.samples, b.samples, a.sampleBytes) == 0,
+              "zmq_wvt_ci16.ini decodes a wvt message like the built-in format " + why);
+        check(b.samples == msg.data() + kStreamHeaderBytes, "little-endian ci16: the samples are not copied");
+        h.fmt = SampleFormat::CU8;
+        check(!decodes(wf->format, dataMessage(h), b, s2, &why) && why.find("match.format") != std::string::npos,
+              "a cu8 wvt message does not match the ci16 file: " + why);
+        const auto info = packStreamInfo(sampleHeader(), {"uhd", "B205mini"});
+        check(!decodes(wf->format, info, b, s2, &why) && why.find("match.kind") != std::string::npos,
+              "an info message does not match: " + why);
+    }
+
+    // The example header: big-endian fields, a scale, a counter, big-endian ci16.
+    {
+        std::vector<uint8_t> msg(32 + 3 * 4, 0);
+        memcpy(msg.data(), "ABCD", 4);
+        msg[4] = 1;
+        putBE(msg, 8, 77, 4);
+        double fc = 2.4e9;
+        uint64_t bits = 0;
+        memcpy(&bits, &fc, 8);
+        putBE(msg, 12, bits, 8);
+        putBE(msg, 20, 2400, 4);  // kS/s
+        putBE(msg, 24, 1793750400000000000ULL, 8);
+        const int16_t vals[6] = {1, -2, 300, -400, 32767, -32768};
+        for (size_t i = 0; i < 6; ++i) putBE(msg, 32 + 2 * i, (uint16_t)vals[i], 2);
+        FormatExtra x;
+        const bool ok = decodes(ex->format, msg, m, scratch, &why, &x);
+        bool same = ok && m.sampleBytes == 12;
+        for (size_t i = 0; same && i < 6; ++i) same = i16At(m.samples, i) == vals[i];
+        check(ok && m.h.fc == 2.4e9 && m.h.rate == 2.4e6 && m.h.gain == 0 && m.h.count == 3 && x.hasSeq && x.seq == 77 &&
+                  !x.hasIndex && m.h.timeNs == 1793750400000000000ULL && m.h.fmt == SampleFormat::CI16,
+              "example header: fc f64be, rate u32be * 1e3, seq, time " + why);
+        check(same, "big-endian ci16 samples become little-endian ci16");
+        msg[0] = 'X';
+        check(!decodes(ex->format, msg, m, scratch, &why) && why.find("match.magic") != std::string::npos,
+              "another magic: " + why);
+        msg[0] = 'A';
+        msg[4] = 2;
+        check(!decodes(ex->format, msg, m, scratch, &why) && why.find("match.type") != std::string::npos,
+              "another type: " + why);
+        msg[4] = 1;
+        msg.resize(31);
+        check(!decodes(ex->format, msg, m, scratch, &why) && why.find("too short") != std::string::npos,
+              "shorter than the header: " + why);
+    }
+
+    // Raw cf32: no header, the rate from the file.
+    {
+        std::vector<uint8_t> msg(8 * 4);
+        const float v[8] = {0.5f, -0.5f, 0.25f, 1, 0, 0, -1, 0.125f};
+        memcpy(msg.data(), v, sizeof v);
+        const bool ok = decodes(gr->format, msg, m, scratch, &why);
+        check(ok && m.h.count == 4 && m.h.rate == 2e6 && m.h.fc == 100e6 && m.samples == msg.data() &&
+                  m.h.fmt == SampleFormat::CF32,
+              "raw cf32: 4 samples in place, rate and fc from the file " + why);
+        msg.resize(7);
+        check(!decodes(gr->format, msg, m, scratch, &why) && why.find("whole samples") != std::string::npos,
+              "7 bytes are not whole samples: " + why);
+        msg.assign(gr->format.maxBytes + 8, 0);
+        check(!decodes(gr->format, msg, m, scratch, &why) && why.find("too large") != std::string::npos,
+              "larger than max_bytes: " + why);
+    }
+
+    // Conversions: Q/I order, ci8 and cf64 to cf32, a count field, signed matches.
+    {
+        StreamFormat f;
+        check(formatFrom("[socket]\ntype = pull\n[samples]\nformat = cu8\norder = qi\n[stream]\nrate = 1e6\n", f, err),
+              "cu8, order qi " + err);
+        const std::vector<uint8_t> qi = {1, 2, 3, 4};
+        check(decodes(f, qi, m, scratch) && m.h.fmt == SampleFormat::CU8 && m.sampleBytes == 4 && m.samples[0] == 2 &&
+                  m.samples[1] == 1 && m.samples[2] == 4 && m.samples[3] == 3,
+              "cu8 Q/I becomes I/Q");
+        check(formatFrom("[socket]\ntype = pull\n[samples]\nformat = ci8\n[stream]\nrate = 1e6\n", f, err), "ci8 " + err);
+        const std::vector<uint8_t> c8 = {64, (uint8_t)-64};
+        std::complex<float> c{};
+        const bool ok8 = decodes(f, c8, m, scratch);
+        if (ok8) memcpy(&c, m.samples, sizeof c);
+        check(ok8 && m.h.fmt == SampleFormat::CF32 && m.sampleBytes == 8 && c == std::complex<float>(0.5f, -0.5f),
+              "ci8 becomes cf32 (64 -> 0.5)");
+        check(formatFrom("[socket]\ntype = pull\n[samples]\nformat = cf64\nendian = big\n[stream]\nrate = 1e6\n", f, err),
+              "cf64 big endian " + err);
+        std::vector<uint8_t> c64(16);
+        const double re = 0.75, im = -0.25;
+        uint64_t b1 = 0, b2 = 0;
+        memcpy(&b1, &re, 8);
+        memcpy(&b2, &im, 8);
+        putBE(c64, 0, b1, 8);
+        putBE(c64, 8, b2, 8);
+        const bool ok64 = decodes(f, c64, m, scratch);
+        if (ok64) memcpy(&c, m.samples, sizeof c);
+        check(ok64 && c == std::complex<float>(0.75f, -0.25f), "cf64 big endian becomes cf32");
+
+        check(formatFrom("[socket]\ntype = sub\n[header]\nbytes = 4\ncount = u16le @ 0\nmatch.m = i16be @ 2 == -2\n"
+                         "[samples]\nformat = ci16\n[stream]\nrate = 1e6\n",
+                         f, err),
+              "a count field and a signed match " + err);
+        check(f.matches.size() == 1 && f.matches[0].bytes == std::string("\xff\xfe", 2), "i16be -2 is the bytes ff fe");
+        std::vector<uint8_t> msg = {2, 0, 0xff, 0xfe, 1, 0, 2, 0, 3, 0, 4, 0, 9, 9, 9, 9};
+        check(decodes(f, msg, m, scratch) && m.h.count == 2 && m.sampleBytes == 8, "count 2: the rest of the message is not used");
+        msg[0] = 4;
+        check(!decodes(f, msg, m, scratch, &why) && why.find("count") != std::string::npos, "count 4 does not fit: " + why);
+    }
+
+    // Files with errors and warnings.
+    {
+        const std::string ok = "[socket]\ntype = sub\n[samples]\nformat = cf32\n[stream]\nrate = 1e6\n";
+        StreamFormat f;
+        struct Bad {
+            std::string text, want, what;
+        };
+        const Bad bads[] = {
+            {"[samples]\nformat = cf32\n[stream]\nrate = 1e6\n", "type is missing", "no socket type"},
+            {"[socket]\ntype = dish\ntransport = tcp\n[samples]\nformat = cf32\n[stream]\nrate = 1e6\n",
+             "dish works only", "dish on tcp"},
+            {"[socket]\ntype = pull\ntransport = udp\n[samples]\nformat = cf32\n[stream]\nrate = 1e6\n",
+             "udp works only", "pull on udp"},
+            {"[socket]\ntype = dish\nmode = connect\n[samples]\nformat = cf32\n[stream]\nrate = 1e6\n",
+             "mode = bind", "dish that connects"},
+            {"[socket]\ntype = sub\n[samples]\nformat = cf32\n", "rate is missing", "no rate"},
+            {"[socket]\ntype = sub\n[stream]\nrate = 1e6\n", "format is missing", "no sample format"},
+            {ok + "[samples]\nformat = ci12\n", "ci12", "an unknown sample format"},
+            {ok + "[header]\nbytes = 8\nfc = f64le @ 4\n", "outside the header", "a field outside the header"},
+            {ok + "[header]\nbytes = 4\nmatch.m = \"ABCDE\" @ 0\n", "outside the header", "a match outside the header"},
+            {ok + "[header]\nbytes = 8\nfc = u24le @ 0\n", "unknown type", "an unknown field type"},
+            {ok + "[header]\nbytes = 8\nindex = u64le @ 0 * 2\n", "scale is allowed only", "a scale on index"},
+            {ok + "[header]\nbytes = 8\ncount = f32le @ 0\n", "integer type", "a float count"},
+            {ok + "[header]\nbytes = 8\nmatch.m = u8 @ 0 == 256\n", "does not fit", "a match value too large"},
+            {ok + "[header]\nbytes = 16\nindex = u64le @ 0\nseq = u32le @ 8\n", "not both", "index and seq"},
+            {"[socket]\ntype = sub\n[samples]\nformat = cf32\n[stream]\nrate = 2.4M\n", "not a number", "2.4M"},
+            {"type = sub\n", "before the first [section]", "a key before a section"},
+            {"[socket]\ntype = router\n", "not dish, sub or pull", "an unknown socket type"},
+            {ok + "[header]\nfc = f64le 0\n", "TYPE @ OFFSET", "a field without @"},
+        };
+        for (const Bad& b : bads)
+            check(!formatFrom(b.text, f, err) && err.find(b.want) != std::string::npos, "error: " + b.what + ": " + err);
+        check(formatFrom(ok + "[socket]\naddres = 1.2.3.4:5\n[extra]\nx = 1\n", f, err, &warn) && warn.size() == 2 &&
+                  warn[0].find("did you mean 'address'") != std::string::npos && warn[1].find("[extra]") != std::string::npos,
+              "warnings: a typo with a suggestion, an unknown section");
+        check(formatFrom(ok, f, err) && f.tcp && !f.bind && f.name == "test.ini", "sub defaults: tcp, connect, the file name");
+        check(formatFrom(ok + "[format]\nname = \"A # B\"   # comment\n", f, err) && f.name == "A # B",
+              "a quoted value keeps its #; the comment after it is removed");
+    }
+
+    // A folder with a bad file and a file that takes the built-in name.
+    {
+        const char* tmp = getenv("TMPDIR");
+        const std::string dir = std::string(tmp && *tmp ? tmp : "/tmp") + "/wvt_zmq_formats_" + std::to_string(getpid());
+        mkdir(dir.c_str(), 0755);
+        auto write = [&](const char* name, const char* text) {
+            if (FILE* fp = fopen((dir + "/" + name).c_str(), "w")) {
+                fputs(text, fp);
+                fclose(fp);
+            }
+        };
+        write("zmq_bad.ini", "[socket]\ntype = dish\ntransport = tcp\n");
+        write("zmq_wvt.ini", "[socket]\ntype = sub\n[samples]\nformat = cf32\n[stream]\nrate = 1e6\n");
+        write("zmq_good.ini", "[socket]\ntype = sub\n[samples]\nformat = cf32\n[stream]\nrate = 1e6\n");
+        write("other.ini", "not a format");
+        const auto l = scanStreamFormats(dir);
+        const auto* b = findStreamFormat(l, "bad");
+        const auto* g = findStreamFormat(l, "good");
+        check(l.size() == 4 && b && !b->ok() && b->error.find("zmq_bad.ini") != std::string::npos && g && g->ok(),
+              "a bad file is listed with its error; other.ini is not a format file");
+        check(l[3].format.id == "wvt" && !l[3].ok() && l[3].error.find("taken") != std::string::npos,
+              "zmq_wvt.ini cannot take the built-in name: " + (l.size() > 3 ? l[3].error : std::string()));
+        for (const char* n : {"zmq_bad.ini", "zmq_wvt.ini", "zmq_good.ini", "other.ini"}) unlink((dir + "/" + n).c_str());
+        rmdir(dir.c_str());
+    }
 }
 
 #ifdef WVT_HAVE_ZMQ
@@ -764,6 +1033,7 @@ int main() {
     checkAddress();
     checkDefaultAddress();
     checkTracker();
+    checkFormats();
 #ifdef WVT_HAVE_ZMQ
     checkSockets();
     checkPublisher();
