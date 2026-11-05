@@ -127,3 +127,51 @@ bool decodeStreamMessage(const StreamFormat& f, const uint8_t* p, size_t n, Stre
 
 // The text of a field type ("u32be"), for messages and checks.
 const char* fieldTypeName(FieldType t, bool bigEndian);
+
+// The config folder where the subscriber finds the format files. main sets
+// it at start (configFindDir); empty = no folder: only the built-in format.
+void setStreamFormatDir(const std::string& dir);
+std::string streamFormatDir();
+
+// The format with this id ("" = "wvt") from streamFormatDir(). False (err
+// set) when there is no such format or its file has an error.
+bool resolveStreamFormat(const std::string& id, StreamFormat& f, std::string& err);
+
+// Where the subscriber receives, for format f: `typed` (the Address field),
+// else the format's address, else (dish only) the default address.
+//   dish:     "a.b.c.d[:port]" or "iface;group[:port]" (parseStreamAddress)
+//   sub/pull: "host:port"; "*:port" binds on all interfaces (mode = bind)
+// A "udp://" or "tcp://" before it must fit the transport.
+struct FormatEndpoint {
+    std::string endpoint;  // for zmq_bind / zmq_connect: "udp://...", "tcp://..."
+    std::string text;      // for messages: "127.0.0.1:5555"
+    int port = 0;
+    StreamAddress udp;     // dish only
+};
+bool formatEndpoint(const StreamFormat& f, const std::string& typed, FormatEndpoint& out, std::string& err);
+
+// Follows a message counter ([header] seq) of `bits` bits, which wraps. A
+// counter that jumps far, or goes back by more than a few messages, is a
+// source that started again.
+class MessageCounter {
+public:
+    enum class Event { First, InOrder, Lost, Late, Restart };
+    struct Result {
+        Event event = Event::First;
+        uint64_t lost = 0;  // messages, for Lost
+    };
+    explicit MessageCounter(int bits = 64);
+    Result next(uint64_t seq);
+    void reset() { started_ = false; }
+
+    static constexpr uint64_t kMaxLost = 1000000;  // a larger jump forward is a restart
+    static constexpr uint64_t kMaxLate = 1000;     // a larger jump back is a restart
+
+private:
+    uint64_t mask_;
+    bool started_ = false;
+    uint64_t expected_ = 0;
+};
+
+// The bits of a field type (for MessageCounter).
+int fieldTypeBits(FieldType t);

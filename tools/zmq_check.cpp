@@ -49,6 +49,9 @@
 
 #include "common/json.h"
 #include "device/live.h"
+#include "device/sdr_device.h"
+
+#include <mutex>
 #endif
 
 namespace {
@@ -612,6 +615,71 @@ void checkFormats() {
         for (const char* n : {"zmq_bad.ini", "zmq_wvt.ini", "zmq_good.ini", "other.ini"}) unlink((dir + "/" + n).c_str());
         rmdir(dir.c_str());
     }
+
+    // The format by id from the config folder.
+    {
+        StreamFormat f;
+        setStreamFormatDir(WVT_CONFIG_EXAMPLES);
+        check(resolveStreamFormat("", f, err) && f.builtin && resolveStreamFormat("WVT", f, err) && f.builtin,
+              "\"\" and \"wvt\" are the built-in format");
+        check(resolveStreamFormat("gnuradio_sub_cf32", f, err) && f.socket == FormatSocket::Sub, "a file by its id");
+        check(!resolveStreamFormat("nope", f, err) && err.find("no ZMQ format 'nope'") != std::string::npos,
+              "an unknown id: " + err);
+        setStreamFormatDir("");
+        check(!resolveStreamFormat("gnuradio_sub_cf32", f, err) && err.find("no config folder") != std::string::npos,
+              "no config folder: only the built-in format: " + err);
+    }
+
+    // Where the subscriber receives.
+    {
+        FormatEndpoint ep;
+        check(formatEndpoint(builtinStreamFormat(), "", ep, err) && ep.endpoint.rfind("udp://", 0) == 0 &&
+                  ep.udp.port == kStreamDefaultPort,
+              "built-in, no address: the default address on udp (" + ep.endpoint + ")");
+        check(formatEndpoint(builtinStreamFormat(), "udp://239.1.2.3:7000", ep, err) && ep.udp.multicast &&
+                  ep.endpoint == "udp://239.1.2.3:7000",
+              "built-in: udp:// before a multicast group");
+        check(!formatEndpoint(builtinStreamFormat(), "tcp://1.2.3.4:5", ep, err) && err.find("not tcp") != std::string::npos,
+              "built-in: tcp:// is refused: " + err);
+        StreamFormat sub;
+        formatFrom("[socket]\ntype = sub\naddress = 10.0.0.5:5555\n[samples]\nformat = cf32\n[stream]\nrate = 1e6\n", sub,
+                   err);
+        check(formatEndpoint(sub, "", ep, err) && ep.endpoint == "tcp://10.0.0.5:5555" && ep.port == 5555,
+              "sub: the address of the file");
+        check(formatEndpoint(sub, "tcp://host.local:6000", ep, err) && ep.endpoint == "tcp://host.local:6000" &&
+                  ep.text == "host.local:6000",
+              "sub: a typed tcp:// address with a host name");
+        check(!formatEndpoint(sub, "udp://1.2.3.4:5", ep, err) && err.find("not udp") != std::string::npos,
+              "sub: udp:// is refused: " + err);
+        check(!formatEndpoint(sub, "1.2.3.4", ep, err) && err.find("host:port") != std::string::npos, "no port: " + err);
+        check(!formatEndpoint(sub, "1.2.3.4:70000", ep, err), "port 70000 is refused");
+        check(!formatEndpoint(sub, "*:5555", ep, err) && err.find("mode = bind") != std::string::npos,
+              "* with connect: " + err);
+        sub.address.clear();
+        check(!formatEndpoint(sub, "", ep, err) && err.find("no address") != std::string::npos, "sub without an address: " + err);
+        StreamFormat pull;
+        formatFrom("[socket]\ntype = pull\nmode = bind\n[samples]\nformat = cf32\n[stream]\nrate = 1e6\n", pull, err);
+        check(formatEndpoint(pull, "*:5556", ep, err) && ep.endpoint == "tcp://*:5556", "pull that binds: *:port");
+    }
+
+    // The message counter.
+    {
+        MessageCounter c(8);
+        using E = MessageCounter::Event;
+        bool order = c.next(250).event == E::First;
+        for (uint64_t s = 251; s < 256 + 3; ++s) order = order && c.next(s).event == E::InOrder;  // wraps at 256
+        check(order, "8 bits: 250 to 255, then 0, 1, 2 in order");
+        auto r = c.next(6);
+        check(r.event == E::Lost && r.lost == 3, "3 to 5 missing: 3 messages lost");
+        check(c.next(6).event == E::Late && c.next(5).event == E::Late, "a repeat and an older message: late");
+        check(c.next(7).event == E::InOrder, "then in order again");
+        MessageCounter w(64);
+        w.next(100000);
+        check(w.next(100000 - 5000).event == E::Restart, "64 bits: 5000 back is a restart");
+        check(w.next(95001 + 2000000).event == E::Restart, "2 000 000 ahead is a restart");
+        check(w.next(95001 + 2000001).event == E::InOrder, "then in order from there");
+        check(fieldTypeBits(FieldType::U16) == 16 && fieldTypeBits(FieldType::I64) == 64, "field type bits");
+    }
 }
 
 #ifdef WVT_HAVE_ZMQ
@@ -683,6 +751,288 @@ void checkSockets() {
     zmq_close(radio);
     zmq_close(dish);
     zmq_ctx_term(ctx);
+}
+
+// ---- the subscriber with format files (issue #101) -------------------------
+
+// Sends messages from its own thread on a socket that binds on the loopback.
+// make(seq) gives the frames of message `seq`; no frames: skip that seq.
+class Sender {
+public:
+    using Make = std::function<std::vector<std::vector<uint8_t>>(uint64_t seq)>;
+    explicit Sender(int type) : ctx_(zmq_ctx_new()) {
+        sock_ = zmq_socket(ctx_, type);
+        if (sock_ && zmq_bind(sock_, "tcp://127.0.0.1:*") == 0) {
+            char buf[256] = {};
+            size_t len = sizeof buf;
+            zmq_getsockopt(sock_, ZMQ_LAST_ENDPOINT, buf, &len);
+            endpoint_ = buf;
+        }
+    }
+    ~Sender() {
+        stop();
+        const int linger = 0;
+        if (sock_) zmq_setsockopt(sock_, ZMQ_LINGER, &linger, sizeof linger);
+        if (sock_) zmq_close(sock_);
+        zmq_ctx_term(ctx_);
+    }
+    Sender(const Sender&) = delete;
+    Sender& operator=(const Sender&) = delete;
+    // "127.0.0.1:port", for the Address field.
+    std::string address() const { return endpoint_.size() > 6 ? endpoint_.substr(6) : std::string(); }
+    void run(Make make, int periodMs = 1) {
+        th_ = std::thread([this, make = std::move(make), periodMs] {
+            for (uint64_t seq = 0; !stop_; ++seq) {
+                const auto frames = make(seq);
+                for (size_t i = 0; i < frames.size(); ++i) {
+                    const int flags = ZMQ_DONTWAIT | (i + 1 < frames.size() ? ZMQ_SNDMORE : 0);
+                    zmq_send(sock_, frames[i].data(), frames[i].size(), flags);
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(periodMs));
+            }
+        });
+    }
+    void stop() {
+        stop_ = true;
+        if (th_.joinable()) th_.join();
+    }
+
+private:
+    void* ctx_;
+    void* sock_ = nullptr;
+    std::string endpoint_;
+    std::thread th_;
+    std::atomic<bool> stop_{false};
+};
+
+// What a started device delivered.
+struct Received {
+    std::mutex m;
+    std::vector<uint8_t> bytes;
+    std::vector<int64_t> gaps;
+    std::vector<std::string> gapWhy;
+};
+
+void startInto(SdrDevice& dev, Received& rx, int bytesPerSample) {
+    std::string err;
+    dev.start(
+        [&rx, bytesPerSample](const uint8_t* p, int64_t n) {
+            std::lock_guard<std::mutex> lk(rx.m);
+            rx.bytes.insert(rx.bytes.end(), p, p + n * bytesPerSample);
+        },
+        [&rx](int64_t lost, const char* why) {
+            std::lock_guard<std::mutex> lk(rx.m);
+            rx.gaps.push_back(lost);
+            rx.gapWhy.emplace_back(why);
+        },
+        err);
+}
+
+bool waitFor(const std::function<bool()>& ok, double seconds) {
+    const auto end = std::chrono::steady_clock::now() + std::chrono::duration<double>(seconds);
+    while (std::chrono::steady_clock::now() < end) {
+        if (ok()) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return ok();
+}
+
+size_t receivedBytes(Received& rx) {
+    std::lock_guard<std::mutex> lk(rx.m);
+    return rx.bytes.size();
+}
+
+void checkFormatDevice() {
+    printf("subscriber with format files (issue #101)\n");
+    setStreamFormatDir(WVT_CONFIG_EXAMPLES);
+    std::string err;
+    StreamConfig cfg;
+    cfg.driver = "zmq";
+
+    // 1. GNU Radio PUB Sink: raw cf32 on PUB / SUB.
+    {
+        constexpr int n = 64;
+        Sender tx(ZMQ_PUB);
+        tx.run([](uint64_t) {
+            std::vector<float> v(2 * n);
+            for (int k = 0; k < n; ++k) {
+                v[2 * (size_t)k] = 0.01f * (float)k;
+                v[2 * (size_t)k + 1] = -0.01f * (float)k;
+            }
+            std::vector<uint8_t> b(v.size() * sizeof(float));
+            memcpy(b.data(), v.data(), b.size());
+            return std::vector<std::vector<uint8_t>>{b};
+        });
+        cfg.format = "gnuradio_sub_cf32";
+        cfg.args = tx.address();
+        auto dev = openDevice(cfg, err);
+        check(dev && dev->sampleRate() == 2e6 && dev->centerFreq() == 100e6 && dev->format() == SampleFormat::CF32,
+              "GNU Radio cf32 on SUB: opens with the rate and frequency of the file " + err);
+        if (dev) {
+            check(dev->description().find("GNU Radio PUB Sink") != std::string::npos, "the description: " + dev->description());
+            Received rx;
+            startInto(*dev, rx, 8);
+            const bool got = waitFor([&] { return receivedBytes(rx) >= 10 * n * 8; }, 3);
+            dev->stop();
+            bool same = got;
+            for (int k = 0; same && k < n; ++k) {
+                float iq[2];
+                memcpy(iq, rx.bytes.data() + 8 * (size_t)k, 8);
+                same = iq[0] == 0.01f * (float)k && iq[1] == -0.01f * (float)k;
+            }
+            check(got && same, "the samples arrive as sent (" + std::to_string(rx.bytes.size() / 8) + " samples)");
+            check(rx.gaps.empty(), "no format field for loss: no gaps");
+        }
+    }
+
+    // 2. Raw ci16 on PUSH / PULL.
+    {
+        constexpr int n = 32;
+        Sender tx(ZMQ_PUSH);
+        tx.run([](uint64_t) {
+            std::vector<int16_t> v(2 * n);
+            for (int k = 0; k < n; ++k) {
+                v[2 * (size_t)k] = (int16_t)k;
+                v[2 * (size_t)k + 1] = (int16_t)-k;
+            }
+            std::vector<uint8_t> b(v.size() * 2);
+            memcpy(b.data(), v.data(), b.size());
+            return std::vector<std::vector<uint8_t>>{b};
+        });
+        cfg.format = "raw_pull_ci16";
+        cfg.args = tx.address();
+        auto dev = openDevice(cfg, err);
+        check(dev && dev->sampleRate() == 1e6 && dev->format() == SampleFormat::CI16, "raw ci16 on PULL: opens " + err);
+        if (dev) {
+            Received rx;
+            startInto(*dev, rx, 4);
+            const bool got = waitFor([&] { return receivedBytes(rx) >= 10 * n * 4; }, 3);
+            dev->stop();
+            bool same = got;
+            for (size_t k = 0; same && k < 3 * (size_t)n; ++k)
+                same = i16At(rx.bytes.data(), 2 * k) == (int16_t)(k % n) && i16At(rx.bytes.data(), 2 * k + 1) == -(int16_t)(k % n);
+            check(got && same, "PUSH / PULL loses nothing: the samples in order");
+        }
+    }
+
+    // 3. The example header: two frames (a topic, then the message), a
+    //    message counter with gaps, big-endian ci16.
+    {
+        Sender tx(ZMQ_PUB);
+        tx.run([](uint64_t seq) {
+            if (seq % 10 == 5) return std::vector<std::vector<uint8_t>>{};  // lost: the counter skips one
+            std::vector<uint8_t> msg(32 + 3 * 4, 0);
+            memcpy(msg.data(), "ABCD", 4);
+            msg[4] = 1;
+            putBE(msg, 8, seq, 4);
+            const double fc = 2.4e9;
+            uint64_t bits = 0;
+            memcpy(&bits, &fc, 8);
+            putBE(msg, 12, bits, 8);
+            putBE(msg, 20, 500, 4);  // 500 kS/s
+            for (size_t i = 0; i < 6; ++i) putBE(msg, 32 + 2 * i, (uint16_t)(int16_t)(i + 1), 2);
+            return std::vector<std::vector<uint8_t>>{{'i', 'q'}, msg};
+        });
+        cfg.format = "example_header";
+        cfg.args = tx.address();
+        auto dev = openDevice(cfg, err);
+        check(dev && dev->sampleRate() == 5e5 && dev->centerFreq() == 2.4e9, "example header, two frames: opens " + err);
+        if (dev) {
+            Received rx;
+            startInto(*dev, rx, 4);
+            const bool got = waitFor(
+                [&] {
+                    std::lock_guard<std::mutex> lk(rx.m);
+                    return rx.gaps.size() >= 3;
+                },
+                3);
+            dev->stop();
+            bool gapsOk = got;
+            for (size_t i = 0; i < rx.gaps.size(); ++i) gapsOk = gapsOk && rx.gaps[i] == 3 && rx.gapWhy[i] == "network loss";
+            check(gapsOk, "each skipped counter value is a gap of 3 samples (" + std::to_string(rx.gaps.size()) + " gaps)");
+            check(rx.bytes.size() >= 12 && i16At(rx.bytes.data(), 0) == 1 && i16At(rx.bytes.data(), 5) == 6,
+                  "big-endian samples arrive little-endian");
+        }
+    }
+
+    // 4. Messages that are not of the format; no source; errors before the socket.
+    {
+        Sender tx(ZMQ_PUB);
+        tx.run([](uint64_t) { return std::vector<std::vector<uint8_t>>{{'h', 'e', 'l', 'l', 'o'}}; });
+        cfg.format = "example_header";
+        cfg.args = tx.address();
+        check(!openDevice(cfg, err) && err.find("none is of the format") != std::string::npos, "other messages: " + err);
+    }
+    {
+        std::string free;
+        {
+            Sender probe(ZMQ_PUSH);  // a port that was free a moment ago
+            free = probe.address();
+        }
+        cfg.format = "raw_pull_ci16";
+        cfg.args = free;
+        check(!openDevice(cfg, err) && err.find("no message from tcp://" + free) != std::string::npos, "no source: " + err);
+    }
+    cfg.format = "nope";
+    cfg.args.clear();
+    check(!openDevice(cfg, err) && err.find("no ZMQ format 'nope'") != std::string::npos, "an unknown format: " + err);
+    cfg.format = "gnuradio_sub_cf32";
+    cfg.args = "localhost";
+    check(!openDevice(cfg, err) && err.find("host:port") != std::string::npos, "an address without a port: " + err);
+
+    // 5. A sample index in the header: exact loss, then a new rate.
+    {
+        const char* tmp = getenv("TMPDIR");
+        const std::string dir = std::string(tmp && *tmp ? tmp : "/tmp") + "/wvt_zmq_dev_" + std::to_string(getpid());
+        mkdir(dir.c_str(), 0755);
+        if (FILE* fp = fopen((dir + "/zmq_idx.ini").c_str(), "w")) {
+            fputs("[socket]\ntype = sub\n[header]\nbytes = 16\nindex = u64le @ 0\nrate = f64le @ 8\n"
+                  "[samples]\nformat = ci16\n",
+                  fp);
+            fclose(fp);
+        }
+        setStreamFormatDir(dir);
+        std::atomic<bool> newRate{false};
+        Sender tx(ZMQ_PUB);
+        tx.run([&newRate](uint64_t seq) {
+            if (seq % 7 == 3) return std::vector<std::vector<uint8_t>>{};  // lost: 4 samples
+            std::vector<uint8_t> msg(16 + 4 * 4, 0);
+            const uint64_t index = seq * 4;
+            const double rate = newRate ? 2e6 : 1e6;
+            memcpy(msg.data(), &index, 8);
+            memcpy(msg.data() + 8, &rate, 8);
+            return std::vector<std::vector<uint8_t>>{msg};
+        });
+        cfg.format = "idx";
+        cfg.args = tx.address();
+        err.clear();
+        auto dev = openDevice(cfg, err);
+        check(dev && dev->sampleRate() == 1e6, "a format with a sample index: opens " + err);
+        if (dev) {
+            Received rx;
+            startInto(*dev, rx, 4);
+            waitFor(
+                [&] {
+                    std::lock_guard<std::mutex> lk(rx.m);
+                    return rx.gaps.size() >= 3;
+                },
+                3);
+            bool gapsOk = true;
+            {
+                std::lock_guard<std::mutex> lk(rx.m);
+                gapsOk = rx.gaps.size() >= 3;
+                for (int64_t g : rx.gaps) gapsOk = gapsOk && g == 4;
+            }
+            check(gapsOk, "the sample index gives the exact loss: 4 samples per lost message");
+            newRate = true;
+            check(waitFor([&] { return dev->fatalError().find("another rate") != std::string::npos; }, 3),
+                  "a new rate in the header stops the device: " + dev->fatalError());
+            dev->stop();
+        }
+        unlink((dir + "/zmq_idx.ini").c_str());
+        rmdir(dir.c_str());
+    }
+    setStreamFormatDir("");
 }
 
 // The test pattern: sample k of the ring is (k & 0x7fff, (k >> 15) & 0x7fff).
@@ -872,15 +1222,6 @@ void checkPublisher() {
     printf("  (the small ring made the publisher skip %lld of 200000 samples)\n", (long long)s2.skipped);
 }
 
-bool waitFor(const std::function<bool()>& ok, double seconds) {
-    const auto end = std::chrono::steady_clock::now() + std::chrono::duration<double>(seconds);
-    while (!ok()) {
-        if (std::chrono::steady_clock::now() >= end) return false;
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-    return true;
-}
-
 bool contains(const std::string& s, const char* what) { return s.find(what) != std::string::npos; }
 
 void checkSubscriber() {
@@ -1038,6 +1379,7 @@ int main() {
     checkSockets();
     checkPublisher();
     checkSubscriber();
+    checkFormatDevice();
 #else
     printf("libzmq: not in this build (WVT_WITH_ZMQ), the socket tests are skipped\n");
     StreamPublisher pub;

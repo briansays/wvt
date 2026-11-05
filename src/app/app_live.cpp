@@ -58,6 +58,15 @@ bool sameStreamAddress(const std::string& a, const std::string& b) {
            parseStreamAddress(b.empty() ? defaultStreamAddress() : b, y, err) && x.ip == y.ip && x.port == y.port;
 }
 
+// True when the live device receives the built-in wvt stream on the address
+// that the publisher sends to. Other formats (issue #101) are not checked:
+// SUB and PULL use tcp, which the publisher does not, and a format file with
+// a DISH would need its file read here, on each frame.
+bool receivesOwnStream(const StreamConfig& c, const std::string& pubAddress) {
+    const bool builtin = c.format.empty() || c.format == "wvt";
+    return c.driver == "zmq" && builtin && sameStreamAddress(c.args, pubAddress);
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -211,7 +220,7 @@ bool App::startPublishing(const PublishConfig& cfg) {
     snprintf(pubAddr_, sizeof pubAddr_, "%s", cfg.address.c_str());
     pubTtl_ = cfg.ttl;
     std::string err;
-    if (live_ && live_->running() && live_->config().driver == "zmq" && sameStreamAddress(live_->config().args, cfg.address))
+    if (live_ && live_->running() && receivesOwnStream(live_->config(), cfg.address))
         err = "the stream would come back to this wvt: the device receives on that address";
     else if (!live_ || !live_->running())
         err = "start a device before publishing";
@@ -586,7 +595,7 @@ void App::drawPublishBar() {
     if (pubWasActive_ && !ps.active && !ps.error.empty()) pubErr_ = ps.error;
     pubWasActive_ = ps.active;
     if (!pubAddr_[0]) snprintf(pubAddr_, sizeof pubAddr_, "%s", defaultStreamAddress().c_str());
-    const bool loop = running && live_->config().driver == "zmq" && sameStreamAddress(live_->config().args, pubAddr_);
+    const bool loop = running && receivesOwnStream(live_->config(), pubAddr_);
 
     flow(ImGui::CalcTextSize("Stop publishing").x + ImGui::GetStyle().FramePadding.x * 2 + ImGui::GetFrameHeight() * 1.5f);
     if (!ps.active) {

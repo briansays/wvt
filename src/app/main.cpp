@@ -28,6 +28,7 @@
 #include "common/paths.h"
 #include "app/platform_x11.h"
 #include "common/ui_util.h"
+#include "net/zmq_format.h"
 #include "net/zmq_wire.h"
 
 extern const unsigned char g_embedded_font[];
@@ -520,6 +521,7 @@ int main(int argc, char** argv) {
         return 2;
     }
     for (const auto& w : cfgWarnings) LOG_WARN("config", "%s", w.c_str());
+    setStreamFormatDir(cfgDir.path);  // the zmq_*.ini message formats (issue #101)
     if (cfgDir.path.empty()) LOG_DEBUG("config", "no config folder");
     else LOG_INFO("config", "config folder %s (%s)", cfgDir.path.c_str(), cfgDir.why.c_str());
     if (const std::string note = configUnusedNote(cfgDir); !note.empty()) LOG_INFO("config", "%s", note.c_str());

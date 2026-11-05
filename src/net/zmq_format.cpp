@@ -10,6 +10,7 @@
 #include <fstream>
 #include <initializer_list>
 #include <limits>
+#include <mutex>
 #include <set>
 #include <sstream>
 
@@ -744,4 +745,121 @@ bool decodeStreamMessage(const StreamFormat& f, const uint8_t* p, size_t n, Stre
     m.samples = count ? scratch.data() : nullptr;
     m.sampleBytes = scratch.size();
     return true;
+}
+
+namespace {
+std::mutex gDirMutex;
+std::string gDir;  // guarded by gDirMutex
+}  // namespace
+
+void setStreamFormatDir(const std::string& dir) {
+    std::lock_guard<std::mutex> lk(gDirMutex);
+    gDir = dir;
+}
+
+std::string streamFormatDir() {
+    std::lock_guard<std::mutex> lk(gDirMutex);
+    return gDir;
+}
+
+bool resolveStreamFormat(const std::string& id, StreamFormat& f, std::string& err) {
+    if (id.empty() || lower(id) == "wvt") {
+        f = builtinStreamFormat();
+        return true;
+    }
+    const std::string dir = streamFormatDir();
+    const auto list = scanStreamFormats(dir);
+    const StreamFormatEntry* e = findStreamFormat(list, id);
+    if (!e) {
+        err = "no ZMQ format '" + id + "' (" + (dir.empty() ? "no config folder" : "no zmq_" + id + ".ini in " + dir) + ")";
+        return false;
+    }
+    if (!e->ok()) {
+        err = "ZMQ format '" + id + "': " + e->error;
+        return false;
+    }
+    f = e->format;
+    return true;
+}
+
+bool formatEndpoint(const StreamFormat& f, const std::string& typed, FormatEndpoint& out, std::string& err) {
+    out = FormatEndpoint{};
+    std::string t = trim(typed.empty() ? f.address : typed);
+    const bool dish = f.socket == FormatSocket::Dish;
+    for (const char* scheme : {"udp://", "tcp://"}) {
+        if (t.rfind(scheme, 0) == 0) {
+            const bool udp = scheme[0] == 'u';
+            if (udp != dish) {
+                err = std::string("the format '") + f.name + "' receives on " + (dish ? "udp" : "tcp") + ", not " +
+                      (udp ? "udp" : "tcp");
+                return false;
+            }
+            t = t.substr(6);
+        }
+    }
+    if (dish) {
+        if (t.empty()) t = defaultStreamAddress();
+        if (!parseStreamAddress(t, out.udp, err)) return false;
+        out.endpoint = out.udp.endpoint();
+        out.text = out.udp.text();
+        out.port = out.udp.port;
+        return true;
+    }
+    if (t.empty()) {
+        err = "no address: type host:port in the Address field" +
+              (f.path.empty() ? std::string() : ", or set address in [socket] of " + f.path);
+        return false;
+    }
+    const size_t colon = t.rfind(':');
+    const std::string host = colon == std::string::npos ? t : t.substr(0, colon);
+    const std::string port = colon == std::string::npos ? "" : t.substr(colon + 1);
+    uint64_t p = 0;
+    bool neg = false;
+    if (port.empty() || port.find_first_not_of("0123456789") != std::string::npos || !parseWhole(port, false, p, neg) ||
+        p < 1 || p > 65535) {
+        err = "'" + t + "': write host:port, e.g. 127.0.0.1:5555";
+        return false;
+    }
+    if (host.empty() || host.find_first_of(" \t;/") != std::string::npos) {
+        err = "'" + t + "': bad host '" + host + "'";
+        return false;
+    }
+    if (host == "*" && !f.bind) {
+        err = "'" + t + "': * (all interfaces) is for mode = bind; to connect, type the source's address";
+        return false;
+    }
+    out.port = (int)p;
+    out.text = host + ":" + std::to_string(p);
+    out.endpoint = "tcp://" + out.text;
+    return true;
+}
+
+int fieldTypeBits(FieldType t) { return 8 * typeBytes(t); }
+
+MessageCounter::MessageCounter(int bits) : mask_(bits >= 64 ? ~0ULL : (1ULL << bits) - 1) {}
+
+MessageCounter::Result MessageCounter::next(uint64_t seq) {
+    Result r;
+    seq &= mask_;
+    if (!started_) {
+        started_ = true;
+        expected_ = (seq + 1) & mask_;
+        r.event = Event::First;
+        return r;
+    }
+    const uint64_t ahead = (seq - expected_) & mask_;  // 0 = in order
+    const uint64_t behind = (expected_ - seq) & mask_;  // 1 = a repeat of the last message
+    if (ahead == 0) {
+        r.event = Event::InOrder;
+    } else if (behind <= kMaxLate && behind <= mask_ / 2) {
+        r.event = Event::Late;
+        return r;  // expected_ stays
+    } else if (ahead <= kMaxLost && ahead <= mask_ / 2) {
+        r.event = Event::Lost;
+        r.lost = ahead;
+    } else {
+        r.event = Event::Restart;
+    }
+    expected_ = (seq + 1) & mask_;
+    return r;
 }
