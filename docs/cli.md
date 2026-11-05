@@ -39,13 +39,16 @@ Refer to [Configuration file](config.md).
 | Option | Function |
 |---|---|
 | `--config FILE` | Read this configuration file. If it does not exist, wvt stops |
+| `--config-dir DIR` | Use this config folder. If it does not exist, wvt stops |
 | `--no-config` | Read no configuration file. wvt uses the built-in defaults |
-| `--write-config FILE` | Write a configuration file with all the keys, then stop. `-` writes to the terminal |
+| `--write-config [FILE]` | Write a configuration file with all the keys, then stop. `-` writes to the terminal. Without FILE: `wvt.conf` in the config folder |
 | `--force` | With `--write-config`: replace a file that exists |
 | `--show-config` | Show each setting, its value and its source, then stop |
 
-Without `--config`, wvt reads `$WVT_CONFIG`. If that is not set, wvt reads
-`$XDG_CONFIG_HOME/wvt/wvt.conf` or `~/.config/wvt/wvt.conf`, if the file exists.
+Without `--config`, wvt reads `$WVT_CONFIG`. If that is not set, wvt reads `wvt.conf` in the
+config folder, if the file exists. The config folder is the first that exists of `--config-dir`,
+`config/` next to the program, `config/` in the folder above it, and `~/.config/wvt/`. Refer to
+[The config folder](config.md#the-config-folder).
 
 The SDR profiles of the file (`sdr.N.*`) also apply on the command line:
 

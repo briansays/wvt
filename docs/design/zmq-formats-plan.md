@@ -1,6 +1,6 @@
 # Plan: ZMQ message formats from configuration files (issue #101)
 
-Status: planned (2026-11-05). Not started.
+Status: phase 1 (config folder) implemented on `zmq-formats` (2026-11-05). Phases 2 to 6 not started.
 
 ## 1. Goal
 

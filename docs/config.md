@@ -8,14 +8,33 @@ GPU and a profile for each SDR. wvt reads the file when it starts.
 1. Write a file with all the keys and their defaults:
 
    ```sh
-   wvt --write-config ~/.config/wvt/wvt.conf
+   wvt --write-config
    ```
 
+   wvt writes `wvt.conf` in the [config folder](#the-config-folder). If there is no config folder,
+   wvt makes `~/.config/wvt/` and writes the file there. To write another file, give its name:
+   `wvt --write-config FILE`.
+
 2. Open the file in a text editor and change the values that you need.
-3. Start wvt. The log shows `read ~/.config/wvt/wvt.conf: N settings`.
+3. Start wvt. The log shows `read <folder>/wvt.conf: N settings`.
 
 wvt does not replace a file that exists. To replace it, add `--force`. To show the file on the
-terminal, use `--write-config -`.
+terminal, use `--write-config -`. In the repository, `config/wvt.conf.example` is a copy of the file
+with the defaults.
+
+## The config folder
+
+The config folder holds the user configuration files of wvt: `wvt.conf`, and later other files
+such as ZMQ message formats. wvt uses the first of these folders that exists, and only that one:
+
+1. The `--config-dir DIR` option. If the folder does not exist, wvt stops.
+2. `config/` in the folder of the program.
+3. `config/` in the folder above the program. When you run wvt from a build folder in the
+   repository (for example `build/wvt`), this is the repository's `config/` folder.
+4. `~/.config/wvt/`.
+
+If wvt uses a folder in item 1, 2 or 3 and `~/.config/wvt/` also has configuration files, the log
+and `--show-config` tell you that wvt does not use them.
 
 ## Where wvt finds the file
 
@@ -23,12 +42,14 @@ wvt uses the first of these items:
 
 1. The `--config FILE` option.
 2. The `WVT_CONFIG` environment variable.
-3. `$XDG_CONFIG_HOME/wvt/wvt.conf`.
-4. `~/.config/wvt/wvt.conf`.
+3. `wvt.conf` in the [config folder](#the-config-folder).
 
-If you give the file with `--config` or `WVT_CONFIG` and the file does not exist, wvt stops. If the
-file in item 3 or 4 does not exist, wvt uses the built-in defaults. To read no file, use
-`--no-config`.
+If you give the file with `--config` or `WVT_CONFIG` and the file does not exist, wvt stops. If
+there is no config folder, or the folder has no `wvt.conf`, wvt uses the built-in defaults. To read
+no file, use `--no-config`.
+
+wvt does not read `$XDG_CONFIG_HOME/wvt/wvt.conf`. If you keep the file there, move it to
+`~/.config/wvt/wvt.conf` or to a config folder.
 
 ## The order of the settings
 
@@ -49,6 +70,7 @@ To see each value and its source, use `--show-config`:
 
 ```text
 $ WVT_GPU=off wvt --scale 1.5 --show-config
+# config folder: /home/user/.config/wvt (home folder)
 # configuration file: /home/user/.config/wvt/wvt.conf
 fft.size              = 4096                            wvt.conf:14
 gpu                   = off                             $WVT_GPU

@@ -36,6 +36,7 @@ folders.
 | `src/common/log.*` | The logger |
 | `src/common/build_info.h` | The git commit and version tag. `cmake/build_info.cmake` writes the definitions at each build |
 | `src/common/json.*` | The JSON module: a small reader (chain files, SigMF metadata) and the writer functions `jsonQuote` and `jsonNumber` |
+| `src/common/paths.*` | File system helpers: the folder of the program, folder and file tests, a sorted file list. The config folder search uses them |
 | `src/io/snapshot.*`, `src/app/app_snapshot.cpp` | Plot snapshots: names, crop, PNG writer, the snapshot window and the capture |
 
 ## File viewer and signal processing

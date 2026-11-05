@@ -25,6 +25,7 @@
 #include "imgui.h"
 #include "implot.h"
 #include "common/log.h"
+#include "common/paths.h"
 #include "app/platform_x11.h"
 #include "common/ui_util.h"
 #include "net/zmq_wire.h"
@@ -37,6 +38,9 @@ static volatile sig_atomic_t g_interrupted = 0;
 // Records and / or publishes (issue #96) from a device without a window.
 // Prints progress once a second. With a recording, the run ends when the
 // recording ends (--record-duration); publishing ends with it.
+// The value that a bare --write-config gets: wvt.conf in the config folder.
+static char kWriteConfigDefault[] = "\x01config-folder";
+
 static int runHeadless(const StreamConfig& dev, const RecordConfig* rc, const PublishConfig* pub) {
     LiveEngine live(nullptr);
     std::string err;
@@ -461,12 +465,16 @@ int main(int argc, char** argv) {
     const std::vector<std::string> cmdLine(argv, argv + argc);  // before the option parsers take theirs
     WvtConfig cfg;
     std::vector<std::string> cfgWarnings;
-    std::string cfgOption, cfgFile, cfgErr;
+    std::string cfgOption, cfgDirOption, cfgFile, cfgErr;
+    ConfigDir cfgDir;  // the config folder (issue #101)
     bool noConfig = false;
-    if (configTakeArgs(args, cfgOption, noConfig, cfgErr) && !noConfig) {
+    if (configTakeArgs(args, cfgOption, cfgDirOption, noConfig, cfgErr) &&
+        configFindDir(cfgDirOption, executableDir(), cfgDir, cfgErr) && !noConfig) {
         bool required = false;
-        cfgFile = configPath(cfgOption, required);
-        if (required || access(cfgFile.c_str(), F_OK) == 0) {
+        cfgFile = configPath(cfgOption, cfgDir, required);
+        if (cfgFile.empty()) {
+            // no config folder and no --config: the built-in defaults
+        } else if (required || access(cfgFile.c_str(), F_OK) == 0) {
             if (!loadConfigFile(cfgFile, cfg, cfgWarnings, cfgErr) && !required) {
                 cfgWarnings.push_back(cfgErr);  // the default file exists but cannot be read
                 cfgErr.clear();
@@ -512,11 +520,21 @@ int main(int argc, char** argv) {
         return 2;
     }
     for (const auto& w : cfgWarnings) LOG_WARN("config", "%s", w.c_str());
+    if (cfgDir.path.empty()) LOG_DEBUG("config", "no config folder");
+    else LOG_INFO("config", "config folder %s (%s)", cfgDir.path.c_str(), cfgDir.why.c_str());
+    if (const std::string note = configUnusedNote(cfgDir); !note.empty()) LOG_INFO("config", "%s", note.c_str());
     if (noConfig) LOG_INFO("config", "no configuration file (--no-config)");
     else if (cfgFile.empty()) LOG_DEBUG("config", "no configuration file; built-in defaults");
     else LOG_INFO("config", "read %s: %zu settings", cfgFile.c_str(), cfg.origin.size());
     if (const char* e = envVar("WVT_GPU"); e && *e && !parseGpuMode(e, gpuMode))
         LOG_WARN("main", "WVT_GPU=%s is not auto, on or off; using auto", e);
+    // --write-config without FILE (the last word, or an option after it; "-"
+    // alone is the terminal): the parser wants a value, so give it a marker.
+    for (size_t i = 1; i < args.size(); ++i) {
+        if (std::strcmp(args[i], "--write-config") != 0) continue;
+        const char* next = i + 1 < args.size() ? args[i + 1] : nullptr;
+        if (!next || (next[0] == '-' && next[1] != '\0')) args.insert(args.begin() + (std::ptrdiff_t)i + 1, kWriteConfigDefault);
+    }
     argc = (int)args.size();
     args.push_back(nullptr);
     argv = args.data();
@@ -623,11 +641,16 @@ int main(int argc, char** argv) {
              "print log messages to the console: debug | info | warn | error\n(default info; without -v only warnings and errors print)");
     cli.note(nullptr, "--log-dir", "DIR", "log file folder (default $WVT_LOG_DIR, then $TMPDIR, then /tmp)");
     cli.note(nullptr, "--no-log-file", nullptr, "don't write wvt_log_<date>_<time>.log");
-    cli.note(nullptr, "--config", "FILE", "configuration file (default $WVT_CONFIG, then ~/.config/wvt/wvt.conf)");
+    cli.note(nullptr, "--config", "FILE", "configuration file (default $WVT_CONFIG, then wvt.conf in the config folder)");
+    cli.note(nullptr, "--config-dir", "DIR",
+             "config folder (default: the first that exists of config/ next to the program,\n"
+             "config/ in the folder above it, ~/.config/wvt)");
     cli.note(nullptr, "--no-config", nullptr, "read no configuration file: the built-in defaults");
     std::string writeConfig;
     bool showConfig = false, forceWrite = false;
-    cli.add(nullptr, "--write-config", "FILE", "write a configuration file with every key (- = the terminal) and exit",
+    cli.add(nullptr, "--write-config", "[FILE]",
+            "write a configuration file with every key and exit\n"
+            "(- = the terminal; no FILE = wvt.conf in the config folder, else ~/.config/wvt/wvt.conf)",
             text(writeConfig));
     cli.add(nullptr, "--force", nullptr, "with --write-config: replace an existing file", flag(forceWrite));
     cli.add(nullptr, "--show-config", nullptr, "print each setting, its value and where it came from, and exit",
@@ -1064,7 +1087,9 @@ int main(int argc, char** argv) {
             fputs(text.c_str(), stdout);
             return 0;
         }
-        const std::string out = expandHome(writeConfig);
+        const std::string out = writeConfig == kWriteConfigDefault
+                                    ? configJoin(cfgDir.path.empty() ? configHomeDir() : cfgDir.path, "wvt.conf")
+                                    : expandHome(writeConfig);
         if (access(out.c_str(), F_OK) == 0 && !forceWrite) {
             LOG_ERROR("config", "%s exists; add --force to replace it", out.c_str());
             return 2;
@@ -1131,6 +1156,8 @@ int main(int argc, char** argv) {
             const bool env = envVar(tx ? "WVT_TX_ALLOW" : "WVT_TX_MAX_GAIN") && *envVar(tx ? "WVT_TX_ALLOW" : "WVT_TX_MAX_GAIN");
             if (env || given(tx ? "--tx-allow" : "--tx-max-gain")) from[k] = "the strictest of the file, the environment and the options";
         }
+        printf("# config folder: %s\n", cfgDir.path.empty() ? "none" : (cfgDir.path + " (" + cfgDir.why + ")").c_str());
+        if (const std::string note = configUnusedNote(cfgDir); !note.empty()) printf("# %s\n", note.c_str());
         printf("# configuration file: %s\n", noConfig ? "none (--no-config)" : cfgFile.empty() ? "none" : cfgFile.c_str());
         fputs(configShowText(eff, from).c_str(), stdout);
         return 0;

@@ -132,17 +132,38 @@ void parseConfig(const std::string& text, const std::string& name, WvtConfig& cf
 // Reads and parses a file. False (err set) when it cannot be read.
 bool loadConfigFile(const std::string& path, WvtConfig& cfg, std::vector<std::string>& warnings, std::string& err);
 
-// The file to read: `option` (--config) if given, else $WVT_CONFIG, else
-// $XDG_CONFIG_HOME/wvt/wvt.conf, else ~/.config/wvt/wvt.conf. `required` is
-// true when the user named the file (option or $WVT_CONFIG): then a missing
-// file is an error, else it is skipped.
-std::string configPath(const std::string& option, bool& required);
+// The config folder (issue #101): it holds wvt.conf and the other user
+// configuration files (zmq_*.ini). wvt uses the first of these that exists,
+// and only that one:
+//   1. --config-dir DIR
+//   2. <program folder>/config
+//   3. <program folder>/../config   (the repository's config/ from build/)
+//   4. ~/.config/wvt
+struct ConfigDir {
+    std::string path;  // empty: no folder exists
+    std::string why;   // "--config-dir", "next to the program", "above the program", "home folder"
+};
+// The home folder entry: ~/.config/wvt.
+std::string configHomeDir();
+// Finds the folder. `exeDir` is the program folder (executableDir(); a
+// parameter for the checks). False (err set) only when --config-dir names a
+// folder that does not exist.
+bool configFindDir(const std::string& option, const std::string& exeDir, ConfigDir& out, std::string& err);
+// When wvt uses a folder other than ~/.config/wvt and that folder has wvt.conf
+// or zmq_*.ini files, a line that says they are not used; else empty.
+std::string configUnusedNote(const ConfigDir& dir);
 
-// Takes --config FILE, --config=FILE and --no-config out of args (args[0] is
-// the program name), as logParseArgs does for the log options, so that the
-// file is read before the log starts. False (err set) when --config has no
-// value.
-bool configTakeArgs(std::vector<char*>& args, std::string& path, bool& noConfig, std::string& err);
+// The file to read: `option` (--config) if given, else $WVT_CONFIG, else
+// <dir>/wvt.conf, else empty (no folder). `required` is true when the user
+// named the file (option or $WVT_CONFIG): then a missing file is an error,
+// else it is skipped.
+std::string configPath(const std::string& option, const ConfigDir& dir, bool& required);
+
+// Takes --config FILE, --config=FILE, --config-dir DIR, --config-dir=DIR and
+// --no-config out of args (args[0] is the program name), as logParseArgs does
+// for the log options, so that the file is read before the log starts. False
+// (err set) when --config or --config-dir has no value.
+bool configTakeArgs(std::vector<char*>& args, std::string& path, std::string& dir, bool& noConfig, std::string& err);
 
 // A folder and a file name start: "~/rec" + "wvt" -> "~/rec/wvt".
 std::string configJoin(const std::string& folder, const std::string& name);

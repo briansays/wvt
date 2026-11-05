@@ -28,3 +28,7 @@ compile_commands.json
 
 # Obsidian directories
 *obsidian*
+# The config folder (issue #101): only the examples and the README are tracked
+/config/*
+!/config/README.md
+!/config/*.example

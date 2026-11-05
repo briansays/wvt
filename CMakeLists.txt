@@ -100,6 +100,7 @@ add_executable(wvt
   src/common/ui_util.cpp
   src/app/app_live.cpp
   src/app/config.cpp
+  src/common/paths.cpp
   src/app/app_siggen.cpp
   src/app/app_chain.cpp
   src/device/live.cpp
@@ -842,7 +843,7 @@ target_include_directories(measure_check PRIVATE src)
 target_compile_options(measure_check PRIVATE ${WVT_WARNINGS})
 
 # Configuration file self-test (issue #88)
-add_executable(config_check tools/config_check.cpp src/app/config.cpp src/net/zmq_wire.cpp)
+add_executable(config_check tools/config_check.cpp src/app/config.cpp src/common/paths.cpp src/net/zmq_wire.cpp)
 target_include_directories(config_check PRIVATE src)
 target_compile_options(config_check PRIVATE ${WVT_WARNINGS})
 
@@ -955,7 +956,7 @@ if(WVT_FUZZ)
     src/device/sdr_siggen.cpp src/io/iq_file.cpp src/dsp/dsp.cpp src/common/ui_util.cpp src/common/log.cpp)
   set(_fuzz_meta src/io/iq_file.cpp src/common/json.cpp src/common/log.cpp)
   set(_fuzz_parse_si src/common/ui_util.cpp src/common/log.cpp)
-  set(_fuzz_config src/app/config.cpp src/net/zmq_wire.cpp)
+  set(_fuzz_config src/app/config.cpp src/common/paths.cpp src/net/zmq_wire.cpp)
   set(_fuzz_zmq_wire src/net/zmq_wire.cpp)
   foreach(_f json chain meta parse_si config zmq_wire)
     add_executable(fuzz_${_f} tools/fuzz/fuzz_${_f}.cpp ${_fuzz_${_f}})
