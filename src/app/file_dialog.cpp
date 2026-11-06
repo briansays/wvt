@@ -20,6 +20,7 @@
 // panel would open behind the window without an activation first.
 extern "C" void* wvt_dialog_begin(void);
 extern "C" void wvt_dialog_end(void* previous);
+extern "C" void wvt_dialog_pump(void);
 #endif
 
 namespace filedlg {
@@ -141,6 +142,12 @@ bool available(std::string* why) {
     }();
     if (!found && why) *why = "The file browser needs zenity (e.g. sudo apt install zenity). Type the path instead.";
     return found;
+#endif
+}
+
+void pump() {
+#if defined(WVT_HAVE_NFD) && defined(__APPLE__)
+    wvt_dialog_pump();
 #endif
 }
 

@@ -18,6 +18,11 @@ enum class Result { Ok, Cancel, Error };
 // True when a dialog can be shown. When false, why says what is missing.
 bool available(std::string* why = nullptr);
 
+// Call once per frame from the main loop. On macOS it reads the Cocoa events
+// that a dialog leaves queued: an app that never reads them blocks clicks in
+// every app. Elsewhere it does nothing.
+void pump();
+
 // filters: extensions without the dot, separated by commas; a ';' starts
 // another filter group on Linux (macOS joins the groups). Empty: all files.
 // start: the folder (or, for a save dialog, the path with a file name) the
