@@ -8,12 +8,14 @@ copyright = "2026, Brian Collette"
 
 extensions = ["myst_parser"]
 source_suffix = {".md": "markdown"}
-exclude_patterns = ["_build", "requirements.txt"]
+# design/ and docs-archive/ are not tracked (issue #109). Skip them in a local build.
+exclude_patterns = ["_build", "requirements.txt", "design", "docs-archive"]
 
-# MyST: ::: fences, definition lists, and anchors for headings down to ###,
-# so pages can link to a section with page.md#anchor.
+# MyST: ::: fences, definition lists, and anchors for all heading levels.
+# MANUAL.md is one file with headings down to #####, and it links to its own
+# sections with #anchor.
 myst_enable_extensions = ["colon_fence", "deflist"]
-myst_heading_anchors = 3
+myst_heading_anchors = 6
 
 try:
     import furo  # noqa: F401

@@ -945,7 +945,7 @@ endif()
 # ---------------------------------------------------------------------------
 # libFuzzer targets for the parsers of user-supplied text (issue #53), clang
 # only. Each target is built with ASan and UBSan. CTest runs each one over its
-# seed inputs in tools/fuzz/corpus; to fuzz, refer to docs/self-checks.md.
+# seed inputs in tools/fuzz/corpus; to fuzz, refer to WVT_FUZZ in docs/MANUAL.md.
 # ---------------------------------------------------------------------------
 option(WVT_FUZZ "Build the libFuzzer targets (clang only)" OFF)
 if(WVT_FUZZ)

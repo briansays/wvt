@@ -137,7 +137,7 @@ static std::unique_ptr<SdrDevice> openBackend(const StreamConfig& cfg, std::stri
     if (cfg.driver == "zmq") return openZmqDevice(cfg, err);
 #endif
     if (cfg.driver == "rtlsdr" || cfg.driver == "uhd" || cfg.driver == "bb" || cfg.driver == "skiq" || cfg.driver == "zmq")
-        err = "this wvt was built without " + cfg.driver + " support (see docs/live.md)";
+        err = "this wvt was built without " + cfg.driver + " support (see Live devices in docs/MANUAL.md)";
     else
         err = "unknown device driver '" + cfg.driver + "' (use sim, siggen, rtlsdr, uhd, bb, skiq or zmq)";
     return nullptr;
