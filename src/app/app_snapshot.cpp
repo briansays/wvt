@@ -1,4 +1,4 @@
-// Plot snapshots (issue #13, docs/snapshots.md): the window that selects the
+// Plot snapshots (issue #13, Plot snapshots in docs/MANUAL.md): the window that selects the
 // plots and the folder, and the capture. The plots note where they are drawn on
 // each frame; an export hides the pointer for two frames (no crosshair or
 // tooltip in the picture), then crops each plot from the rendered frame.

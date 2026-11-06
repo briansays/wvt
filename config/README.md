@@ -3,9 +3,9 @@
 This folder holds the user configuration files of wvt (issue #101):
 
 - `wvt.conf`: the configuration file. Copy `wvt.conf.example` to `wvt.conf` and change it, or run
-  `wvt --write-config`. See [docs/config.md](../docs/config.md).
+  `wvt --write-config`. Refer to [Configuration file](../docs/MANUAL.md#configuration-file).
 - `zmq_*.ini`: ZMQ message formats for the *ZMQ stream* device, one format per file. Refer to
-  [docs/zmq-formats.md](../docs/zmq-formats.md). The examples:
+  [ZMQ message formats](../docs/MANUAL.md#zmq-message-formats). The examples:
   - `zmq_gnuradio_sub_cf32.ini`: GNU Radio *ZMQ PUB Sink*, complex float, tags off.
   - `zmq_raw_pull_ci16.ini`: raw `ci16` samples from a PUSH socket.
   - `zmq_example_header.ini`: a template for a format with a binary header.
