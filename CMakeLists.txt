@@ -819,8 +819,8 @@ target_link_libraries(extract_check PRIVATE wvt_gpu imgui_implot Threads::Thread
 target_compile_options(extract_check PRIVATE ${WVT_WARNINGS})
 
 # GPU self-test and benchmark (CPU times; GPU vs CPU once a GPU backend exists)
-add_executable(gpu_check tools/gpu_check.cpp src/dsp/engine.cpp src/dsp/dsp.cpp src/io/iq_file.cpp src/common/json.cpp src/common/ui_util.cpp
-  src/common/log.cpp)
+add_executable(gpu_check tools/gpu_check.cpp src/dsp/engine.cpp src/dsp/dsp.cpp src/dsp/analysis.cpp src/io/iq_file.cpp
+  src/common/json.cpp src/common/ui_util.cpp src/common/log.cpp)
 target_include_directories(gpu_check PRIVATE src)
 target_link_libraries(gpu_check PRIVATE wvt_gpu imgui_implot Threads::Threads)
 target_compile_options(gpu_check PRIVATE ${WVT_WARNINGS})

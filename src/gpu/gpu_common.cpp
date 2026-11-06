@@ -42,7 +42,7 @@ struct PathState {
         note.clear();
     }
 };
-PathState g_spec{"waterfall"}, g_live{"live spectrum"}, g_chan{"channel filter"};
+PathState g_spec{"waterfall"}, g_live{"live spectrum"}, g_chan{"channel filter"}, g_fft{"analysis FFT"};
 
 bool forcedFail(std::string& err) {
     const char* f = envVar("WVT_GPU_FORCE_FAIL");
@@ -125,6 +125,7 @@ bool gpuInit(GpuMode mode, int device, std::string& err) {
     g_spec.reset();
     g_live.reset();
     g_chan.reset();
+    g_fft.reset();
     if (mode == GpuMode::Off) {
         // Off does not touch the driver at all.
         g_info.built = gpuBackendBuilt();
@@ -161,12 +162,31 @@ void gpuSetEnabled(bool on) {
         g_spec.reset();
         g_live.reset();
         g_chan.reset();
+        g_fft.reset();
     }
 }
 
 std::vector<std::string> gpuListDevices() { return gpuBackendList(); }
 
-GpuLimits gpuLimits() { return gpuBackendLimits(); }
+namespace {
+std::mutex g_limitMutex;
+bool g_haveTestLimits = false;
+GpuLimits g_testLimits;
+}  // namespace
+
+GpuLimits gpuLimits() {
+    {
+        std::lock_guard<std::mutex> lk(g_limitMutex);
+        if (g_haveTestLimits) return g_testLimits;
+    }
+    return gpuBackendLimits();
+}
+
+void gpuSetLimitsForTest(const GpuLimits* l) {
+    std::lock_guard<std::mutex> lk(g_limitMutex);
+    g_haveTestLimits = l != nullptr;
+    if (l) g_testLimits = *l;
+}
 
 bool gpuSpectrogramUsable() { return gpuEnabled() && !g_spec.waiting() && gpuBackendImplements(GpuJob::Spectrogram); }
 
@@ -182,7 +202,7 @@ GpuStatus gpuSpectrogram(const SpecJob& job, float* lin, const std::function<boo
 std::string gpuFallbackNotes() {
     std::lock_guard<std::mutex> lk(g_noteMutex);
     std::string s;
-    for (const PathState* p : {&g_spec, &g_live, &g_chan})
+    for (const PathState* p : {&g_spec, &g_live, &g_chan, &g_fft})
         if (!p->note.empty()) s += (s.empty() ? "" : "\n") + p->note;
     return s;
 }
@@ -220,5 +240,17 @@ GpuStatus GpuLiveSpectrum::run(const uint8_t* raw, const FormatParams& fp, int n
         impl_ = nullptr;
     }
     noteResult(g_live, st, err, oom);
+    return st;
+}
+
+bool gpuFftUsable() { return gpuEnabled() && !g_fft.waiting() && gpuBackendImplements(GpuJob::Fft); }
+
+GpuStatus gpuFftBatch(float* data, int n, int batch, bool inverse, const std::function<bool()>& cancelled) {
+    if (!gpuFftUsable()) return GpuStatus::Unavailable;
+    if (n < 2 || (n & (n - 1)) || batch < 1) return GpuStatus::Unavailable;
+    std::string err;
+    bool oom = false;
+    const GpuStatus st = forcedFail(err) ? GpuStatus::Failed : gpuBackendFftBatch(data, n, batch, inverse, cancelled, err, oom);
+    noteResult(g_fft, st, err, oom);
     return st;
 }

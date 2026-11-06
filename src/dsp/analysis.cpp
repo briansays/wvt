@@ -30,6 +30,40 @@ void inverseFft(const FFT& f, cf* d) {
     for (int i = 0; i < n; ++i) d[i] = std::conj(d[i]) * s;
 }
 
+// count FFTs of n points in place in d (one after the other), not scaled:
+// forward (e^-i) or inverse (e^+i). On the GPU when it is usable and the job
+// is large enough (issue #111), else on the CPU threads. gpu is set when the
+// GPU did it. False when cancelled.
+bool fftBlocks(cf* d, int n, int64_t count, bool inverse, const CancelFn& cancelled, bool* gpu = nullptr) {
+    if (count <= 0) return true;
+    const GpuLimits lim = gpuLimits();
+    if ((double)n * (double)count >= lim.fftMinPoints && n >= lim.fftMinSize && gpuFftUsable()) {
+        const GpuStatus st = gpuFftBatch(reinterpret_cast<float*>(d), n, (int)count, inverse, cancelled);
+        if (st == GpuStatus::Cancelled) return false;
+        if (st == GpuStatus::Ok) {
+            if (gpu) *gpu = true;
+            return true;
+        }
+    }
+    auto fft = getFFT(n);
+    std::atomic<bool> ab{false};
+    parallelFor((int)count, [&](int b, int e) {
+        for (int k = b; k < e; ++k) {
+            if ((k & 63) == 0 && cancelled()) {
+                ab = true;
+                return;
+            }
+            cf* p = d + (int64_t)k * n;
+            if (inverse)
+                for (int i = 0; i < n; ++i) p[i] = std::conj(p[i]);
+            fft->forward(p);
+            if (inverse)
+                for (int i = 0; i < n; ++i) p[i] = std::conj(p[i]);
+        }
+    });
+    return !ab;
+}
+
 // The value at fraction q (0 to 1) of v (a copy is sorted in part).
 double percentile(std::vector<double> v, double q) {
     if (v.empty()) return 0;
@@ -894,47 +928,68 @@ bool doSearch(const AnaReq& r, const ChannelReader& rd, AnaRes& res, const Cance
     std::mutex m;
     std::atomic<bool> ab{false};
     if (progress) progress->reset(nb);
-    parallelFor((int)nb, [&](int b0, int b1) {
-        std::vector<cf> x((size_t)nf);
-        std::vector<double> cs((size_t)nf + 1);
-        std::vector<float> le(P, 0.f);
-        std::vector<std::pair<int64_t, float>> lc;
-        for (int b = b0; b < b1; ++b) {
-            if (cancelled()) { ab = true; break; }
-            const int64_t j = sA + (int64_t)b * L;
-            const int64_t len = std::min<int64_t>(nf, sB - j);
-            std::fill(x.begin(), x.end(), cf(0, 0));
-            rd.read(j, len, x.data(), cancelled, false);
-            cs[0] = 0;
-            for (int k = 0; k < nf; ++k) cs[k + 1] = cs[k] + std::norm(x[k]);
-            fft->forward(x.data());
-            for (int k = 0; k < nf; ++k) x[k] *= std::conj(H[k]);
-            inverseFft(*fft, x.data());
-            const int64_t valid = std::min<int64_t>(L, positions - (int64_t)b * L);
-            bool run = false;
-            int64_t best = 0;
-            float bv = 0;
-            for (int64_t k = 0; k < valid; ++k) {
-                const double ex = cs[k + T] - cs[k];
-                const float s = ex > 0 ? (float)(std::abs(x[k]) / std::sqrt(et * ex)) : 0.f;
-                const int64_t pos = (int64_t)b * L + k;
-                const int o = (int)std::min<int64_t>(P - 1, pos * P / positions);
-                le[o] = std::max(le[o], s);
-                if (s >= p.threshold) {
-                    if (!run || s > bv) { best = j + k; bv = s; }
-                    run = true;
-                } else if (run) {
-                    lc.push_back({best, bv});
-                    run = false;
-                }
+    // Batches of blocks: read, FFT, times conj(H), inverse FFT, score. The
+    // FFTs of a batch go to the GPU together (fftBlocks).
+    const int64_t per = std::max<int64_t>(1, std::min<int64_t>(nb, (int64_t(1) << 23) / nf));
+    std::vector<cf> X((size_t)(per * nf));
+    std::vector<double> cs((size_t)(per * (nf + 1)));
+    for (int64_t b0 = 0; b0 < nb; b0 += per) {
+        const int64_t cnt = std::min(per, nb - b0);
+        parallelFor((int)cnt, [&](int q0, int q1) {
+            for (int q = q0; q < q1; ++q) {
+                cf* x = X.data() + (int64_t)q * nf;
+                double* c = cs.data() + (int64_t)q * (nf + 1);
+                const int64_t j = sA + (b0 + q) * L;
+                const int64_t len = std::min<int64_t>(nf, sB - j);
+                std::fill(x, x + nf, cf(0, 0));
+                rd.read(j, len, x, cancelled, false);
+                c[0] = 0;
+                for (int k = 0; k < nf; ++k) c[k + 1] = c[k] + std::norm(x[k]);
             }
-            if (run) lc.push_back({best, bv});
-            if (progress) progress->add(1);
-        }
-        std::lock_guard<std::mutex> lk(m);
-        for (int i = 0; i < P; ++i) env[i] = std::max(env[i], le[i]);
-        cand.insert(cand.end(), lc.begin(), lc.end());
-    }, 1);
+        });
+        if (cancelled() || !fftBlocks(X.data(), nf, cnt, false, cancelled, &res.gpu)) return false;
+        parallelFor((int)cnt, [&](int q0, int q1) {
+            for (int q = q0; q < q1; ++q) {
+                cf* x = X.data() + (int64_t)q * nf;
+                for (int k = 0; k < nf; ++k) x[k] *= std::conj(H[k]);
+            }
+        });
+        if (!fftBlocks(X.data(), nf, cnt, true, cancelled, &res.gpu)) return false;
+        parallelFor((int)cnt, [&](int q0, int q1) {
+            std::vector<float> le(P, 0.f);
+            std::vector<std::pair<int64_t, float>> lc;
+            const double scale = 1.0 / nf;
+            for (int q = q0; q < q1; ++q) {
+                const int64_t b = b0 + q;
+                const cf* x = X.data() + (int64_t)q * nf;
+                const double* c = cs.data() + (int64_t)q * (nf + 1);
+                const int64_t j = sA + b * L;
+                const int64_t valid = std::min<int64_t>(L, positions - b * L);
+                bool run = false;
+                int64_t best = 0;
+                float bv = 0;
+                for (int64_t k = 0; k < valid; ++k) {
+                    const double ex = c[k + T] - c[k];
+                    const float sc = ex > 0 ? (float)(std::abs(x[k]) * scale / std::sqrt(et * ex)) : 0.f;
+                    const int64_t pos = b * L + k;
+                    const int o = (int)std::min<int64_t>(P - 1, pos * P / positions);
+                    le[o] = std::max(le[o], sc);
+                    if (sc >= p.threshold) {
+                        if (!run || sc > bv) { best = j + k; bv = sc; }
+                        run = true;
+                    } else if (run) {
+                        lc.push_back({best, bv});
+                        run = false;
+                    }
+                }
+                if (run) lc.push_back({best, bv});
+            }
+            std::lock_guard<std::mutex> lk(m);
+            for (int i = 0; i < P; ++i) env[i] = std::max(env[i], le[i]);
+            cand.insert(cand.end(), lc.begin(), lc.end());
+        });
+        if (progress) progress->add(cnt);
+    }
     if (ab) return false;
     std::sort(cand.begin(), cand.end());
     std::vector<std::pair<int64_t, float>> hits;
@@ -1105,8 +1160,12 @@ bool doCyclo(const AnaReq& r, const ChannelReader& rd, int64_t j0, int64_t n, An
     CycloRes& c = res.cyclo;
     const int np = std::clamp(nextPow2(r.cyclo.np), 16, 256);
     const int L = np / 4;
+    // P is capped so that the alpha x frequency plane (2 L P x 2 np = P np^2
+    // cells) stays at 2^26 (the profile and the image are smaller).
     int P = 16;
-    while (P * 2 <= std::clamp(nextPow2(r.cyclo.maxP), 16, 8192) && (int64_t)(P * 2 - 1) * L + np <= n) P *= 2;
+    while (P * 2 <= std::clamp(nextPow2(r.cyclo.maxP), 16, 8192) && (int64_t)(P * 2 - 1) * L + np <= n &&
+           (int64_t)P * 2 * np * np <= (int64_t(1) << 26))
+        P *= 2;
     if ((int64_t)(P - 1) * L + np > n) {
         res.err = "The region is too short for this analysis. Select a longer region.";
         return true;
@@ -1123,16 +1182,18 @@ bool doCyclo(const AnaReq& r, const ChannelReader& rd, int64_t j0, int64_t n, An
     // the channelizer: X[p][k], fftshifted, with the phase correction
     const std::vector<float> a = makeWindow(WindowType::Hamming, np);
     std::vector<cf> X((size_t)P * np);
-    auto f1 = getFFT(np);
+    for (int p = 0; p < P; ++p)
+        for (int i = 0; i < np; ++i) X[(size_t)p * np + i] = y[(size_t)p * L + i] * a[i];
+    if (!fftBlocks(X.data(), np, P, false, cancelled, &res.gpu)) return false;
     parallelFor(P, [&](int b, int e) {
         std::vector<cf> buf(np);
         for (int p = b; p < e; ++p) {
-            for (int i = 0; i < np; ++i) buf[i] = y[(size_t)p * L + i] * a[i];
-            f1->forward(buf.data());
+            cf* row = X.data() + (size_t)p * np;
+            std::copy(row, row + np, buf.begin());
             for (int k = 0; k < np; ++k) {
                 const int kk = k - np / 2;
                 const double ph = -2 * M_PI * (double)kk * (double)p * L / np;
-                X[(size_t)p * np + k] = buf[(k + np / 2) % np] * cf((float)std::cos(ph), (float)std::sin(ph));
+                row[k] = buf[(k + np / 2) % np] * cf((float)std::cos(ph), (float)std::sin(ph));
             }
         }
     });
@@ -1141,46 +1202,58 @@ bool doCyclo(const AnaReq& r, const ChannelReader& rd, int64_t j0, int64_t n, An
     const double da = rate / ((double)L * P);
     const int naFull = 2 * L * P;
     const int nf = 2 * np;
-    std::vector<float> grid((size_t)naFull * nf, 0.f);
-    auto f2 = getFFT(P);
-    std::atomic<bool> ab{false};
+    // The image: alpha max-pooled to at most 1024 columns; the profile: the
+    // largest value at each alpha, at full resolution. Each thread keeps its
+    // own and they are merged, so that no cell is shared while it is written.
+    c.na = std::min(naFull, 1024);
+    std::vector<float> img((size_t)nf * c.na, 0.f), prof((size_t)naFull, 0.f);
     std::mutex m;
-    parallelFor(np, [&](int b, int e) {
-        std::vector<cf> buf(P);
-        std::vector<std::pair<size_t, float>> upd;
-        for (int k1 = b; k1 < e; ++k1) {
-            if (cancelled()) { ab = true; return; }
-            for (int k2 = 0; k2 < np; ++k2) {
-                for (int p = 0; p < P; ++p) buf[p] = X[(size_t)p * np + k1] * std::conj(X[(size_t)p * np + k2]);
-                f2->forward(buf.data());
-                const double a0 = (double)(k1 - k2) * rate / np;
-                const int fi = k1 + k2;  // f0 = (f1 + f2) / 2 in half bins, 0 .. 2 np - 2
-                for (int q = -P / 4; q < P / 4; ++q) {
-                    const float v = std::abs(buf[(q + P) % P]);
-                    const double al = a0 + q * da;
-                    const int ai = (int)std::llround((al + rate) / da);
-                    if (ai < 0 || ai >= naFull) continue;
-                    upd.push_back({(size_t)fi * naFull + ai, v});
+    // The products of channel k1 and each channel k2 over the blocks, then a
+    // P-point FFT of each: rows of k1 at a time, so that a batch of FFTs goes
+    // to the GPU together (fftBlocks).
+    const int rows = (int)std::clamp<int64_t>((int64_t(1) << 23) / ((int64_t)np * P), 1, np);
+    std::vector<cf> Y((size_t)rows * np * P);
+    for (int c0 = 0; c0 < np; c0 += rows) {
+        const int cr = std::min(rows, np - c0);
+        parallelFor(cr * np, [&](int b, int e) {
+            for (int i = b; i < e; ++i) {
+                const int k1 = c0 + i / np, k2 = i % np;
+                cf* o = Y.data() + (size_t)i * P;
+                for (int p = 0; p < P; ++p) o[p] = X[(size_t)p * np + k1] * std::conj(X[(size_t)p * np + k2]);
+            }
+        });
+        if (cancelled() || !fftBlocks(Y.data(), P, (int64_t)cr * np, false, cancelled, &res.gpu)) return false;
+        parallelFor(cr, [&](int b, int e) {
+            std::vector<float> li((size_t)nf * c.na, 0.f), lp((size_t)naFull, 0.f);
+            for (int r1 = b; r1 < e; ++r1) {
+                const int k1 = c0 + r1;
+                for (int k2 = 0; k2 < np; ++k2) {
+                    const cf* buf = Y.data() + ((size_t)r1 * np + k2) * P;
+                    // f0 = (f1 + f2) / 2 in half bins; row 0 of the image is the largest f
+                    float* irow = li.data() + (size_t)(nf - 1 - (k1 + k2)) * c.na;
+                    const int base = (k1 - k2) * L * P / np + naFull / 2;  // alpha index of a0 = (k1 - k2) rate / np
+                    for (int q = -P / 4; q < P / 4; ++q) {
+                        const int ai = base + q;
+                        if (ai < 0 || ai >= naFull) continue;
+                        const float v = std::abs(buf[(q + P) % P]);
+                        lp[ai] = std::max(lp[ai], v);
+                        float& cell = irow[(int64_t)ai * c.na / naFull];
+                        cell = std::max(cell, v);
+                    }
                 }
             }
             std::lock_guard<std::mutex> lk(m);
-            for (const auto& u : upd) grid[u.first] = std::max(grid[u.first], u.second);
-            upd.clear();
-        }
-    });
-    if (ab) return false;
+            for (size_t i = 0; i < li.size(); ++i) img[i] = std::max(img[i], li[i]);
+            for (size_t i = 0; i < lp.size(); ++i) prof[i] = std::max(prof[i], lp[i]);
+        });
+    }
     // the reference: the largest value at alpha = 0
-    const int a0i = (int)std::llround(rate / da);
-    float ref = 0;
-    for (int fi = 0; fi < nf; ++fi) ref = std::max(ref, grid[(size_t)fi * naFull + a0i]);
-    ref = std::max(ref, 1e-30f);
+    const float ref = std::max(prof[(size_t)naFull / 2], 1e-30f);
     c.alpha.resize(naFull);
     c.profileDb.resize(naFull);
     for (int ai = 0; ai < naFull; ++ai) {
-        float mx = 0;
-        for (int fi = 0; fi < nf; ++fi) mx = std::max(mx, grid[(size_t)fi * naFull + ai]);
         c.alpha[ai] = -rate + ai * da;
-        c.profileDb[ai] = dB(mx / ref);
+        c.profileDb[ai] = dB(prof[ai] / ref);
     }
     // the strongest alphas above rate / np (away from the alpha = 0 leakage)
     std::vector<CorrPeak> pk;
@@ -1196,22 +1269,13 @@ bool doCyclo(const AnaReq& r, const ChannelReader& rd, int64_t j0, int64_t n, An
         if (!near) c.peaks.push_back(q);
         if (c.peaks.size() >= 10) break;
     }
-    // the image: alpha max-pooled to at most 1024 columns; row 0 = the largest f
-    c.na = std::min(naFull, 1024);
     c.nf = nf;
     c.aLo = -rate;
     c.aHi = rate;
     c.fLo = -rate / 2;
     c.fHi = rate / 2;
-    c.db.assign((size_t)c.na * nf, -100.f);
-    for (int fi = 0; fi < nf; ++fi) {
-        for (int ci = 0; ci < c.na; ++ci) {
-            const int aa = (int)((int64_t)naFull * ci / c.na), ae = std::max(aa + 1, (int)((int64_t)naFull * (ci + 1) / c.na));
-            float mx = 0;
-            for (int ai = aa; ai < ae; ++ai) mx = std::max(mx, grid[(size_t)fi * naFull + ai]);
-            c.db[(size_t)(nf - 1 - fi) * c.na + ci] = (float)dB(mx / ref);
-        }
-    }
+    c.db.resize(img.size());
+    for (size_t i = 0; i < img.size(); ++i) c.db[i] = (float)dB(img[i] / ref);
     return true;
 }
 

@@ -702,3 +702,57 @@ GpuStatus gpuBackendChannelize(const ChanJob& j, float* y, const std::function<b
     CUDA_TRY(cudaStreamSynchronize(c.stream));
     return GpuStatus::Ok;
 }
+
+// ---------------------------------------------------------------------------
+// Batched FFTs for the analysis tools (issue #111)
+// ---------------------------------------------------------------------------
+namespace {
+struct FftContext {
+    int device = -1;
+    cudaStream_t stream = nullptr;
+    cufftComplex* dX = nullptr;
+    size_t capX = 0;
+    PlanCache plans;
+    ~FftContext() {
+        plans.release();
+        cudaFree(dX);
+        if (stream) cudaStreamDestroy(stream);
+        cudaGetLastError();
+    }
+};
+thread_local FftContext t_fft;
+}  // namespace
+
+GpuStatus gpuBackendFftBatch(float* data, int n, int batch, bool inverse, const std::function<bool()>& cancelled,
+                             std::string& err, bool& oom) {
+    FftContext& c = t_fft;
+    const int dev = gpuInfo().device;
+    CUDA_TRY(cudaSetDevice(dev));
+    if (c.device != dev) {
+        c.plans.release();
+        if (c.stream) cudaStreamDestroy(c.stream);
+        c.stream = nullptr;
+        CUDA_TRY(cudaStreamCreateWithFlags(&c.stream, cudaStreamNonBlocking));
+        c.device = dev;
+    }
+    // Chunks of up to kChunkSamples points; the plan's batch is a power of two
+    // (few distinct plans), and the transforms past the chunk are ignored.
+    const int64_t maxBatch = std::max<int64_t>(1, kChunkSamples / n);
+    const int planBatch = batchFor(std::min<int64_t>(batch, maxBatch), maxBatch);
+    CUDA_TRY(growDevice(c.dX, c.capX, (size_t)planBatch * n));
+    cufftHandle plan;
+    if (const GpuStatus st = c.plans.get(n, planBatch, c.stream, plan, err, oom); st != GpuStatus::Ok) return st;
+    for (int64_t b0 = 0; b0 < batch; b0 += planBatch) {
+        if (cancelled()) {
+            cudaStreamSynchronize(c.stream);
+            return GpuStatus::Cancelled;
+        }
+        const int64_t m = std::min<int64_t>(planBatch, batch - b0);
+        float* p = data + 2 * b0 * n;
+        CUDA_TRY(cudaMemcpyAsync(c.dX, p, (size_t)m * n * sizeof(cufftComplex), cudaMemcpyHostToDevice, c.stream));
+        CUFFT_TRY(cufftExecC2C(plan, c.dX, c.dX, inverse ? CUFFT_INVERSE : CUFFT_FORWARD));
+        CUDA_TRY(cudaMemcpyAsync(p, c.dX, (size_t)m * n * sizeof(cufftComplex), cudaMemcpyDeviceToHost, c.stream));
+    }
+    CUDA_TRY(cudaStreamSynchronize(c.stream));
+    return GpuStatus::Ok;
+}

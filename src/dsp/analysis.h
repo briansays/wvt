@@ -273,6 +273,7 @@ struct AnaRes {
     int64_t wanted = 0, used = 0;  // outputs in the region, and outputs the kind used
     double t0 = 0;                 // file time of the first output used
     double seconds = 0;            // time taken
+    bool gpu = false;              // FFTs ran on the GPU (the template search and the cyclostationary analysis)
     MeasureRes measure;
     SpectrumRes spectrum;
     HistogramRes hist;

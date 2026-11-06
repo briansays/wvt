@@ -566,7 +566,8 @@ void App::drawAnalysisWindow() {
         ImGui::TextColored(kColWarn, "%s", res->err.c_str());
     } else if (res) {
         const bool cut = res->used < res->wanted;
-        ImGui::TextDisabled("%s samples in %.0f ms%s", fmtSI((double)res->used, "", 4).c_str(), res->seconds * 1e3,
+        ImGui::TextDisabled("%s samples in %.0f ms%s%s", fmtSI((double)res->used, "", 4).c_str(), res->seconds * 1e3,
+                            res->gpu ? " (FFTs on the GPU)" : "",
                             cut ? "  (the first part of the region only: see Max samples)" : "");
     } else {
         ImGui::TextDisabled(" ");

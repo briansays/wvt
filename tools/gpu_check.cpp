@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "dsp/dsp.h"
+#include "dsp/analysis.h"
 #include "dsp/engine.h"
 #include "gpu/gpu.h"
 #include "io/iq_file.h"
@@ -570,6 +571,140 @@ void testChannel(const std::string& dir) {
     unlink(path.c_str());
 }
 
+// --- Analysis FFTs (issue #111) --------------------------------------------------
+// gpuFftBatch against the CPU FFT, then the two analysis tools that use it
+// (the template search and the cyclostationary analysis) with the GPU on and off.
+std::shared_ptr<AnaRes> analyze(const AnaReq& r) { return computeAnalysis(r, [] { return false; }); }
+
+void testAnalysisFft(const std::string& dir) {
+    printf("\nGPU analysis FFTs\n");
+    CancelFn never = [] { return false; };
+    if (!gpuFftUsable()) {
+        std::vector<float> d(16);
+        check(gpuFftBatch(d.data(), 8, 1, false, never) == GpuStatus::Unavailable, "no GPU: the analysis FFT is unavailable");
+        printf("  GPU against CPU comparison skipped: %s\n", skipReason().c_str());
+        return;
+    }
+    struct Case {
+        int n, batch;
+        bool inverse;
+    };
+    for (const Case& c : {Case{64, 4096, false}, Case{1024, 3000, false}, Case{1024, 3000, true}, Case{1 << 19, 5, false},
+                          Case{1 << 19, 3, true}, Case{1 << 23, 2, false}}) {
+        std::vector<cf> x((size_t)c.n * c.batch);
+        uint32_t s = 12345;
+        for (cf& v : x) {
+            s = s * 1664525u + 1013904223u;
+            const float a = (float)(s >> 8) / 16777216.f - 0.5f;
+            s = s * 1664525u + 1013904223u;
+            v = cf(a, (float)(s >> 8) / 16777216.f - 0.5f);
+        }
+        std::vector<cf> cpu = x, gpu = x;
+        auto fft = getFFT(c.n);
+        for (int b = 0; b < c.batch; ++b) {
+            cf* p = cpu.data() + (size_t)b * c.n;
+            if (c.inverse)
+                for (int i = 0; i < c.n; ++i) p[i] = std::conj(p[i]);
+            fft->forward(p);
+            if (c.inverse)
+                for (int i = 0; i < c.n; ++i) p[i] = std::conj(p[i]);
+        }
+        const GpuStatus st = gpuFftBatch(reinterpret_cast<float*>(gpu.data()), c.n, c.batch, c.inverse, never);
+        char b[200];
+        if (st != GpuStatus::Ok) {
+            snprintf(b, sizeof b, "N %d x %d: GPU status %d", c.n, c.batch, (int)st);
+            check(false, b);
+            continue;
+        }
+        double peak = 0, diff = 0;
+        for (size_t k = 0; k < cpu.size(); ++k) {
+            peak = std::max(peak, (double)std::abs(cpu[k]));
+            diff = std::max(diff, (double)std::abs(gpu[k] - cpu[k]));
+        }
+        snprintf(b, sizeof b, "N %d x %d %s: max error %.2g of the peak", c.n, c.batch, c.inverse ? "inverse" : "forward",
+                 diff / peak);
+        check(diff <= 1e-5 * peak, b);
+    }
+    std::vector<float> d(2 * 1024);
+    check(gpuFftBatch(d.data(), 1024, 1, false, [] { return true; }) == GpuStatus::Cancelled, "cancel stops the GPU FFT");
+
+    // The analysis jobs below are under the backend's limits (Metal sends
+    // only large FFTs to the GPU): no limits, so that they use the GPU.
+    GpuLimits all = gpuLimits();
+    all.fftMinPoints = 0;
+    all.fftMinSize = 0;
+    gpuSetLimitsForTest(&all);
+    // A Barker-13 pulse every 1 ms at 10 MS/s (13 us chips), on noise: 200
+    // pulses (enough blocks for the GPU: more than fftMinPoints).
+    const double fs = 10e6;
+    const int64_t n = 2'000'000;
+    std::vector<cf> x((size_t)n);
+    static const int barker[13] = {1, 1, 1, 1, 1, -1, -1, 1, 1, -1, 1, -1, 1};
+    uint32_t s = 7;
+    for (int64_t k = 0; k < n; ++k) {
+        s = s * 1664525u + 1013904223u;
+        const float nz = ((float)(s >> 8) / 16777216.f - 0.5f) * 0.05f;
+        const int64_t inPri = k % 10000;
+        const float a = inPri >= 1000 && inPri < 1000 + 13 * 130 ? 0.5f * (float)barker[(inPri - 1000) / 130] : 0.f;
+        x[k] = cf(a + nz, nz);
+    }
+    const std::string path = dir + "/gpu_analysis.cf32";
+    {
+        FILE* f = fopen(path.c_str(), "wb");
+        fwrite(x.data(), sizeof(cf), x.size(), f);
+        fclose(f);
+    }
+    std::string err;
+    auto file = IqFile::open(path, err);
+    AnaReq q;
+    q.kind = AnaKind::Correlation;
+    q.reg.src = Source{file, FormatParams{}, fs, 0};
+    q.reg.s0 = 0;
+    q.reg.s1 = n;
+    q.corr.search = true;
+    q.corr.tmplS0 = 1000;
+    q.corr.tmplS1 = 1000 + 13 * 130;
+    q.corr.searchS0 = 0;
+    q.corr.searchS1 = n;
+    q.corr.threshold = 0.8;
+    gpuSetEnabled(false);
+    auto rc = analyze(q);
+    gpuSetEnabled(true);
+    auto rg = analyze(q);
+    bool same = rc && rg && rc->corr.peaks.size() == rg->corr.peaks.size() && rc->corr.peaks.size() == 200;
+    for (size_t i = 0; same && i < rc->corr.peaks.size(); ++i)
+        same = rc->corr.peaks[i].x == rg->corr.peaks[i].x && std::abs(rc->corr.peaks[i].v - rg->corr.peaks[i].v) < 1e-4;
+    check(rg && rg->gpu && !rc->gpu, "the template search ran on the GPU (and on the CPU with the GPU off)");
+    check(same, "template search: the GPU finds the same 200 hits at the same times as the CPU (" +
+                    std::to_string(rg ? rg->corr.peaks.size() : 0) + ")");
+    q.kind = AnaKind::Cyclo;
+    q.cyclo.np = 64;
+    q.cyclo.maxP = 2048;
+    gpuSetEnabled(false);
+    rc = analyze(q);
+    gpuSetEnabled(true);
+    rg = analyze(q);
+    double worst = 0;
+    if (rc && rg && rc->cyclo.profileDb.size() == rg->cyclo.profileDb.size())
+        for (size_t i = 0; i < rc->cyclo.profileDb.size(); ++i)
+            if (rc->cyclo.profileDb[i] > -60) worst = std::max(worst, std::abs(rc->cyclo.profileDb[i] - rg->cyclo.profileDb[i]));
+    check(rg && rg->gpu, "the cyclostationary analysis ran on the GPU");
+    char b[160];
+    snprintf(b, sizeof b, "cyclostationary: the GPU profile is within %.4f dB of the CPU", worst);
+    check(rc && rg && !rc->cyclo.profileDb.empty() && worst < 0.01, b);
+    // A forced failure: the CPU does the job, and only this path waits.
+    setenv("WVT_GPU_FORCE_FAIL", "1", 1);
+    auto rf = analyze(q);
+    unsetenv("WVT_GPU_FORCE_FAIL");
+    check(rf && !rf->gpu && rf->cyclo.profileDb == rc->cyclo.profileDb && !gpuFftUsable() && gpuChannelUsable(),
+          "a GPU FFT failure: the CPU result, and only that path waits");
+    gpuInit(GpuMode::Auto, -1, err);
+    check(gpuFftUsable(), "gpuInit turns the path on again");
+    gpuSetLimitsForTest(nullptr);
+    file.reset();
+    unlink(path.c_str());
+}
+
 // --- File waterfall ---------------------------------------------------------
 // Zoom 1 = the span where one FFT per row at 50 % overlap covers the view.
 void benchWaterfall(const Source& src, int64_t nSamples) {
@@ -678,6 +813,54 @@ void benchDemod(const Source& src, int64_t nSamples) {
     }
 }
 
+// --- Analysis FFTs (issue #111) ---------------------------------------------
+// The template search and the cyclostationary analysis, CPU against GPU. The
+// limits in gpuBackendLimits (fftMinPoints) come from this.
+void benchAnalysis(const Source& src, int64_t nSamples) {
+    const bool gpu = gpuFftUsable();
+    printf("\nanalysis (template search, cyclostationary)\n");
+    printf("  %-34s %-11s%s\n", "job", "CPU time", gpu ? "GPU time   speed-up" : "");
+    CancelFn never = [] { return false; };
+    auto run = [&](const char* name, const AnaReq& r) {
+        std::shared_ptr<AnaRes> res;
+        gpuSetEnabled(false);
+        const double ms = timeIt(2, [&] { res = computeAnalysis(r, never); });
+        gpuSetEnabled(true);
+        printf("  %-34s %8.1f ms", name, ms);
+        if (gpu) {
+            computeAnalysis(r, never);  // the graphs and plans of this size
+            const double gms = timeIt(2, [&] { res = computeAnalysis(r, never); });
+            printf("  %8.1f ms  %5.1fx%s", gms, ms / gms, res && res->gpu ? "" : "  (CPU: under the limit)");
+        }
+        printf("\n");
+    };
+    for (int64_t t : {1000, 8000, 60000}) {
+        AnaReq r;
+        r.kind = AnaKind::Correlation;
+        r.reg.src = src;
+        r.reg.s1 = std::min<int64_t>(nSamples, 20'000'000);
+        r.corr.search = true;
+        r.corr.tmplS0 = 100000;
+        r.corr.tmplS1 = 100000 + t;
+        r.corr.searchS0 = 0;
+        r.corr.searchS1 = r.reg.s1;
+        char name[80];
+        snprintf(name, sizeof name, "search, %lld-sample template, 20 MS", (long long)t);
+        run(name, r);
+    }
+    for (int np : {64, 256}) {
+        AnaReq r;
+        r.kind = AnaKind::Cyclo;
+        r.reg.src = src;
+        r.reg.s1 = std::min<int64_t>(nSamples, 4'000'000);
+        r.cyclo.np = np;
+        r.cyclo.maxP = 8192;
+        char name[80];
+        snprintf(name, sizeof name, "cyclostationary, %d channels", np);
+        run(name, r);
+    }
+}
+
 // --- Waterfall colouring ----------------------------------------------------
 // The App::recolor loop on the largest image (1024 x 2048). The texture
 // upload needs a GL context, so the GUI log covers that part.
@@ -733,6 +916,7 @@ int main(int argc, char** argv) {
     testSpectrogram(dir);
     testLive();
     testChannel(dir);
+    testAnalysisFft(dir);
     const double fs = 20e6;
     if (bench) {
         const int64_t n = (int64_t)samples;
@@ -764,6 +948,7 @@ int main(int argc, char** argv) {
         }
         benchLive(raw);
         benchDemod(src, n);
+        benchAnalysis(src, n);
         benchColor();
         file.reset();
         unlink(path.c_str());

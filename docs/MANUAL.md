@@ -3026,7 +3026,20 @@ relative to the mean.
 2. For each pair of channels, the product of one channel and the conjugate of the other, over the
    `P` blocks. Then a `P`-point FFT.
 3. wvt keeps the center half of each FFT and puts each value at its alpha and frequency. The
-   alpha resolution is `fs / (L · P)`.
+   alpha resolution is `fs / (L · P)`. Each thread keeps its own copy of the image and of the
+   profile, and wvt merges the copies at the end.
+4. `P` is a maximum of `2^26 / Np²`. Thus the alpha and frequency plane has a maximum of 64 M
+   cells.
+
+#### The analysis FFTs on the GPU
+
+The template search and the cyclostationary analysis put their FFTs into batches. wvt sends each
+batch to the GPU (`gpuFftBatch` in `src/gpu/gpu.h`) when it is sufficiently large. The CPU does
+the other steps. If the GPU is not usable or a GPU call fails, the CPU does the FFTs. The status
+line of the Analysis window shows *FFTs on the GPU* when the GPU did them.
+
+`build/gpu_check` compares the GPU FFTs with the CPU FFTs, and the two tools with the GPU on and
+off. `build/gpu_check --bench` measures the two tools on the CPU and on the GPU.
 
 #### The demodulation calculations
 
@@ -3055,7 +3068,8 @@ wvt can calculate these items on the GPU:
 
 - The file waterfall.
 - The live spectrum.
-- The channel filter of the time plots and of the region export.
+- The channel filter of the time plots, of the region export and of the Analysis window.
+- The FFTs of the template search and of the cyclostationary analysis in the Analysis window.
 
 wvt supports CUDA on an NVIDIA GPU under Linux, and Metal on an Apple GPU under macOS. With a GPU,
 wide views can keep "FFT sees 100 %", and the live spectrum can analyze all samples at USRP rates.
@@ -3124,6 +3138,8 @@ these jobs. For example:
 - A live row with fewer than 131072 samples. This occurs at low sample rates, with a manual
   **Avg** value, or for one row after a retune.
 - A waterfall view with less than 16 M FFT input samples, for example a view that you zoomed in.
+- An FFT of the Analysis window with fewer than 262144 points. On an M5, the CPU is as fast or
+  faster for these FFTs. Thus on a Mac, only a template search with a long template uses the GPU.
 
 With `-v`, the log shows each change of the live spectrum between the GPU and the CPU, and the
 reason.

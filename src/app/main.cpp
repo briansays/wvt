@@ -320,7 +320,7 @@ static int runAudioExport(const std::string& path, const CliOverrides& ov, bool 
 // --chan when it is given.
 static int runAnalyze(const std::string& path, const CliOverrides& ov, double seg0, double seg1, bool haveView, double t0,
                       double t1, bool haveChan, double chanOff, double chanBw, AnaKind kind, const std::string& opts,
-                      const std::string& out) {
+                      const std::string& out, GpuMode gpuMode, int gpuDevice) {
     FileMetaGuess g = guessMeta(path);
     std::string err;
     if (!ov.haveFmt && !metaReadable(g, err)) {
@@ -368,6 +368,10 @@ static int runAnalyze(const std::string& path, const CliOverrides& ov, double se
     if (kind == AnaKind::Correlation && r.corr.search) {
         r.corr.searchS0 = std::clamp(r.corr.searchS0, seg.s0, seg.s1);
         r.corr.searchS1 = std::clamp(r.corr.searchS1, seg.s0, seg.s1);
+    }
+    if (!gpuInit(gpuMode, gpuDevice, err)) {  // the channel filter and the analysis FFTs can use it
+        LOG_ERROR("gpu", "%s", err.c_str());
+        return 1;
     }
     signal(SIGINT, [](int) { g_interrupted = 1; });
     auto res = computeAnalysis(r, [] { return g_interrupted != 0; });
@@ -1551,7 +1555,7 @@ int main(int argc, char** argv) {
             return 2;
         }
         return runAnalyze(path, ov, seg0, seg1, haveView, view0, view1, haveChan, chanOff, chanBw, analyzeKind,
-                          analyzeOpts, analyzeOut);
+                          analyzeOpts, analyzeOut, gpuMode, gpuDevice);
     }
     if (!extractOut.empty()) {
         if (path.empty()) {
