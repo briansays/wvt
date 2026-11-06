@@ -3,7 +3,12 @@
 // reaches its socket with one of them, so both parsers must reject all bad
 // input. The input is parsed as a format file, and decoded as a message with
 // a few fixed formats (and with the format from the input, if it parses).
+// A message that decodes is encoded again (the publisher's side) and decoded
+// a second time: the count and the samples must stay the same.
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -52,6 +57,35 @@ void decodeWith(const StreamFormat& f, const uint8_t* data, size_t size) {
     if (m.sampleBytes != (size_t)m.h.count * (size_t)formatBytesPerSample(m.h.fmt)) __builtin_trap();
     if (m.h.fmt != streamRingFormat(f)) __builtin_trap();
     if (!(m.h.rate > 0) || m.h.rate > 1e10 || m.h.fc < 0 || m.h.fc > 1e12) __builtin_trap();
+
+    // Encode it again, from the ring format, and decode that.
+    std::string err;
+    if (!checkPublishFormat(f, err)) return;
+    const size_t n = std::min<size_t>(m.h.count, publishMaxSamples(f));
+    const std::vector<uint8_t> ring(m.samples, m.samples + n * (size_t)formatBytesPerSample(m.h.fmt));
+    std::vector<uint8_t> out, scratch2;
+    if (!encodeStreamMessage(f, m.h, x.seq, m.h.fmt, ring.data(), n, out, why)) {
+        if (why.empty()) __builtin_trap();
+        return;  // a value that does not fit after the scale (rounding)
+    }
+    if (out.size() != f.headerBytes + n * (size_t)formatBytesPerSample(f.sampleFmt)) __builtin_trap();
+    StreamMessage m2;
+    FormatExtra x2;
+    // A match that overlaps a field can change the field, so the decode may fail; it must not crash.
+    if (!decodeStreamMessage(f, out.data(), out.size(), m2, x2, scratch2, why)) return;
+    if (f.count.set && m2.h.count != n) __builtin_trap();
+    if (!f.count.set && m2.h.count != n) __builtin_trap();
+    // The same samples, unless a value was NaN (cf32 and cf64 keep it, the others make it 0).
+    if (m2.h.fmt == m.h.fmt && memcmp(m2.samples, ring.data(), ring.size()) != 0) {
+        bool nan = false;
+        if (m.h.fmt == SampleFormat::CF32)
+            for (size_t i = 0; i + 4 <= ring.size(); i += 4) {
+                float v = 0;
+                memcpy(&v, ring.data() + i, 4);
+                nan = nan || std::isnan(v);
+            }
+        if (!nan) __builtin_trap();
+    }
 }
 
 }  // namespace

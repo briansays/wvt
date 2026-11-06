@@ -226,7 +226,10 @@ void decodeSamples(const FormatParams& fp, const uint8_t* src, int64_t count, st
 void encodeSamples(SampleFormat fmt, const std::complex<float>* in, int64_t count, uint8_t* dst) {
     auto q = [](float v, float scale, float lo, float hi) { return std::clamp(std::nearbyint(v * scale), lo, hi); };
     for (int64_t i = 0; i < count; ++i) {
-        const float re = in[i].real(), im = in[i].imag();
+        // NaN is 0 in the integer formats: a NaN converted to an integer is undefined.
+        const bool isInt = fmt != SampleFormat::CF32 && fmt != SampleFormat::CF64;
+        const float re = isInt && std::isnan(in[i].real()) ? 0.f : in[i].real();
+        const float im = isInt && std::isnan(in[i].imag()) ? 0.f : in[i].imag();
         switch (fmt) {
             case SampleFormat::CF32: {
                 float v[2] = {re, im};

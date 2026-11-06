@@ -90,7 +90,8 @@ The SDR profiles of the file (`sdr.N.*`) also apply on the command line:
 | `--record-sample native\|cf32` | The sample format (default `native`) | [Live devices](live.md#recording) |
 | `--record-duration T` | Stop after `T` seconds | [Live devices](live.md#recording) |
 | `--no-gui` | Record or publish without a window. Ctrl+C stops | [Live devices](live.md#recording) |
-| `--publish ADDR` | Send the live stream over the network to `ADDR`: the subscriber's `a.b.c.d[:PORT]`, or a multicast group `[IFACE;]GROUP[:PORT]` (port 5600 by default) | [Live devices](live.md#stream-over-the-network) |
+| `--publish ADDR` | Send the live stream over the network to `ADDR`: the subscriber's `a.b.c.d[:PORT]`, or a multicast group `[IFACE;]GROUP[:PORT]` (port 5600 by default). With a tcp `--publish-format`: `HOST:PORT`, `*:PORT`, or `""` for the address of the format file | [Live devices](live.md#stream-over-the-network) |
+| `--publish-format NAME` | The message format of `--publish`: `wvt` (the built-in format), or the `NAME` of `zmq_NAME.ini` in the config folder (default `publish.format`, else `wvt`) | [ZMQ message formats](zmq-formats.md#publish-with-a-format) |
 | `--publish-ttl N` | The multicast hops, 1 to 255 (default `zmq.ttl`, 1) | [Live devices](live.md#stream-over-the-network) |
 
 `--device zmq[:ADDR]` receives the stream of another wvt on `ADDR`: an address of this computer or

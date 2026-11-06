@@ -234,6 +234,9 @@ int main() {
         check(d.cfg.zmqFormat.empty(), "default: no zmq.format (the built-in format)");
         const Parsed f = parse("zmq.format = gnuradio_sub_cf32\n");
         check(f.warnings.empty() && f.cfg.zmqFormat == "gnuradio_sub_cf32", "zmq.format" + list(f));
+        const Parsed pf = parse("publish.format = raw_pull_ci16\n");
+        check(pf.warnings.empty() && pf.cfg.publishFormat == "raw_pull_ci16" && d.cfg.publishFormat.empty(),
+              "publish.format (default: the built-in format)" + list(pf));
         const Parsed p = parse("zmq.address = 192.168.1.20:5601\nzmq.ttl = 4\n");
         check(p.warnings.empty() && p.cfg.zmqAddress == "192.168.1.20:5601" && p.cfg.zmqTtl == 4,
               "zmq.address and zmq.ttl" + list(p));

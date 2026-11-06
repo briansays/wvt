@@ -182,3 +182,40 @@ private:
 
 // The bits of a field type (for MessageCounter).
 int fieldTypeBits(FieldType t);
+
+// ---------------------------------------------------------------------------
+// Publishing with a format file (phase 6): the reverse of the subscriber.
+// The publisher's socket fits the subscriber's: dish -> RADIO, sub -> PUB,
+// pull -> PUSH. Its mode is the other one: a subscriber that connects needs
+// a publisher that binds.
+
+// True when wvt can publish with format f, else false and err. Every header
+// field has a value that wvt knows, so the checks are about the frames: a
+// sub format with a topic needs frames = last or 2 (the topic, then the
+// data), the others frames = last or 1.
+bool checkPublishFormat(const StreamFormat& f, std::string& err);
+
+// The most samples in one message of format f: a datagram (dish) holds at
+// most 8064 bytes, a tcp message at most max_bytes and 256 KiB, and a count
+// field limits it too. 0 if not even one sample fits.
+size_t publishMaxSamples(const StreamFormat& f);
+
+// Where the publisher sends with format f: as formatEndpoint, from the side
+// of the publisher (sub and pull formats: the other mode).
+bool publishEndpoint(const StreamFormat& f, const std::string& typed, FormatEndpoint& out, std::string& err);
+
+// Writes one data message of format f (not the built-in format) in `out`:
+// the header with h.fc, h.rate, h.gain, h.timeNs, h.index, `seq` and the
+// count, the matches, then `count` samples converted from `native` (cu8, ci16
+// or cf32, as in the ring). False (why set) when a value does not fit in its
+// field, e.g. fc = 2.4e9 in a u16 field.
+bool encodeStreamMessage(const StreamFormat& f, const StreamHeader& h, uint64_t seq, SampleFormat native,
+                         const uint8_t* samples, size_t count, std::vector<uint8_t>& out, std::string& why);
+
+// True when a publisher with format `tx` on `txAddress` sends to the
+// subscriber with format `rx` on `rxAddress`: the stream would come back to
+// the wvt that sends it. The sockets must fit (RADIO to DISH in the same
+// group, PUB to SUB, PUSH to PULL) and the endpoints must be the same port
+// on the same host (or "*" on one side).
+bool publishReachesSubscriber(const StreamFormat& rx, const std::string& rxAddress, const StreamFormat& tx,
+                              const std::string& txAddress);

@@ -690,6 +690,172 @@ void checkFormats() {
     }
 }
 
+// The publisher's side of the formats (phase 6): encode, then decode.
+void checkEncode() {
+    printf("publishing with message formats (issue #101)\n");
+    std::string err, why;
+    std::vector<std::string> warn;
+    setStreamFormatDir(WVT_CONFIG_EXAMPLES);
+
+    // 8 ci16 samples of the ring: (k * 1000, -k * 1000).
+    constexpr size_t n = 8;
+    int16_t ring[2 * n];
+    for (size_t k = 0; k < n; ++k) {
+        ring[2 * k] = (int16_t)(1000 * k);
+        ring[2 * k + 1] = (int16_t)(-1000 * (int)k);
+    }
+    StreamHeader h;
+    h.fc = 433.92e6;
+    h.rate = 1e6;
+    h.gain = 12.5;
+    h.index = 123456789012ULL;
+    h.timeNs = 1700000000123456789ULL;
+    std::vector<uint8_t> out, scratch;
+    StreamMessage m;
+    FormatExtra extra;
+
+    // Each example file: what the encoder writes, the decoder reads back.
+    for (const char* id : {"gnuradio_sub_cf32", "raw_pull_ci16", "example_header", "wvt_ci16"}) {
+        StreamFormat f;
+        check(resolveStreamFormat(id, f, err) && checkPublishFormat(f, err), std::string(id) + ": can publish " + err);
+        h.rate = f.rate.set ? 1e6 : f.fixedRate;
+        h.fc = f.fc.set ? 433.92e6 : f.fixedFc;
+        const bool enc = encodeStreamMessage(f, h, 77, SampleFormat::CI16, (const uint8_t*)ring, n, out, why);
+        const bool dec = enc && decodeStreamMessage(f, out.data(), out.size(), m, extra, scratch, why);
+        bool same = dec && m.h.count == n;
+        for (size_t k = 0; same && k < n; ++k) {
+            float re = 0, im = 0;
+            if (m.h.fmt == SampleFormat::CI16) {
+                re = i16At(m.samples, 2 * k) / 32768.f;
+                im = i16At(m.samples, 2 * k + 1) / 32768.f;
+            } else {
+                memcpy(&re, m.samples + 8 * k, 4);
+                memcpy(&im, m.samples + 8 * k + 4, 4);
+            }
+            same = std::fabs(re - ring[2 * k] / 32768.f) < 1e-6f && std::fabs(im - ring[2 * k + 1] / 32768.f) < 1e-6f;
+        }
+        check(same && m.h.rate == h.rate && m.h.fc == h.fc, std::string(id) + ": the samples, the rate and fc come back " + why);
+        if (f.seq.set) check(extra.hasSeq && extra.seq == 77, std::string(id) + ": the message counter");
+        if (f.index.set) check(extra.hasIndex && m.h.index == h.index, std::string(id) + ": the sample index");
+        if (f.timeNs.set) check(m.h.timeNs == h.timeNs, std::string(id) + ": the time, exact to the ns");
+        if (f.gain.set) check(m.h.gain == h.gain, std::string(id) + ": the gain");
+    }
+    // The wvt file writes the built-in wire format: the built-in decoder reads it.
+    {
+        StreamFormat f;
+        resolveStreamFormat("wvt_ci16", f, err);
+        h.rate = 1e6;
+        encodeStreamMessage(f, h, 0, SampleFormat::CI16, (const uint8_t*)ring, n, out, why);
+        check(parseStreamMessage(out.data(), out.size(), m, why) && m.h.count == n && m.h.index == h.index &&
+                  m.h.fmt == SampleFormat::CI16 && i16At(m.samples, 2) == 1000,
+              "zmq_wvt_ci16.ini writes messages that the built-in format reads " + why);
+    }
+
+    // Every sample format, byte order and I/Q order, from each ring format.
+    {
+        const char* fmts[] = {"cu8", "ci8", "ci16", "ci32", "cf32", "cf64"};
+        int bad = 0, total = 0;
+        for (const char* sf : fmts)
+            for (const char* endian : {"little", "big"})
+                for (const char* order : {"iq", "qi"}) {
+                    StreamFormat f;
+                    const std::string text = std::string("[socket]\ntype = pull\n[header]\nbytes = 4\nseq = u32be @ 0\n[samples]\nformat = ") +
+                                             sf + "\nendian = " + endian + "\norder = " + order + "\n[stream]\nrate = 1e6\n";
+                    if (!formatFrom(text, f, err)) {
+                        ++bad;
+                        continue;
+                    }
+                    // From cf32 samples of the ring: k / 16 and -k / 32, exact in every format but cu8.
+                    std::complex<float> c[n];
+                    for (size_t k = 0; k < n; ++k) c[k] = {(float)k / 16.f, -(float)k / 32.f};
+                    ++total;
+                    if (!encodeStreamMessage(f, h, 1, SampleFormat::CF32, (const uint8_t*)c, n, out, why) ||
+                        out.size() != 4 + n * (size_t)formatBytesPerSample(f.sampleFmt) ||
+                        !decodeStreamMessage(f, out.data(), out.size(), m, extra, scratch, why)) {
+                        ++bad;
+                        continue;
+                    }
+                    FormatParams fp;
+                    fp.fmt = m.h.fmt;
+                    std::complex<float> back[n];
+                    decodeSamples(fp, m.samples, n, back);
+                    // cu8 has no 0: 127.5 is 128, +0.0039 in I and Q.
+                    const float tol = f.sampleFmt == SampleFormat::CU8 ? 0.006f : f.sampleFmt == SampleFormat::CI8 ? 0.004f : 1e-6f;
+                    for (size_t k = 0; k < n; ++k)
+                        if (std::abs(back[k] - c[k]) > tol) {
+                            ++bad;
+                            printf("  layout %s %s %s: sample %zu is (%g, %g), not (%g, %g)\n", sf, endian, order, k,
+                                   back[k].real(), back[k].imag(), c[k].real(), c[k].imag());
+                            break;
+                        }
+                }
+        check(bad == 0 && total == 24, "24 sample layouts (6 formats x byte order x I/Q order): encode, then decode (" +
+                                           std::to_string(bad) + " bad)");
+    }
+
+    // Values that do not fit, and the limits of a message.
+    {
+        StreamFormat f;
+        const std::string base = "[socket]\ntype = sub\n[samples]\nformat = ci16\n[stream]\nrate = 1e6\n";
+        check(formatFrom(base + "[header]\nbytes = 2\nfc = u16le @ 0\n", f, err), "a u16 fc field");
+        h.fc = 2.4e9;
+        check(!encodeStreamMessage(f, h, 0, SampleFormat::CI16, (const uint8_t*)ring, 1, out, why) &&
+                  why.find("fc 2400000000 does not fit in u16le") != std::string::npos,
+              "fc 2.4e9 in u16: " + why);
+        check(formatFrom(base + "[header]\nbytes = 2\nfc = u16le @ 0 * 1e6\n", f, err) &&
+                  encodeStreamMessage(f, h, 0, SampleFormat::CI16, (const uint8_t*)ring, 1, out, why) && out[0] == 0x60 &&
+                  out[1] == 0x09,
+              "with the scale 1e6: 2400 in the field");
+        check(formatFrom(base + "[header]\nbytes = 1\ncount = u8 @ 0\n", f, err) && publishMaxSamples(f) == 255,
+              "a u8 count: at most 255 samples in a message");
+        check(formatFrom(base, f, err) && publishMaxSamples(f) == (256u << 10) / 4, "tcp: 256 KiB of samples");
+        check(formatFrom("[socket]\ntype = dish\n[samples]\nformat = cf32\n[stream]\nrate = 1e6\n", f, err) &&
+                  publishMaxSamples(f) == 8064 / 8,
+              "dish: a datagram of 8064 bytes");
+        check(formatFrom(base + "[socket]\ntopic = iq\nframes = 1\n", f, err) && !checkPublishFormat(f, err) &&
+                  err.find("frames = last or 2") != std::string::npos,
+              "a topic needs frames = last or 2: " + err);
+        check(formatFrom(base + "[socket]\ntopic = iq\nframes = 2\n", f, err) && checkPublishFormat(f, err), "a topic with frames = 2");
+        check(formatFrom(base + "[socket]\nframes = 3\n", f, err) && !checkPublishFormat(f, err), "frames = 3 without a topic: " + err);
+        check(formatFrom(base + "[socket]\nmax_bytes = 64\n[header]\nbytes = 63\n", f, err) && !checkPublishFormat(f, err) &&
+                  err.find("no sample fits") != std::string::npos,
+              "a header that leaves no room: " + err);
+    }
+
+    // Where the publisher sends: the other mode.
+    {
+        StreamFormat f;
+        FormatEndpoint ep;
+        resolveStreamFormat("gnuradio_sub_cf32", f, err);
+        check(publishEndpoint(f, "*:5555", ep, err) && ep.endpoint == "tcp://*:5555",
+              "the subscriber connects, so the publisher binds: * is allowed " + err);
+        check(!formatEndpoint(f, "*:5555", ep, err), "the subscriber cannot connect to *");
+        f.bind = true;
+        check(!publishEndpoint(f, "*:5555", ep, err) && publishEndpoint(f, "", ep, err) && ep.text == "127.0.0.1:5555",
+              "a subscriber that binds: the publisher connects, to the file's address");
+    }
+
+    // The loop check: a publisher that sends to this wvt's own subscriber.
+    {
+        StreamFormat gr, pull, wvt, wvtFile;
+        resolveStreamFormat("gnuradio_sub_cf32", gr, err);
+        resolveStreamFormat("raw_pull_ci16", pull, err);
+        resolveStreamFormat("wvt", wvt, err);
+        resolveStreamFormat("wvt_ci16", wvtFile, err);
+        check(publishReachesSubscriber(wvt, "127.0.0.1:5600", wvt, "127.0.0.1:5600"), "built-in to built-in, same address: a loop");
+        check(!publishReachesSubscriber(wvt, "127.0.0.1:5600", wvt, "127.0.0.1:5601"), "another port: no loop");
+        check(publishReachesSubscriber(wvtFile, "127.0.0.1:5600", wvt, "127.0.0.1:5600"),
+              "the built-in format to the wvt file (a dish in group wvt): a loop");
+        check(publishReachesSubscriber(gr, "127.0.0.1:5555", gr, "*:5555"), "PUB binds on * where SUB connects: a loop");
+        check(publishReachesSubscriber(gr, "localhost:5555", gr, "127.0.0.1:5555"), "localhost and 127.0.0.1: a loop");
+        check(!publishReachesSubscriber(gr, "127.0.0.1:5555", pull, "127.0.0.1:5555"), "PUSH does not reach SUB");
+        check(!publishReachesSubscriber(gr, "10.0.0.2:5555", gr, "127.0.0.1:5555"), "another host: no loop");
+        check(!publishReachesSubscriber(gr, "127.0.0.1:5555", wvt, "127.0.0.1:5555"), "udp does not reach tcp");
+    }
+    h = StreamHeader{};
+    setStreamFormatDir("");
+}
+
 #ifdef WVT_HAVE_ZMQ
 void checkSockets() {
     printf("libzmq (RADIO / DISH on udp://)\n");
@@ -1062,6 +1228,165 @@ bool matchesPattern(const StreamMessage& m) {
     return true;
 }
 
+// A tcp port on the loopback that is free now.
+int freeTcpPort() {
+    void* ctx = zmq_ctx_new();
+    void* sock = zmq_socket(ctx, ZMQ_PUB);
+    int port = 0;
+    if (zmq_bind(sock, "tcp://127.0.0.1:*") == 0) {
+        char buf[256] = {};
+        size_t len = sizeof buf;
+        zmq_getsockopt(sock, ZMQ_LAST_ENDPOINT, buf, &len);
+        const char* colon = strrchr(buf, ':');
+        port = colon ? atoi(colon + 1) : 0;  // NOLINT(cert-err34-c): a port from libzmq
+    }
+    const int linger = 0;
+    zmq_setsockopt(sock, ZMQ_LINGER, &linger, sizeof linger);
+    zmq_close(sock);
+    zmq_ctx_term(ctx);
+    return port;
+}
+
+// The sample index of each received sample, from the test pattern.
+std::vector<int64_t> patternIndexes(const Received& rx, SampleFormat fmt) {
+    std::vector<int64_t> out;
+    const size_t bps = fmt == SampleFormat::CI16 ? 4 : 8;
+    for (size_t at = 0; at + bps <= rx.bytes.size(); at += bps) {
+        int64_t i = 0, q = 0;
+        if (fmt == SampleFormat::CI16) {
+            i = i16At(rx.bytes.data() + at, 0);
+            q = i16At(rx.bytes.data() + at, 1);
+        } else {
+            float v[2];
+            memcpy(v, rx.bytes.data() + at, 8);
+            i = std::lround(v[0] * 32768.f);
+            q = std::lround(v[1] * 32768.f);
+        }
+        out.push_back(i | (q << 15));
+    }
+    return out;
+}
+
+// wvt publishes the pattern with a format file; the zmq device receives it
+// with the same file. `pubAddr` and `subAddr` are the Address fields of the
+// two sides.
+void publishAndReceive(const std::string& id, const std::string& pubAddr, const std::string& subAddr, double rate,
+                       double fc, bool lossless) {
+    std::string err;
+    auto ring = std::make_shared<SampleRing>(1 << 18, 4);
+    PublishSource src;
+    src.fmt = SampleFormat::CI16;
+    src.rate = rate;
+    src.fc = 100e6;
+    src.gain = 20;
+    StreamPublisher pub;
+    if (!pub.start(ring, src, {pubAddr, 1, id}, err)) {
+        check(false, id + ": the publisher starts: " + err);
+        return;
+    }
+    // The device waits for the first message, so the ring fills before it opens.
+    std::atomic<bool> quit{false};
+    std::thread feed([&] {
+        std::vector<int16_t> buf;
+        for (int64_t at = 0; !quit; at += 1000) {
+            fillPattern(buf, at, 1000);
+            ring->push((const uint8_t*)buf.data(), 1000);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    });
+    StreamConfig cfg;
+    cfg.driver = "zmq";
+    cfg.format = id;
+    cfg.args = subAddr;
+    auto dev = openDevice(cfg, err);
+    check(dev && dev->sampleRate() == rate && dev->centerFreq() == fc, id + ": the device opens with the rate and fc " + err);
+    Received rx;
+    if (dev) {
+        const SampleFormat fmt = dev->format();
+        startInto(*dev, rx, fmt == SampleFormat::CI16 ? 4 : 8);
+        waitFor([&] { return receivedBytes(rx) >= 40000 * 8; }, 3);
+        dev->stop();
+        std::lock_guard<std::mutex> lk(rx.m);
+        const std::vector<int64_t> idx = patternIndexes(rx, fmt);
+        int64_t lost = 0;
+        bool order = idx.size() >= 20000;
+        for (size_t k = 1; order && k < idx.size(); ++k) {
+            order = idx[k] > idx[k - 1];
+            lost += idx[k] - idx[k - 1] - 1;
+        }
+        int64_t gaps = 0;
+        for (int64_t g : rx.gaps) gaps += g;
+        check(order && (lossless ? lost == 0 : lost == gaps),
+              id + ": " + std::to_string(idx.size()) + " samples arrive in order, " + std::to_string(lost) +
+                  " lost, gaps report " + std::to_string(gaps));
+    }
+    quit = true;
+    feed.join();
+    const StreamPublisher::Status st = pub.status();
+    pub.stop();
+    check(st.active && st.error.empty() && st.messages > 0, id + ": the publisher sent " + std::to_string(st.messages) +
+                                                             " messages without an error " + st.error);
+}
+
+void checkFormatPublisher() {
+    printf("publisher with format files (issue #101)\n");
+    setStreamFormatDir(WVT_CONFIG_EXAMPLES);
+    std::string err;
+
+    // PUB binds where the SUB connects; samples to cf32; the rate of the file.
+    std::string a = "127.0.0.1:" + std::to_string(freeTcpPort());
+    publishAndReceive("gnuradio_sub_cf32", a, a, 2e6, 100e6, true);  // both from [stream]
+    // PUSH binds where the PULL connects.
+    a = "127.0.0.1:" + std::to_string(freeTcpPort());
+    publishAndReceive("raw_pull_ci16", a, a, 1e6, 433.92e6, true);
+    // The header: big-endian samples, the rate in kS/s, a message counter.
+    a = "127.0.0.1:" + std::to_string(freeTcpPort());
+    publishAndReceive("example_header", "*:" + a.substr(a.rfind(':') + 1), a, 1e6, 100e6, true);
+    // RADIO to DISH on udp, with the sample index: loss is exact.
+    publishAndReceive("wvt_ci16", "127.0.0.1:15930", "127.0.0.1:15930", 1e6, 100e6, false);
+
+    // A topic: two frames, the topic and the data.
+    {
+        const char* tmp = getenv("TMPDIR");
+        const std::string dir = std::string(tmp && *tmp ? tmp : "/tmp") + "/wvt_zmq_pub_" + std::to_string(getpid());
+        mkdir(dir.c_str(), 0755);
+        if (FILE* fp = fopen((dir + "/zmq_topic.ini").c_str(), "w")) {
+            fputs("[socket]\ntype = sub\ntopic = iq\n[header]\nbytes = 8\nindex = u64le @ 0\n"
+                  "[samples]\nformat = ci16\n[stream]\nrate = 1e6\nfc = 100e6\n",
+                  fp);
+            fclose(fp);
+        }
+        setStreamFormatDir(dir);
+        a = "127.0.0.1:" + std::to_string(freeTcpPort());
+        publishAndReceive("topic", a, a, 1e6, 100e6, true);
+        unlink((dir + "/zmq_topic.ini").c_str());
+        rmdir(dir.c_str());
+        setStreamFormatDir(WVT_CONFIG_EXAMPLES);
+    }
+
+    // Errors at the start.
+    {
+        auto ring = std::make_shared<SampleRing>(4096, 4);
+        PublishSource src;
+        src.fmt = SampleFormat::CI16;
+        src.rate = 1e6;
+        src.fc = 100e6;
+        StreamPublisher pub;
+        check(!pub.start(ring, src, {"127.0.0.1:5555", 1, "nope"}, err) && err.find("no ZMQ format 'nope'") != std::string::npos,
+              "an unknown format: " + err);
+        check(!pub.start(ring, src, {"", 1, "raw_pull_ci16"}, err) || (pub.stop(), true), "the file's address when the field is empty");
+        const int port = freeTcpPort();
+        StreamPublisher first;
+        err.clear();
+        const std::string addr = "127.0.0.1:" + std::to_string(port);
+        check(first.start(ring, src, {addr, 1, "gnuradio_sub_cf32"}, err), "a PUB binds on " + addr + " " + err);
+        check(!pub.start(ring, src, {addr, 1, "gnuradio_sub_cf32"}, err) && err.find("is in use") != std::string::npos,
+              "a second PUB on the same port: " + err);
+        first.stop();
+    }
+    setStreamFormatDir("");
+}
+
 // A DISH on a free loopback port, and a thread that keeps every message
 // until it has seen `ends` end-of-stream messages or 10 s passed.
 struct Receiver {
@@ -1131,7 +1456,7 @@ void checkPublisher() {
     src.description = "zmq_check source";
     StreamPublisher pub;
     std::string err;
-    check(pub.start(ring, src, {rx.address, 1}, err), "the publisher starts (" + (err.empty() ? rx.address : err) + ")");
+    check(pub.start(ring, src, {rx.address, 1, ""}, err), "the publisher starts (" + (err.empty() ? rx.address : err) + ")");
     std::vector<int16_t> buf;
     for (int64_t at = 0; at < total; at += chunk) {
         if (at == half) {
@@ -1153,7 +1478,7 @@ void checkPublisher() {
     //    falls behind and skips.
     const int64_t total2 = 200000;
     auto small = std::make_shared<SampleRing>(4096, 4);
-    check(pub.start(small, src, {rx.address, 1}, err), "the publisher starts again on a small ring");
+    check(pub.start(small, src, {rx.address, 1, ""}, err), "the publisher starts again on a small ring");
     const uint32_t id2 = pub.status().streamId;
     fillPattern(buf, 0, total2);
     small->push((const uint8_t*)buf.data(), total2);
@@ -1249,7 +1574,7 @@ void checkSubscriber() {
     std::string addr;
     for (int port = 15800; port < 15820; ++port) {
         addr = "127.0.0.1:" + std::to_string(port);
-        if (!src.startPublishing({addr, 1}, err)) break;
+        if (!src.startPublishing({addr, 1, ""}, err)) break;
         rc.args = addr;
         if (sub.start(rc, err)) break;
         src.stopPublishing();
@@ -1314,7 +1639,7 @@ void checkSubscriber() {
     PublishSource os;
     os.rate = 2e6;
     os.fc = 100e6;
-    check(other.start(ring, os, {addr, 1}, err), "a second source at 2 MS/s sends to the same address");
+    check(other.start(ring, os, {addr, 1, ""}, err), "a second source at 2 MS/s sends to the same address");
     std::vector<int16_t> zeros(2 * 2000);
     for (int i = 0; i < 20; ++i) {
         ring->push((const uint8_t*)zeros.data(), 2000);
@@ -1333,7 +1658,7 @@ void checkSubscriber() {
     sub.stop();
 
     // A restart of the source publishes again, with a new stream ID.
-    check(src.startPublishing({addr, 1}, err), "the source publishes again");
+    check(src.startPublishing({addr, 1, ""}, err), "the source publishes again");
     const uint32_t id1 = src.publisher().status().streamId;
     sc.rate = 2e6;
     check(src.start(sc, err) && src.publisher().active() && src.publisher().status().streamId != id1,
@@ -1346,7 +1671,7 @@ void checkSubscriber() {
     src.stopPublishing();
     StreamConfig mc = rc;
     mc.args = "239.10.0.1:" + std::to_string(15830 + getpid() % 100);
-    if (src.startPublishing({mc.args, 1}, err) && sub.start(mc, err)) {
+    if (src.startPublishing({mc.args, 1, ""}, err) && sub.start(mc, err)) {
         check(sub.stats().rate == 2e6, "multicast " + mc.args + ": the subscriber receives the stream");
         check(waitFor([&] { return sub.stats().received > 200000; }, 2), "multicast: samples arrive");
         sub.stop();
@@ -1383,16 +1708,18 @@ int main() {
     checkDefaultAddress();
     checkTracker();
     checkFormats();
+    checkEncode();
 #ifdef WVT_HAVE_ZMQ
     checkSockets();
     checkPublisher();
     checkSubscriber();
     checkFormatDevice();
+    checkFormatPublisher();
 #else
     printf("libzmq: not in this build (WVT_WITH_ZMQ), the socket tests are skipped\n");
     StreamPublisher pub;
     std::string err;
-    check(!pub.start(std::make_shared<SampleRing>(4096, 4), {}, {"127.0.0.1:5600", 1}, err) &&
+    check(!pub.start(std::make_shared<SampleRing>(4096, 4), {}, {"127.0.0.1:5600", 1, ""}, err) &&
               err.find("without ZMQ") != std::string::npos,
           "the publisher reports that this build has no ZMQ");
 #endif

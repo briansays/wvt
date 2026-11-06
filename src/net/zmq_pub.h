@@ -3,6 +3,10 @@
 // the samples of a SampleRing in the wvt wire format (net/zmq_wire.h) to a
 // unicast address (the subscriber's) or a multicast group.
 //
+// With a format file (issue #101, net/zmq_format.h) it sends that format
+// instead: RADIO, PUB or PUSH, for a subscriber with DISH, SUB or PULL. Only
+// the built-in format has the info and end messages.
+//
 // The publisher is a lossy reader of the ring, like the spectrum and the
 // audio: it leaves the lossless gate to the recorder, so a recording does not
 // change. If it falls behind (the ring overwrote samples that it did not
@@ -19,8 +23,10 @@
 #include "io/iq_file.h"
 
 struct PublishConfig {
-    std::string address;  // "a.b.c.d[:port]" or "iface;group[:port]" (parseStreamAddress)
+    std::string address;  // "a.b.c.d[:port]" or "iface;group[:port]" (parseStreamAddress); with a
+                          // tcp format "host:port" (empty = the format file's address)
     int ttl = 1;          // multicast hops; 1 = the local network only
+    std::string format;   // "wvt" or empty = the built-in format, else the id of a zmq_<id>.ini file
 };
 
 struct PublishSource {
@@ -41,7 +47,8 @@ public:
         uint32_t streamId = 0;
         int64_t messages = 0;    // data messages sent
         int64_t samples = 0;     // samples sent
-        int64_t skipped = 0;     // samples not sent because the publisher fell behind
+        int64_t skipped = 0;     // samples not sent: the publisher fell behind, or the socket dropped them
+        std::string format;      // the format's name ("wvt" for the built-in format)
         double messagesPerSec = 0, bytesPerSec = 0;  // over the last second
     };
 

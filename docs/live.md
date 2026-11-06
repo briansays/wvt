@@ -398,6 +398,11 @@ the local network). While wvt publishes, the row shows the address and the data 
   subscriber sees each skip as a gap.
 - If you change the sample rate or a device option, the device restarts and wvt publishes again.
 
+To send to another program, select a format file in **Format** in the ⚙ options. The other program
+receives with the socket of the file, for example a ZMQ SUB socket, and wvt sends with the matching
+socket. If the file has an address, you can leave **Address** empty. For the details, refer to
+[Publish with a format](zmq-formats.md#publish-with-a-format).
+
 On a computer without a display, use `--publish` with `--no-gui`. Press Ctrl+C to stop:
 
 ```sh
@@ -406,6 +411,9 @@ wvt --device uhd -c 915M -r 10M --gain 40 --publish 192.168.1.50:5600 --no-gui
 
 # Publish and record at the same time; the run stops after 60 s
 wvt --device rtlsdr -c 100.1M -r 2.4M --publish 239.10.0.1 --record ~/caps/fm --record-duration 60 --no-gui
+
+# Send raw ci16 on a ZMQ PUSH socket, on the address of the format file
+wvt --device rtlsdr -c 433.92M -r 1M --publish "" --publish-format raw_pull_ci16 --no-gui
 ```
 
 ### Receive
@@ -461,7 +469,7 @@ wvt --device zmq:192.168.1.30:5555 --zmq-format gnuradio_sub_cf32
 To use a format each time, set [`zmq.format`](config.md#network-stream) in the configuration file.
 
 The frequency, the rate and the gain come from the message header, or from the format file when the
-header does not have them. The publisher and the **Publish** button use the built-in format only.
+header does not have them. To send in a format file, refer to [Publish](#publish).
 
 ### Messages
 

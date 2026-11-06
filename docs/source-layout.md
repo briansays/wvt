@@ -78,7 +78,7 @@ folders.
 | `src/device/sdr_siggen.cpp` | The loopback device that streams the generator into the live view |
 | `src/device/sdr_tx.h` | The transmitter interface. `sdr_uhd.cpp` implements it for UHD |
 | `src/net/zmq_wire.*` | The network stream (issue #96): the message header, the info message, the stream address, the default address, the sample index tracker. No libzmq |
-| `src/net/zmq_pub.*` | The network stream publisher: a lossy reader of the sample ring that sends it on a ZMQ RADIO socket |
+| `src/net/zmq_pub.*` | The network stream publisher: a lossy reader of the sample ring that sends it on a ZMQ RADIO socket, or on RADIO, PUB or PUSH in a format file |
 | `src/net/zmq_format.*` | The message formats from `zmq_*.ini` files (issue #101): the INI reader, the format checks, the list of formats in the config folder, and the decoder with the sample conversions. No libzmq |
 
 ## Signal generator

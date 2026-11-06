@@ -47,6 +47,7 @@ ui.geometry         = 1600x950           # window size WxH
 # zmq.address       = 192.168.1.20:5600  # a.b.c.d[:port] or [iface;]group[:port]
 zmq.ttl             = 1                  # multicast hops: 1 = the local network
 # zmq.format        = gnuradio_sub_cf32  # the ZMQ stream device's message format: wvt | NAME of <config folder>/zmq_NAME.ini
+# publish.format    = gnuradio_sub_cf32  # the publisher's message format: wvt | NAME of <config folder>/zmq_NAME.ini
 
 # ---- transmit limits (only stricter than the environment and the options) ---
 # tx.max_gain_db    = 60

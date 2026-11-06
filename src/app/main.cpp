@@ -66,8 +66,8 @@ static int runHeadless(const StreamConfig& dev, const RecordConfig* rc, const Pu
     signal(SIGTERM, [](int) { g_interrupted = 1; });
     if (pub) {
         const auto ps = live.publisher().status();
-        logStatus("stream", "publishing to %s, stream ID %08x, TTL %d (Ctrl+C to stop)", ps.address.c_str(),
-                ps.streamId, pub->ttl);
+        logStatus("stream", "publishing to %s, format %s, stream ID %08x, TTL %d (Ctrl+C to stop)", ps.address.c_str(),
+                  ps.format.c_str(), ps.streamId, pub->ttl);
     }
     if (rc) logStatus("record", "recording to %s (Ctrl+C to stop)", live.recorder().status().dataPath.c_str());
     auto next = std::chrono::steady_clock::now();
@@ -119,7 +119,7 @@ static int runHeadless(const StreamConfig& dev, const RecordConfig* rc, const Pu
         auto ps = live.publisher().status();
         logStatus("stream", "sent %lld samples in %lld messages to %s%s", (long long)ps.samples,
                 (long long)ps.messages, ps.address.c_str(),
-                ps.skipped ? (", skipped " + std::to_string(ps.skipped) + " (the network was too slow)").c_str() : "");
+                ps.skipped ? (", skipped " + std::to_string(ps.skipped) + " (the network was too slow, or no subscriber was connected)").c_str() : "");
         if (!ps.error.empty()) failed = 1;  // the publisher logged why
     }
     if (!devErr.empty()) {
@@ -466,7 +466,7 @@ int main(int argc, char** argv) {
         return c != std::string::npos && parseSI(str.substr(0, c).c_str(), a) && parseSI(str.substr(c + 1).c_str(), b);
     };
     StreamConfig dev;
-    bool haveDevice = false, haveRecord = false, noGui = false, haveGain = false, haveZmqFormat = false;
+    bool haveDevice = false, haveRecord = false, noGui = false, haveGain = false, haveZmqFormat = false, havePubFormat = false;
     PublishConfig pubCfg;  // --publish (issue #96)
     bool havePublish = false;
     std::vector<std::string> devGiven;  // device fields set by options; an SDR profile leaves them (issue #88)
@@ -514,6 +514,7 @@ int main(int argc, char** argv) {
     rc.cf32 = cfg.recordingCf32;
     rc.maxSeconds = cfg.recordingMaxSeconds;
     pubCfg.ttl = cfg.zmqTtl;
+    pubCfg.format = cfg.publishFormat;
     gc.fmt = cfg.siggenSample;
     extractCi16 = cfg.exportBandCi16;
     bool haveRecordFormat = false;  // --record-format also sets the generator file format
@@ -829,13 +830,18 @@ int main(int argc, char** argv) {
     cli.section("network stream (needs --device):");
     cli.add(nullptr, "--publish", "ADDR",
             "send the live stream over ZMQ on UDP to ADDR: the subscriber's address a.b.c.d[:PORT],\n"
-            "or a multicast group [IFACE;]GROUP[:PORT] (default port 5600); receive it with --device zmq",
+            "or a multicast group [IFACE;]GROUP[:PORT] (default port 5600); receive it with --device zmq.\n"
+            "With a tcp --publish-format: HOST:PORT (*:PORT listens on all interfaces), or \"\" for the file's address",
             [&](const char* v) {
-                StreamAddress a;
-                std::string err;
-                if (!parseStreamAddress(v, a, err)) return bad("--publish: %s", err.c_str());
                 pubCfg.address = v;
                 return havePublish = true;
+            });
+    cli.add(nullptr, "--publish-format", "NAME",
+            "the message format of --publish: wvt (the built-in format) or the NAME of\n"
+            "<config folder>/zmq_NAME.ini (default: publish.format, else wvt); see --list-zmq-formats",
+            [&](const char* v) {
+                pubCfg.format = v;
+                return havePubFormat = true;
             });
     cli.add(nullptr, "--publish-ttl", "N", "multicast hops (default zmq.ttl, 1: the local network only)", [&](const char* v) {
         long long n;
@@ -1176,6 +1182,7 @@ int main(int argc, char** argv) {
         eff.siggenSample = gc.fmt;
         eff.exportBandCi16 = extractCi16;
         eff.zmqTtl = pubCfg.ttl;
+        eff.publishFormat = pubCfg.format;
         eff.txMaxGainDb = txc.limits.maxGain;
         eff.txAllow.clear();
         for (const TxBand& b : txc.limits.allow) eff.txAllow.emplace_back(b.lo, b.hi);
@@ -1192,6 +1199,7 @@ int main(int argc, char** argv) {
         source("siggen.sample", nullptr, "--gen-sample");
         source("export.band_sample", nullptr, "--extract-format");
         source("zmq.ttl", nullptr, "--publish-ttl");
+        source("publish.format", nullptr, "--publish-format");
         for (const char* k : {"tx.max_gain_db", "tx.allow"}) {
             const bool tx = std::string(k) == "tx.allow";
             const bool env = envVar(tx ? "WVT_TX_ALLOW" : "WVT_TX_MAX_GAIN") && *envVar(tx ? "WVT_TX_ALLOW" : "WVT_TX_MAX_GAIN");
@@ -1330,6 +1338,24 @@ int main(int argc, char** argv) {
             LOG_WARN("config", "sdr.default %s: no such device found", cfg.sdrDefault.c_str());
         }
     }
+    // The publisher's format (issue #101) and its address, checked here for a clear message.
+    if (havePubFormat && !havePublish) {
+        LOG_ERROR("main", "--publish-format is for --publish");
+        return 2;
+    }
+    StreamFormat pubFmt;
+    if (havePublish) {
+        std::string err;
+        FormatEndpoint ep;
+        if (!resolveStreamFormat(pubCfg.format, pubFmt, err) || !checkPublishFormat(pubFmt, err)) {
+            LOG_ERROR("main", "%s%s", err.c_str(), havePubFormat ? "" : " (publish.format in the configuration file)");
+            return 2;
+        }
+        if (!publishEndpoint(pubFmt, pubCfg.address, ep, err)) {
+            LOG_ERROR("main", "--publish: %s", err.c_str());
+            return 2;
+        }
+    }
     if (haveZmqFormat && !(haveDevice && dev.driver == "zmq")) {
         LOG_ERROR("main", "--zmq-format is for --device zmq");
         return 2;
@@ -1358,12 +1384,9 @@ int main(int argc, char** argv) {
                               "drop -c, -r, --gain and the other device options");
             return 2;
         }
-        StreamAddress in, out;
-        const std::string inText = dev.args.empty() ? defaultStreamAddress() : dev.args;
-        if (builtin && havePublish && parseStreamAddress(inText, in, err) && parseStreamAddress(pubCfg.address, out, err) &&
-            in.ip == out.ip && in.port == out.port) {
+        if (havePublish && publishReachesSubscriber(fmt, dev.args, pubFmt, pubCfg.address)) {
             LOG_ERROR("main", "--publish %s would send the stream back to this wvt (--device zmq receives on %s)",
-                      pubCfg.address.c_str(), in.text().c_str());
+                      pubCfg.address.c_str(), ep.text.c_str());
             return 2;
         }
     }

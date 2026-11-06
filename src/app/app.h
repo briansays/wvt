@@ -156,6 +156,9 @@ private:
     void drawSourceSelector(float width);
     void drawDeviceToolbar();
     void drawZmqFormat(bool running);  // the Format combo of the ZMQ stream device (issue #101)
+    void scanZmqFormats();
+    bool zmqFormatCombo(const char* id, std::string& cur, bool publish, bool& wasOpen);
+    bool publishLoops(const std::string& address);
     void drawRecordBar();
     void drawPublishBar();
     void drawLiveLeft();
@@ -403,6 +406,7 @@ private:
     std::vector<StreamFormatEntry> zmqFormats_;
     bool zmqFormatsScanned_ = false;
     bool zmqFormatOpen_ = false;
+    bool pubFormatOpen_ = false;
     std::string liveErr_;
     double fileFs_ = 1e6, fileFc_ = 0;  // file-mode values while live mode borrows fs_/fc_
     double liveViewFc_ = NAN, liveViewFs_ = NAN;
@@ -416,6 +420,7 @@ private:
     // Publishing over the network (issue #96)
     char pubAddr_[256] = {};  // the subscriber's address or a group; empty = this computer's address at first use
     int pubTtl_ = 1;
+    std::string pubFormat_;  // the publisher's message format (issue #101): "" or "wvt" = the built-in format
     std::string pubErr_;
     bool pubWasActive_ = false;  // for the error of a publisher that stops on its own
 

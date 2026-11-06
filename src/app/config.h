@@ -77,6 +77,8 @@ struct WvtConfig {
     // The message format of the ZMQ stream device (issue #101): "wvt" or
     // empty = the built-in format, else the id of <config folder>/zmq_<id>.ini.
     std::string zmqFormat;
+    // The message format of the publisher (issue #101), as zmqFormat.
+    std::string publishFormat;
 
     // Transmit limits; they only make the other limits stricter
     double txMaxGainDb = NAN;                         // NaN = no limit from the file

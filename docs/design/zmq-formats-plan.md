@@ -1,6 +1,6 @@
 # Plan: ZMQ message formats from configuration files (issue #101)
 
-Status: phases 1 (config folder), 2 (format files and decoder), 3 (subscriber device), 4 (selection) and 5 (docs) implemented on `zmq-formats` (2026-11-05). Phase 6 (publisher) not started.
+Status: all six phases implemented on `zmq-formats` (2026-11-05).
 
 ## 1. Goal
 
@@ -210,6 +210,23 @@ The repository ships these examples in `config/`:
   `--publish-format` on the command line. The built-in `wvt` format stays the default.
 - `[socket]` may need different defaults for the publisher (for example PUB binds). The file gets
   a `[publish]` section if needed.
+
+Implementation notes:
+
+- No `[publish]` section was needed. The publisher uses the subscriber's file as it is: RADIO,
+  PUB or PUSH for DISH, SUB or PULL, and the other mode (a SUB that connects needs a PUB that
+  binds). So one file describes both sides.
+- `seq` counts every message, also one that the socket drops, so the subscriber sees the loss.
+  `index` counts samples from the start of publishing. `time_ns` is the wall clock time.
+- A message is at most 8064 bytes on udp (as the built-in format) and at most `max_bytes` and
+  256 KiB on tcp. A `count` field limits it too.
+- A sub format with a topic sends two frames, the topic and the data; it needs `frames = last` or
+  `2`. Other formats send one frame.
+- A value that does not fit its field (for example fc in a `u16` field) stops publishing with a
+  message. The start checks the values of the device first.
+- Only the built-in format sends the info and end messages.
+- The loop check (`publishReachesSubscriber`) compares the sockets, the group and the endpoints,
+  so it covers the format files and the built-in format.
 
 ## 6. Verification
 

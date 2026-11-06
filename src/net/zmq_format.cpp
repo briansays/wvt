@@ -203,6 +203,61 @@ FieldValue readField(const FormatField& f, const uint8_t* p) {
     return v;
 }
 
+void storeAt(uint64_t bits, int n, bool be, uint8_t* dst) {
+    for (int i = 0; i < n; ++i) dst[be ? n - 1 - i : i] = (uint8_t)(bits >> (8 * i));
+}
+
+// The samples with I and Q, or the bytes of each value, in the other order.
+// It is its own inverse, so the decoder and the encoder both use it.
+void reorderSamples(const uint8_t* src, uint8_t* dst, size_t count, size_t bps, bool swapIQ, bool swapBytes) {
+    const size_t half = bps / 2;
+    for (size_t i = 0; i < count; ++i) {
+        const uint8_t* in = src + i * bps;
+        uint8_t* out = dst + i * bps;
+        for (size_t c = 0; c < 2; ++c) {
+            const uint8_t* from = in + (swapIQ ? 1 - c : c) * half;
+            uint8_t* to = out + c * half;
+            for (size_t b = 0; b < half; ++b) to[b] = from[swapBytes ? half - 1 - b : b];
+        }
+    }
+}
+
+// Writes `v` / the field's scale. False (why set) if it does not fit.
+bool writeNumber(const FormatField& f, double v, const char* name, uint8_t* p, std::string& why) {
+    const int n = typeBytes(f.type);
+    const double x = v / f.scale;
+    if (f.type == FieldType::F32) {
+        const auto x32 = (float)x;
+        uint32_t b = 0;
+        memcpy(&b, &x32, sizeof b);
+        storeAt(b, 4, f.bigEndian, p + f.offset);
+        return true;
+    }
+    if (f.type == FieldType::F64) {
+        uint64_t b = 0;
+        memcpy(&b, &x, sizeof b);
+        storeAt(b, 8, f.bigEndian, p + f.offset);
+        return true;
+    }
+    const double r = std::nearbyint(x);
+    const double top = std::ldexp(1.0, 8 * n - (typeIsSigned(f.type) ? 1 : 0));  // 2^bits or 2^(bits-1)
+    const double lo = typeIsSigned(f.type) ? -top : 0;
+    if (!std::isfinite(r) || r < lo || r >= top) {
+        char buf[64];
+        if (std::fabs(v) < 1e15 && v == std::floor(v)) snprintf(buf, sizeof buf, "%.0f", v);  // 2400000000, not 2.4e+09
+        else snprintf(buf, sizeof buf, "%.9g", v);
+        why = std::string(name) + " " + buf + " does not fit in " + fieldTypeName(f.type, f.bigEndian) +
+              (f.scale != 1 ? " (with the scale)" : "");
+        return false;
+    }
+    const uint64_t bits = r < 0 ? (uint64_t)(int64_t)r : (uint64_t)r;
+    storeAt(bits, n, f.bigEndian, p + f.offset);
+    return true;
+}
+
+// A counter: the low bits of `v` (it wraps, as the subscriber expects).
+void writeCounter(const FormatField& f, uint64_t v, uint8_t* p) { storeAt(v, typeBytes(f.type), f.bigEndian, p + f.offset); }
+
 struct Parser {
     Parser(const std::string& n, StreamFormat& fmt, std::vector<std::string>& w) : name(n), f(fmt), warnings(w) {}
     const std::string& name;
@@ -718,18 +773,8 @@ bool decodeStreamMessage(const StreamFormat& f, const uint8_t* p, size_t n, Stre
     }
     if (out == f.sampleFmt) {
         // The same format, with the bytes or I and Q in another order.
-        const size_t half = bps / 2;
-        const bool swapBytes = f.bigEndian && half > 1;
         scratch.resize(count * bps);
-        for (size_t i = 0; i < count; ++i) {
-            const uint8_t* src = body + i * bps;
-            uint8_t* dst = scratch.data() + i * bps;
-            for (size_t c = 0; c < 2; ++c) {
-                const uint8_t* s = src + (f.swapIQ ? 1 - c : c) * half;
-                uint8_t* d = dst + c * half;
-                for (size_t b = 0; b < half; ++b) d[b] = s[swapBytes ? half - 1 - b : b];
-            }
-        }
+        reorderSamples(body, scratch.data(), count, bps, f.swapIQ, f.bigEndian && bps > 2);
     } else {
         // Another format: to cf32.
         FormatParams fp;
@@ -880,4 +925,110 @@ MessageCounter::Result MessageCounter::next(uint64_t seq) {
     }
     expected_ = (seq + 1) & mask_;
     return r;
+}
+
+// ---------------------------------------------------------------------------
+// Publishing (phase 6)
+
+namespace {
+constexpr size_t kDatagramBytes = kStreamHeaderBytes + kStreamMaxPayload;  // as the built-in format
+constexpr size_t kTcpMessageBytes = 256u << 10;
+
+bool isAnyHost(const std::string& h) { return h == "*" || h == "0.0.0.0"; }
+bool isLoopback(const std::string& h) { return h == "localhost" || h.rfind("127.", 0) == 0; }
+}  // namespace
+
+bool checkPublishFormat(const StreamFormat& f, std::string& err) {
+    if (f.builtin) return true;
+    const bool topic = f.socket == FormatSocket::Sub && !f.topic.empty();
+    if (topic && f.frame != 0 && f.frame != 2) {
+        err = "the format '" + f.name + "' has a topic: wvt sends it as frame 1 and the data as frame 2, so set frames = last or 2";
+        return false;
+    }
+    if (!topic && f.frame > 1) {
+        err = "the format '" + f.name + "' reads frame " + std::to_string(f.frame) +
+              ": wvt sends one frame (two with a topic), so set frames = last or 1";
+        return false;
+    }
+    if (publishMaxSamples(f) == 0) {
+        err = "the format '" + f.name + "': no sample fits in a message after the header of " +
+              std::to_string(f.headerBytes) + " bytes";
+        return false;
+    }
+    return true;
+}
+
+size_t publishMaxSamples(const StreamFormat& f) {
+    const size_t limit = f.socket == FormatSocket::Dish ? kDatagramBytes : std::min(f.maxBytes, kTcpMessageBytes);
+    const auto bps = (size_t)formatBytesPerSample(f.sampleFmt);
+    size_t n = limit > f.headerBytes ? (limit - f.headerBytes) / bps : 0;
+    if (f.count.set) {
+        const int bits = 8 * typeBytes(f.count.type) - (typeIsSigned(f.count.type) ? 1 : 0);
+        if (bits < 64) n = std::min<size_t>(n, (size_t)((1ULL << bits) - 1));
+    }
+    return n;
+}
+
+bool publishEndpoint(const StreamFormat& f, const std::string& typed, FormatEndpoint& out, std::string& err) {
+    StreamFormat p = f;
+    if (f.socket != FormatSocket::Dish) p.bind = !f.bind;  // a dish binds; its RADIO sends to the address
+    return formatEndpoint(p, typed, out, err);
+}
+
+bool encodeStreamMessage(const StreamFormat& f, const StreamHeader& h, uint64_t seq, SampleFormat native,
+                         const uint8_t* samples, size_t count, std::vector<uint8_t>& out, std::string& why) {
+    const auto bps = (size_t)formatBytesPerSample(f.sampleFmt);
+    out.assign(f.headerBytes + count * bps, 0);
+    uint8_t* p = out.data();
+    if (f.fc.set && !writeNumber(f.fc, h.fc, "fc", p, why)) return false;
+    if (f.rate.set && !writeNumber(f.rate, h.rate, "rate", p, why)) return false;
+    if (f.gain.set && !writeNumber(f.gain, h.gain, "gain", p, why)) return false;
+    if (f.timeNs.set) {
+        if (!typeIsFloat(f.timeNs.type) && f.timeNs.scale == 1 && typeBytes(f.timeNs.type) == 8)
+            writeCounter(f.timeNs, h.timeNs, p);  // exact: a double has only 53 bits
+        else if (!writeNumber(f.timeNs, (double)h.timeNs, "time_ns", p, why))
+            return false;
+    }
+    if (f.index.set) writeCounter(f.index, h.index, p);
+    if (f.seq.set) writeCounter(f.seq, seq, p);
+    if (f.count.set && !writeNumber(f.count, (double)count, "count", p, why)) return false;
+    for (const FormatMatch& m : f.matches) std::copy(m.bytes.begin(), m.bytes.end(), p + m.offset);
+
+    if (count == 0) return true;
+    uint8_t* body = p + f.headerBytes;
+    const bool swapBytes = f.bigEndian && bps > 2;
+    if (native == f.sampleFmt && !f.swapIQ && !swapBytes) {
+        memcpy(body, samples, count * bps);
+    } else if (native == f.sampleFmt) {
+        reorderSamples(samples, body, count, bps, f.swapIQ, swapBytes);
+    } else {
+        // Through cf32, as the decoder does the other way.
+        thread_local std::vector<std::complex<float>> tmp;
+        thread_local std::vector<uint8_t> packed;
+        tmp.resize(count);
+        FormatParams fp;
+        fp.fmt = native;
+        decodeSamples(fp, samples, (int64_t)count, tmp.data());
+        if (!f.swapIQ && !swapBytes) {
+            encodeSamples(f.sampleFmt, tmp.data(), (int64_t)count, body);
+        } else {
+            packed.resize(count * bps);
+            encodeSamples(f.sampleFmt, tmp.data(), (int64_t)count, packed.data());
+            reorderSamples(packed.data(), body, count, bps, f.swapIQ, swapBytes);
+        }
+    }
+    return true;
+}
+
+bool publishReachesSubscriber(const StreamFormat& rx, const std::string& rxAddress, const StreamFormat& tx,
+                              const std::string& txAddress) {
+    if (rx.socket != tx.socket) return false;  // RADIO-DISH, PUB-SUB, PUSH-PULL only
+    FormatEndpoint a, b;
+    std::string err;
+    if (!formatEndpoint(rx, rxAddress, a, err) || !publishEndpoint(tx, txAddress, b, err)) return false;
+    if (rx.socket == FormatSocket::Dish) return rx.group == tx.group && a.udp.ip == b.udp.ip && a.udp.port == b.udp.port;
+    // The publisher has the other mode than its file: it meets a subscriber of the same mode.
+    if (rx.bind != tx.bind || a.port != b.port) return false;
+    const std::string ha = a.text.substr(0, a.text.rfind(':')), hb = b.text.substr(0, b.text.rfind(':'));
+    return ha == hb || isAnyHost(ha) || isAnyHost(hb) || (isLoopback(ha) && isLoopback(hb));
 }

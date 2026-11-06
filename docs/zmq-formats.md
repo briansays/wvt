@@ -2,7 +2,8 @@
 
 The **ZMQ stream** device receives the stream of another wvt in the built-in format `wvt`. It can
 also receive samples from other programs, for example GNU Radio. A format file tells wvt the
-structure of the messages from such a program. This page is the reference for the format files.
+structure of the messages from such a program. The publisher (**Publish**) can send in the same
+formats. This page is the reference for the format files.
 
 For how to receive a stream, refer to [Receive other formats](live.md#receive-other-formats).
 
@@ -197,6 +198,62 @@ gap. Set `index` or `seq`, not both.
 
 If the sample rate in the header changes, wvt stops the device. Click **Start** again. If the center
 frequency in the header changes, wvt retunes at the first sample of that message.
+
+## Publish with a format
+
+wvt can send the live stream in a format file, so that another program receives it. One file
+describes both sides: the publisher sends the messages that a subscriber with the file receives.
+
+1. Start a device.
+2. Click the ⚙ button next to **Publish**.
+3. In **Format**, select the format file.
+4. In **Address**, type the address, or leave it empty to use the address of the file.
+5. Click **Publish**.
+
+From the command line, use `--publish ADDR --publish-format NAME`. To use the address of the file,
+type `--publish ""`. To use a format each time, set
+[`publish.format`](config.md#network-stream) in the configuration file.
+
+wvt uses the socket that fits the socket of the file, and the other mode:
+
+| The file (the subscriber) | wvt sends with |
+|---|---|
+| `type = dish` (`bind`) | RADIO, to the address of the subscriber or a multicast group |
+| `type = sub`, `mode = connect` | PUB that binds on the address. `*:port` listens on all interfaces |
+| `type = sub`, `mode = bind` | PUB that connects to the address of the subscriber |
+| `type = pull`, `mode = connect` | PUSH that binds on the address |
+| `type = pull`, `mode = bind` | PUSH that connects to the address of the subscriber |
+
+wvt fills the header from the device:
+
+- `fc`, `rate` and `gain`: the values of the device. If a value does not fit in its field, wvt does
+  not start, or it stops publishing with a message. For example, 2.4 GHz does not fit in a `u16`
+  field without a scale.
+- `index`: the samples since the start of publishing. `seq`: the messages since the start.
+- `time_ns`: the time of the first sample of the message.
+- `count`: the samples in the message.
+- The matches: their bytes. Other header bytes are 0.
+
+wvt changes the samples from the format of the device to the format of the file. A message has at
+most 8064 bytes on `udp`. On `tcp`, it has at most `max_bytes` and 256 KiB.
+
+Some files cannot publish, and the **Format** list shows them disabled:
+
+- A `sub` format with a `topic` needs `frames = last` or `frames = 2`. wvt sends the topic in frame
+  1 and the data in frame 2.
+- The other formats need `frames = last` or `frames = 1`.
+- The header must leave space for one sample in `max_bytes`.
+
+If the file has no `rate` field, the subscriber takes the rate from `[stream]`. If the device has
+another rate, wvt writes a warning in the log. Set `rate` in `[stream]` to the rate of the device.
+
+```{warning}
+A PUSH socket without a subscriber, and a PUB or RADIO socket on a slow network, drop messages.
+wvt shows the dropped samples as *skipped*.
+```
+
+Only the built-in format sends the info message and the end message. A subscriber of a format file
+does not get the description of the device, and it does not see when the publisher stops.
 
 ## The examples
 
