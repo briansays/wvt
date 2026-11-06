@@ -25,6 +25,10 @@ GpuStatus gpuBackendChannelize(const ChanJob&, float*, const std::function<bool(
     return GpuStatus::Unavailable;
 }
 
+GpuStatus gpuBackendFftBatch(float*, int, int, bool, const std::function<bool()>&, std::string&, bool&) {
+    return GpuStatus::Unavailable;
+}
+
 GpuStatus gpuBackendSpectrogram(const SpecJob&, float*, const std::function<bool()>&, std::string&, bool&) {
     return GpuStatus::Unavailable;
 }

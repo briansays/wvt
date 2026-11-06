@@ -80,6 +80,9 @@ Session sample(const std::string& file) {
     s.pt[0] = {MeasPlot::Waterfall, 2.15, 915.01e6};
     s.pt[1] = {MeasPlot::FM, 2.25, 0};
     s.bookmarks = {{"burst \"A\"", 2.0, 2.1}, {"tail", 8.0, 9.0}};
+    std::string err;
+    parseJson(R"({"open": true, "tab": "pulses", "pulses": {"threshold_db": 9.5, "auto": false}, "x": [1, null, "a\"b"]})",
+              s.analysis, err);
     return s;
 }
 
@@ -101,7 +104,7 @@ bool same(const Session& a, const Session& b) {
     for (size_t k = 0; ok && k < a.bookmarks.size(); ++k)
         ok = a.bookmarks[k].name == b.bookmarks[k].name && a.bookmarks[k].t0 == b.bookmarks[k].t0 &&
              a.bookmarks[k].t1 == b.bookmarks[k].t1;
-    return ok;
+    return ok && jsonWrite(a.analysis) == jsonWrite(b.analysis);
 }
 }  // namespace
 
@@ -129,6 +132,12 @@ int main() {
     Session r;
     check(loadSession(sess, r, err), "read back: " + err);
     check(same(s, r), "every value read back is the same");
+    check(r.analysis.type == JsonValue::Type::Object && r.analysis.get("pulses") &&
+              r.analysis.get("pulses")->number("threshold_db") == 9.5,
+          "the analysis object is read back: " + jsonWrite(r.analysis));
+    check(jsonWrite(r.analysis) ==
+              R"({"open": true, "tab": "pulses", "pulses": {"threshold_db": 9.5, "auto": false}, "x": [1, null, "a\"b"]})",
+          "jsonWrite keeps the members in order");
     check(sessionRecording(r) == rec, "the recording: " + sessionRecording(r));
     std::ifstream in(sess);
     const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());

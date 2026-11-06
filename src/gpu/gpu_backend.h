@@ -19,7 +19,7 @@ void gpuBackendProbe(int device, GpuInfo& info);
 std::vector<std::string> gpuBackendList();
 
 // The jobs this backend runs; the others use the CPU.
-enum class GpuJob { Spectrogram, Live, Channel };
+enum class GpuJob { Spectrogram, Live, Channel, Fft };
 bool gpuBackendImplements(GpuJob job);
 GpuLimits gpuBackendLimits();
 
@@ -29,6 +29,8 @@ GpuStatus gpuBackendSpectrogram(const SpecJob& job, float* lin, const std::funct
                                 bool& oom);
 GpuStatus gpuBackendChannelize(const ChanJob& job, float* y, const std::function<bool()>& cancelled, std::string& err,
                                bool& oom);
+GpuStatus gpuBackendFftBatch(float* data, int n, int batch, bool inverse, const std::function<bool()>& cancelled,
+                             std::string& err, bool& oom);
 // Live spectrum state, created on first use by the thread that runs it.
 GpuLiveImpl* gpuBackendLiveCreate();
 void gpuBackendLiveDestroy(GpuLiveImpl* impl);

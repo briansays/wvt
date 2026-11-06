@@ -23,8 +23,9 @@
 #endif
 
 namespace {
-const char* kNames[kSnapPlots] = {"overview", "spectrum", "waterfall", "iq", "am", "fm", "pm"};
-const char* kLabels[kSnapPlots] = {"Overview strip", "Spectrum", "Waterfall", "I / Q", "AM", "FM", "PM"};
+const char* kNames[kSnapPlots] = {"overview", "spectrum", "waterfall", "iq", "am", "fm", "pm", "analysis"};
+const char* kLabels[kSnapPlots] = {"Overview strip", "Spectrum", "Waterfall", "I / Q", "AM", "FM", "PM",
+                                   "Analysis (the open tab)"};
 
 bool exists(const std::string& path) {
     struct stat st;

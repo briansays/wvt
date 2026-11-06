@@ -14,7 +14,8 @@ if(rc)
   message(FATAL_ERROR "iqgen failed")
 endif()
 execute_process(COMMAND ${WVT} --no-log-file --software ${DIR}/rec.sigmf-meta --view 0.5:0.75 --chan 150k:30k
-                        --segment 0.25:1.75 --session-out ${DIR}/a.wvtsession.json
+                        --segment 0.25:1.75 --analyze pulses --analyze-opt threshold=9.5,smooth=4,nfft=8192
+                        --session-out ${DIR}/a.wvtsession.json
                 RESULT_VARIABLE rc ERROR_VARIABLE out)
 if(out MATCHES "cannot open X display")
   message("${out}no X server: skipped")
@@ -33,7 +34,9 @@ file(READ ${DIR}/b.wvtsession.json b)
 if(NOT a STREQUAL b)
   message(FATAL_ERROR "the session changed when opened and saved again:\n${a}\n---\n${b}")
 endif()
-if(NOT a MATCHES "\"offset_hz\": 150000" OR NOT a MATCHES "\"t0_s\": 0.5" OR NOT a MATCHES "\"segment_s\": \\[0.25, 1.75\\]")
+if(NOT a MATCHES "\"offset_hz\": 150000" OR NOT a MATCHES "\"t0_s\": 0.5" OR NOT a MATCHES "\"segment_s\": \\[0.25, 1.75\\]"
+   OR NOT a MATCHES "\"analysis\": {\"open\": true, \"tab\": \"pulses\"" OR NOT a MATCHES "\"threshold_db\": 9.5"
+   OR NOT a MATCHES "\"smooth\": 4" OR NOT a MATCHES "\"spectrum\": {\"nfft\": 8192")
   message(FATAL_ERROR "the session does not have the options:\n${a}")
 endif()
 file(REMOVE_RECURSE ${DIR})

@@ -103,6 +103,10 @@ void App::drawMenuBar() {
             ImGui::SetItemTooltip("Two draggable time cursors shown on every plot");
         }
         ImGui::MenuItem("Frequency markers", "F", &fMarkers_);
+        if (!liveMode_) {
+            ImGui::MenuItem("Symbol cursors", nullptr, &anViewerCursors_, symbolCursorsReady());
+            ImGui::SetItemTooltip("The symbol centers of the Symbols tab (Tools > Analysis) on the time plots");
+        }
         ImGui::SetItemTooltip("Two draggable frequency cursors on the spectrum and waterfall");
         if (!liveMode_) {
             ImGui::MenuItem("Point markers", nullptr, &pointsShown_);
@@ -133,6 +137,7 @@ void App::drawMenuBar() {
     if (ImGui::BeginMenu("Tools")) {
         ImGui::MenuItem("Signal generator", "Ctrl+G", &sgOpen_);
         ImGui::MenuItem("Audio", "Ctrl+D", &auOpen_);
+        ImGui::MenuItem("Analysis", "Ctrl+Y", &anOpen_, !liveMode_);
         if (gpuInfo().available) {
             ImGui::Separator();
             bool on = gpuEnabled();

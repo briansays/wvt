@@ -17,6 +17,8 @@ wvt has these other functions:
 - **Audio:** wvt demodulates one channel and plays it through the speakers or writes it to a WAV
   file.
 - **Region export:** wvt writes a time range, and as an option a frequency band, to a new file.
+- **Signal analysis:** wvt measures a part of a recording, finds and measures pulses, finds the
+  symbol rate, and demodulates OOK, FSK, BPSK and QPSK to bits.
 - **GPU processing:** wvt can do the signal processing on an NVIDIA GPU (CUDA) or an Apple GPU
   (Metal).
 
@@ -26,8 +28,8 @@ This manual has four parts:
    first recording. The [Build reference](#build-reference) gives all the build settings.
 2. [Front end](#part-2-front-end): the window and each tool in it.
 3. [Back end](#part-3-back-end): the log, the configuration file and the command line.
-4. [In the weeds](#part-4-in-the-weeds): the signal processing, the GPU, file sessions and the
-   ZMQ message formats.
+4. [In the weeds](#part-4-in-the-weeds): the signal processing, the analysis calculations, the
+   GPU, file sessions and the ZMQ message formats.
 
 ## Part 1: Getting started
 
@@ -568,6 +570,7 @@ cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
 | `session_check` | Self-check for the file sessions |
 | `config_check` | Self-check for the configuration file parser |
 | `measure_check` | Self-check for the point measurements |
+| `analysis_check` | Self-check for the tools of the Analysis window |
 | `clipboard_check` | Self-check for the system clipboard. It needs an X server. Without one, CTest skips it |
 | `device_check` | Self-check for the device list and the sample rate rules |
 | `bb_check` | Self-check for the BB60 backend, with the simulated device. Only with `WVT_BB_SIM=ON` |
@@ -703,8 +706,8 @@ new end. The status bar then shows a warning. To see the new length, open the fi
 | Menu | Items |
 |---|---|
 | **File** | Open file, export region, save plot snapshots, save file session, quit |
-| **View** | Time markers, frequency markers, point markers, relative frequency, peak hold, the overview strip, the time plots to show, show everything |
-| **Tools** | Signal generator, audio, use the GPU |
+| **View** | Time markers, frequency markers, symbol cursors, point markers, relative frequency, peak hold, the overview strip, the time plots to show, show everything |
+| **Tools** | Signal generator, audio, analysis, use the GPU |
 | **Help** | Keyboard and mouse, about wvt |
 
 #### Linked views
@@ -824,6 +827,7 @@ Point markers are not available in live mode.
 | Signal generator window | `Ctrl+G` |
 | Audio window | `Ctrl+D` |
 | Export window | `Ctrl+E` |
+| Analysis window | `Ctrl+Y` |
 | Stop wvt | `Ctrl+Q` |
 
 #### Copy and paste
@@ -1004,6 +1008,309 @@ If a GPU is available, the filter runs on the GPU. The mixer phase is a function
 sample number. The self-check `build/extract_check` tests the copies, the band filter, the
 metadata, the input checks and the cancel.
 
+### Signal analysis
+
+The **Analysis** window has tools that measure and examine a part of a recording. Use them to find
+the parameters of a signal: its power, bandwidth, pulse timing, symbol rate and modulation. The
+window is available in File mode only.
+
+#### Open the Analysis window
+
+Select **Tools → Analysis**, or press `Ctrl+Y`. To open it from the command line, use `--analyze
+KIND`, for example `--analyze pulses`. Refer to
+[Analysis on the command line](#analysis-on-the-command-line).
+
+The window has one tab for each tool. wvt calculates the result of the open tab only. Each tab
+keeps its last result. Thus a tab shows its result immediately when you open it again. When the
+region or a setting changes, wvt calculates the result again.
+
+#### Select the samples
+
+The top row of the window sets the samples that all the tabs use.
+
+| Control | Function |
+|---|---|
+| **Region** | **View**: the time range of the view. **Time markers**: the range between the time markers. **Bookmark**: the time range of the bookmark that you select. **Whole segment**: the full file, or the loaded segment |
+| **Channel filter** | On: the tools use the output of the channel filter, when the filter is on. Off: the tools use the full band of the file |
+| **Max samples** | The maximum number of samples that a tab holds in memory. The default is 16 M (128 MB) |
+
+The line under the row shows the region, the number of samples, the sample rate and the channel.
+
+The **Measurements**, **Spectrum** and **Pulses** tabs read all the samples of the region in
+blocks. Thus their region can be the full file. The other tabs use only the first **Max samples**
+of the region. When this occurs, the status line shows *the first part of the region only*.
+
+The status line also shows `Calculating... NN %` while wvt calculates, and the time that the last
+result took.
+
+To use the channel filter, set it in the file viewer first. Refer to
+[The channel filter and the time plots](#the-channel-filter-and-the-time-plots). With a narrow
+channel, the tools get fewer samples and a lower rate. Thus they are faster, and the noise outside
+the channel does not change the results.
+
+#### Region measurements
+
+The **Measurements** tab shows these values for the region, and the spectrum that it used:
+
+| Value | Description |
+|---|---|
+| **Mean power**, **Peak power** | The mean and the maximum of the sample power, in dBFS |
+| **PAPR** | The peak power minus the mean power (the crest factor) |
+| **Carrier** | The frequency of the spectrum peak |
+| **Centroid** | The mean frequency, weighted by the power over the noise floor |
+| **Occupied BW (99 %)** | The width of the band that has 99 % of the power, and its edges |
+| **-26 dB bandwidth** | From the lowest bin to the highest bin that is not more than 26 dB under the peak |
+| **Noise floor** | The power of one spectrum bin at the 20th percentile of the bins |
+| **SNR** | The signal power in the occupied bandwidth, relative to the noise in the same band |
+| **DC offset**, **DC power** | The mean of I and of Q, and the DC power relative to the total power |
+| **I/Q gain imbalance** | The I power relative to the Q power, after wvt removes the DC |
+| **I/Q phase imbalance** | The angle between I and Q, relative to 90 degrees |
+| **RBW** | The resolution bandwidth of the spectrum |
+
+**FFT size** and **Window** set the spectrum. The plot shows the spectrum, the occupied band, the
+noise floor and the carrier.
+
+#### High-resolution spectrum
+
+The **Spectrum** tab shows a Welch spectrum of all the samples of the region. The FFT size can be
+up to 1 M points. Thus the resolution can be much better than the spectrum of the file viewer.
+
+| Control | Function |
+|---|---|
+| **FFT size**, **Window**, **Overlap** | The settings of the Welch average |
+| **Max**, **Min** | Show the maximum and the minimum of each bin over all the FFTs |
+
+The line over the plot shows the RBW, the number of averages and the total power.
+
+To measure the power in a channel, turn on the frequency markers (`F`) and put them at the
+edges of the channel. The line then also shows:
+
+- The power between the markers, in dBFS.
+- The ACPR, in dBc. This is the power in the band of the same width below and above the channel,
+  relative to the power in the channel.
+
+#### Histograms and CCDF
+
+The **Histograms** tab shows the distribution of the values of the samples.
+
+| Control | Function |
+|---|---|
+| **Show** | `I`, `Q`, `AM` (the magnitude), `FM` (the frequency, in Hz from the channel center) or `PM` (the phase) |
+| **Bins** | The number of histogram bins |
+| **Log counts** | A logarithmic count axis. Use it to see small counts |
+
+The right plot is the CCDF of the power. It shows the probability that the power is more than the
+mean power by the value on the horizontal axis. The gray line is the CCDF of Gaussian noise, for
+comparison. The line over the plots shows the CCDF at 1 %, 0.1 % and 0.01 %, and the peak.
+
+Some examples:
+
+- An FM histogram of an FSK signal has one peak for each frequency of the signal.
+- An AM histogram of a constant-envelope signal has one narrow peak.
+- A CCDF to the right of the Gaussian line shows a signal with high peaks, for example OFDM.
+
+#### Constellation diagram
+
+The **Constellation** tab shows the samples on the I/Q plane.
+
+| Control | Function |
+|---|---|
+| **Carrier offset** | How wvt removes a carrier offset that stays after the channel filter. **None**. **Manual**: the offset that you type. **Mean frequency**: for FM, FSK and tones. **x^N peak**: for M-PSK and QAM. This also removes the mean phase |
+| **N** | With **x^N peak**: 2 for BPSK, 4 for QPSK and QAM, 8 for 8-PSK |
+| **Normalize** | Scale the samples to an RMS magnitude of 1 |
+| **Symbols only** | Show one point at each symbol center. This uses the rate and the timing of the **Symbols** tab. Open that tab first |
+| **Density** | Show the number of points in each cell, in color. Off: show each point (up to 20000 points) |
+
+The line over the plot shows the offset that wvt removed, the RMS magnitude and the deviation of
+the magnitude.
+
+#### Pulse analysis
+
+The **Pulses** tab finds the pulses in the region and measures each pulse.
+
+| Control | Function |
+|---|---|
+| **Auto threshold** | On: the threshold is the noise floor plus the value in **Over the noise**. Off: the threshold is the value in **Threshold**, in dBFS |
+| **Hysteresis** | A pulse ends when the power is this much under the threshold |
+| **Min width** | wvt ignores pulses that are shorter |
+| **Smooth** | A moving average of the power, in samples, before the threshold. Use it with noisy signals |
+
+The table has one row for each pulse:
+
+| Column | Description |
+|---|---|
+| **TOA** | The time of arrival: the time of the leading edge at 50 % of the pulse amplitude |
+| **Width** | From the leading edge to the trailing edge, at 50 % of the amplitude |
+| **PRI** | The time from the TOA of the pulse before |
+| **Peak** | The peak power of the pulse |
+| **Frequency** | The mean frequency in the center 80 % of the pulse |
+| **Chirp** | The slope of the frequency in the pulse. An LFM pulse has a chirp of its bandwidth divided by its width |
+| **Rise**, **Fall** | From 10 % to 90 % of the amplitude, and from 90 % to 10 % |
+
+Click a row to show the pulse in the file viewer.
+
+The line over the table shows the number of pulses, the noise floor and the threshold. It also
+shows the mean width, the mean PRI, the PRF and the duty cycle. wvt puts PRIs that are within 1 % of each other into
+one group, and shows the result:
+
+- One group: a fixed PRI.
+- 2 to 8 groups: a stagger. The next line shows the PRIs.
+- More than 8 groups: a PRI that varies (jitter).
+
+The plots show:
+
+- The first 200 pulses, aligned on their TOA. A red line shows the selected pulse.
+- The histogram of the PRIs.
+
+**Add as bookmarks** adds a bookmark for each pulse (up to 1000). **Copy table** copies all the
+pulses as CSV text.
+
+A pulse that starts before the region, or that does not end in the region, is not in the table.
+
+#### Correlation and template search
+
+The **Correlation** tab has two modes.
+
+**Autocorrelation of the region** shows how the region repeats. The plot shows |R| / R(0)
+as a function of the lag, and the table shows the strongest lags. A peak at a lag shows a signal
+that repeats after that time, for example the PRI, a frame length or a preamble. Click a lag to
+copy it.
+
+**Find a template** finds each part of the file that has the same shape as a template signal:
+
+1. Put the time markers around one example of the signal, or make a bookmark of it.
+2. Select **Find a template**, and set **Template** to **Time markers** or **Bookmark**.
+3. Set **Look in** to **Whole segment** or **View**.
+4. Set the **Threshold**. A hit must have a normalized correlation of this value or more. 1 is a
+   perfect match.
+
+The plot shows the score over time, and the table shows the hits. Click a hit to show it in the
+file viewer. **Add as bookmarks** adds a bookmark for each hit (up to 1000). **Copy hits** copies
+them as CSV text.
+
+The template can have a maximum of 131072 samples. For a longer template, use the channel filter to
+decrease the sample rate. Two hits are always at least one template length apart.
+
+#### Symbol rate and eye diagram
+
+The **Symbols** tab finds the symbol rate and the symbol timing of a digital signal, and shows
+the signal at each symbol.
+
+| Control | Function |
+|---|---|
+| **Detector** | What shows the symbol clock. **Envelope**: shaped PSK and QAM. **Envelope changes**: OOK and ASK. **Frequency changes**: FSK, and PSK with sharp edges |
+| **Rate** | Empty: use the estimate. Type a rate to use a different rate |
+| **Search** | The range of rates to search. Empty: automatic |
+| **Trace** | The value that the cursors and the eye show: `I`, `Q`, `AM`, `FM` or `PM` |
+| **x^N** | The power for the x^N spectrum |
+
+The plots are:
+
+- **The trace with the symbol cursors.** The red dots are the values at the symbol centers. To
+  move the timing, drag the red cursor. **Use the estimated timing** goes back to the estimate.
+- **The eye diagram**: the trace for two symbols, for all the symbols, in color.
+- **The symbol clock line**: the spectrum of the detector. The estimate is the strongest line
+  (the red line). If the line is weak, the line over the plots tells you. Then try a different
+  detector.
+- **The spectrum of x^N.** For an M-PSK signal with N = M, the strongest line is at N times the
+  carrier offset. The line over the plots shows the carrier offset.
+
+You can also show the cursors on the I/Q, AM, FM and PM plots of the file viewer. To do this,
+tick **Cursors in the viewer**, or select **View → Symbol cursors**. The cursors stay when you close the Analysis
+window. On a time plot:
+
+- Drag the red cursor **S0** to move the timing.
+- Drag the orange cursor (**S** and a number) to change the rate. S0 stays, and the cursors
+  between them stay equally spaced.
+
+The cursors show when no more than 2000 symbols are in the view. Zoom in to see them.
+
+**Copy symbol values** copies the trace at each cursor (up to 100000 values) as text.
+**Use in Demodulation** opens the **Demodulation** tab with this rate.
+
+#### Cyclostationary analysis
+
+The **Cyclostationary** tab shows the spectral correlation of the region. Digital signals have
+features at cycle frequencies (alpha) that noise does not have. For example, a symbol rate shows
+as a line at alpha equal to the rate. wvt uses the FFT accumulation method (FAM).
+
+| Control | Function |
+|---|---|
+| **Channels** | The FFT size of the channelizer. The frequency resolution is the rate divided by this value. The time increases as the square of this value |
+| **Max blocks** | The maximum number of channelizer blocks. More blocks give a finer alpha resolution and use more samples |
+| **Range** | The dB range of the plots |
+
+The top plot shows the spectral correlation as a function of alpha and frequency, in dB relative
+to the peak at alpha = 0. The bottom plot is the cyclic profile: the maximum over the frequency for
+each alpha. The line over the plots shows the strongest cycle frequencies.
+
+#### Digital demodulation
+
+The **Demodulation** tab changes the region to bits.
+
+| Control | Function |
+|---|---|
+| **Mode** | `OOK`, `2-FSK`, `BPSK` or `QPSK` |
+| **Rate** | The symbol rate. Empty: wvt estimates it |
+| **Auto threshold** | OOK and 2-FSK: wvt finds the threshold between the two levels. Off: type the threshold |
+| **Differential** | BPSK and QPSK: each symbol is the phase change from the symbol before. This removes the phase ambiguity of the carrier recovery |
+| **Timing loop** | The gain of the timing recovery loop. 0 keeps the timing of the estimate |
+
+The tab shows the bits as text (or in hexadecimal), and the decision value of each symbol. For BPSK
+and QPSK, the plot shows the symbols on the I/Q plane.
+
+- **Copy bits** copies the bits that show (up to 200000).
+- **Save bits** writes all the bits to the file in **File**. A `.txt` file gets the characters `0`
+  and `1`. A different file gets the bits packed into bytes, with the first bit in the most
+  significant bit. wvt does not replace a file that exists.
+
+Without **Differential**, the BPSK and QPSK bits can have a phase ambiguity. Thus each bit can be
+the opposite value, or the I bits and the Q bits can change places. Use **Differential** if the signal uses
+differential coding, or compare the bits with a known preamble.
+
+#### Analysis on the command line
+
+| Option | Function |
+|---|---|
+| `--analyze KIND` | Open the Analysis window on a tab. `KIND` is `measure`, `spectrum`, `histogram`, `constellation`, `pulses`, `correlation`, `symbols`, `cyclo` or `demod` |
+| `--analyze-out F` | With `--analyze`: do not open a window. Write the result to `F` as text, then stop. `-` writes it to the terminal |
+| `--analyze-opt K=V,...` | The settings of the tab. Refer to the table below |
+
+Without a window, the region is `--view`, or the full segment. `--chan` sets the channel filter.
+wvt does not replace a file that exists.
+
+| Key | Tab | Value |
+|---|---|---|
+| `nfft` | Measurements, Spectrum | The FFT size (64 to 1048576) |
+| `window` | Measurements, Spectrum | `rect`, `hann`, `hamming`, `blackman`, `bh` or `flattop` |
+| `overlap` | Spectrum | The overlap in percent |
+| `band` | Spectrum | `LO:HI` in absolute Hz: the channel power and the ACPR |
+| `max-samples` | All | As **Max samples** |
+| `bins` | Histograms, Constellation | The number of bins |
+| `carrier` | Constellation | `none`, `mean`, `power` or a frequency in Hz |
+| `power` | Constellation, Symbols | N of x^N: 2, 4 or 8 |
+| `threshold` | Pulses, Correlation, Demodulation | The threshold of the tab |
+| `absolute`, `hysteresis`, `min-width`, `smooth` | Pulses | As the controls. `absolute=1` sets the threshold in dBFS |
+| `template`, `search` | Correlation | `T0:T1` in seconds. `template` selects the template search |
+| `method` | Symbols | `envelope`, `envchange` or `frequency` |
+| `rate` | Symbols, Demodulation | The symbol rate |
+| `t0` | Symbols | The time of a symbol center |
+| `trace` | Symbols | `i`, `q`, `am`, `fm` or `pm` |
+| `np`, `blocks` | Cyclostationary | As **Channels** and **Max blocks** |
+| `mode` | Demodulation | `ook`, `fsk`, `bpsk` or `qpsk` |
+| `differential` | Demodulation | `0` or `1` |
+| `loop` | Demodulation | The gain of the timing loop |
+
+The output starts with lines that start with `#`. These lines give the kind, the sample rate, the
+channel center, the first time and the number of samples, and the summary values. CSV rows follow.
+
+```sh
+wvt cap.sigmf-meta --analyze pulses --analyze-out pulses.csv
+wvt cap.sigmf-meta --view 2:2.5 --chan 300k:150k --analyze measure --analyze-out -
+wvt cap.sigmf-meta --analyze correlation --analyze-opt template=1.2:1.201,threshold=0.8 --analyze-out hits.csv
+wvt cap.sigmf-meta --analyze demod --analyze-opt mode=fsk,rate=9600 --analyze-out bits.txt
+```
+
 ### Plot snapshots
 
 wvt saves the plots as PNG files, as they show on the screen. Use the snapshots in reports or to
@@ -1031,6 +1338,7 @@ close the window without a save, click **Cancel**.
 | Spectrum | File, Device | The spectrum of the view, or the live spectrum |
 | Waterfall | File, Device | The waterfall with its color bar |
 | I / Q, AM, FM, PM | File | The time plot with its header (name, readout) |
+| Analysis (the open tab) | File | The main plot of the open tab of the Analysis window |
 
 - A plot that is not on the screen is not available. For example, a hidden time plot, or the time
   plots in Device mode.
@@ -1045,7 +1353,7 @@ The file name is `<recording>_capture_<plot>_<n>.png`, for example
 
 - `<recording>` is the name of the open recording without its folder and extension. In Device mode,
   it is `live`.
-- `<plot>` is `overview`, `spectrum`, `waterfall`, `iq`, `am`, `fm` or `pm`.
+- `<plot>` is `overview`, `spectrum`, `waterfall`, `iq`, `am`, `fm`, `pm` or `analysis`.
 - `<n>` is the first number that no snapshot of this recording in the folder uses. All the files of
   one export have the same number.
 
@@ -2551,6 +2859,7 @@ The chapter of each function has the full table of its options:
 | Logging | `-v`, `--log-dir`, `--no-log-file` | [Console output](#console-output) |
 | Configuration file | `--config`, `--write-config`, `--show-config` and related options | [Configuration file options](#configuration-file-options) |
 | File sessions | `--session-out F` | [Save a session](#save-a-session) |
+| Signal analysis | `--analyze`, `--analyze-out`, `--analyze-opt` | [Analysis on the command line](#analysis-on-the-command-line) |
 
 #### Environment variables
 
@@ -2636,13 +2945,131 @@ Squelch
 Each calculation runs on its own worker thread. A new request replaces the old request. Thus a
 setting change shows its effect immediately, and the UI does not stop.
 
+### How the analysis works
+
+This chapter tells you how the tabs of the Analysis window calculate their results. The code is in
+`src/dsp/analysis.cpp`. It has no UI code. Thus the window, `--analyze-out` and the self-check use
+the same code.
+
+#### The channel samples
+
+Each tool reads the samples through `ChannelReader` in `src/dsp/engine.h`. It gives the output of
+the channel filter: the mixer, the FIR filter and the decimation, on the GPU or the CPU. When the
+filter is off, it gives the samples of the file. Output `j` is at input sample `j · D`. Thus the
+samples of a tool are at the same times as the time plots. A tool can also read each part of the
+region separately.
+
+The tools that read all the samples (measurements, spectrum and pulses) read blocks of 4 M
+samples. The other tools read the first **Max samples** of the region into memory.
+
+#### The measurement calculations
+
+- The time-domain values come from the sums of I, Q, I², Q², I·Q and the power over all the
+  samples.
+- The gain imbalance is 10 log10(var(I) / var(Q)). The phase imbalance is
+  asin(cov(I, Q) / √(var(I) · var(Q))).
+- The spectrum is a Welch average with 50 % overlap. wvt scales each bin so that a full-scale
+  tone in one bin reads 0 dBFS (the same scale as the waterfall).
+- The carrier is the peak bin, with parabolic interpolation.
+- The occupied bandwidth starts where the cumulative power is 0.5 % of the total. It ends where
+  the cumulative power is 99.5 % of the total.
+
+#### The spectrum and channel power calculations
+
+The channel power is the sum of the bins in the band, divided by the equivalent noise bandwidth of
+the window in bins. Thus the result is the total power in the band, for tones and for noise. The
+RBW is the equivalent noise bandwidth times the bin width.
+
+#### The CCDF calculation
+
+wvt puts 10 log10(p / mean) of each sample into bins of 0.05 dB, and adds the bins from the top.
+For complex Gaussian noise, the probability of a value over x dB is exp(−10^(x/10)) / exp(−1)
+relative to the mean.
+
+#### The pulse calculations
+
+1. **Noise floor.** wvt takes the power of up to 64 blocks of 16384 samples across the region,
+   with the smoothing. It uses the 20th percentile, divided by the 20th percentile of a gamma
+   distribution with the same smoothing. Thus the result is the mean noise power.
+2. **Detection.** A pulse starts where the smoothed power goes above the threshold. It ends
+   where the power goes below the threshold minus the hysteresis.
+3. **Measurement.** For each pulse, wvt reads the pulse again with a margin. The amplitude is the
+   median of the envelope in the center 60 % of the pulse. The edges are the 10 %, 50 % and 90 %
+   crossings of that amplitude, with linear interpolation.
+4. **Frequency and chirp.** wvt calculates the instantaneous frequency in the center 80 % of the
+   pulse. The frequency is its mean, weighted by the power. The chirp is the least-squares slope.
+
+#### The correlation calculations
+
+- The autocorrelation uses FFTs: R = IFFT(|FFT(x)|²), on up to 4 M samples, after wvt removes
+  the mean.
+- The template search uses overlap-save FFT correlation in blocks. The score is
+  |Σ x[k+m] · t*[m]| / √(E_t · E_x[k]). E_t is the energy of the template, and E_x[k] is the
+  energy of the samples under it. Thus the score is 1 for a perfect match at any level. A hit is
+  the maximum of each run of scores over the threshold.
+
+#### The symbol calculations
+
+1. wvt makes a detector signal: the power (**Envelope**), |Δ|x|| (**Envelope changes**), or the
+   size of the change of the instantaneous frequency (**Frequency changes**).
+2. The symbol rate is the strongest line in the spectrum of the detector, with parabolic
+   interpolation. Sharp symbol edges give harmonics that are as strong as the rate. Thus wvt
+   selects the lowest sub-multiple of the strongest line that is within 6 dB of it.
+3. The phase of the detector at the rate gives the time of the symbol centers.
+4. The eye diagram folds the trace over two symbols, with linear interpolation between the
+   samples, for the first 2 M samples.
+
+#### The FAM calculation
+
+1. Hamming-windowed FFTs of `Np` points (the channels) at a hop of `L = Np / 4`, with the phase
+   correction for each block.
+2. For each pair of channels, the product of one channel and the conjugate of the other, over the
+   `P` blocks. Then a `P`-point FFT.
+3. wvt keeps the center half of each FFT and puts each value at its alpha and frequency. The
+   alpha resolution is `fs / (L · P)`. Each thread keeps its own copy of the image and of the
+   profile, and wvt merges the copies at the end.
+4. `P` is a maximum of `2^26 / Np²`. Thus the alpha and frequency plane has a maximum of 64 M
+   cells.
+
+#### The analysis FFTs on the GPU
+
+The template search and the cyclostationary analysis put their FFTs into batches. wvt sends each
+batch to the GPU (`gpuFftBatch` in `src/gpu/gpu.h`) when it is sufficiently large. The CPU does
+the other steps. If the GPU is not usable or a GPU call fails, the CPU does the FFTs. The status
+line of the Analysis window shows *FFTs on the GPU* when the GPU did them.
+
+`build/gpu_check` compares the GPU FFTs with the CPU FFTs, and the two tools with the GPU on and
+off. `build/gpu_check --bench` measures the two tools on the CPU and on the GPU.
+
+#### The demodulation calculations
+
+1. **Symbol rate.** OOK uses **Envelope changes**, 2-FSK uses **Frequency changes**, and BPSK and
+   QPSK use the detector with the strongest line.
+2. **Decision values.** OOK uses the magnitude. 2-FSK uses the instantaneous frequency, with a
+   moving average of half a symbol. The threshold is the center between the two means of a
+   two-means clustering. BPSK and QPSK first remove the carrier with the x^2 or x^4 peak.
+3. **Timing.** A Gardner timing loop starts at the estimated symbol center. It samples with linear
+   interpolation.
+4. **Carrier phase (BPSK, QPSK).** wvt removes the phase of each block of 256 symbols, from the
+   x^N phase of the block. QPSK uses Gray coding.
+
+#### The analysis self-checks
+
+- `build/analysis_check` tests each tool on signals with known values. Most of the signals come
+  from the signal generator. The signals are tones with DC offset and I/Q imbalance, pulse trains
+  with LFM and stagger, Barker codes, FSK, OOK and QPSK.
+- The CTest `analysis_cli` runs each `--analyze` kind through wvt, and the refusals.
+- The CTest `analysis_window` opens each tab in the window and takes a screenshot. It needs an X
+  server. Without one, CTest skips it.
+
 ### GPU processing
 
 wvt can calculate these items on the GPU:
 
 - The file waterfall.
 - The live spectrum.
-- The channel filter of the time plots and of the region export.
+- The channel filter of the time plots, of the region export and of the Analysis window.
+- The FFTs of the template search and of the cyclostationary analysis in the Analysis window.
 
 wvt supports CUDA on an NVIDIA GPU under Linux, and Metal on an Apple GPU under macOS. With a GPU,
 wide views can keep "FFT sees 100 %", and the live spectrum can analyze all samples at USRP rates.
@@ -2711,6 +3138,8 @@ these jobs. For example:
 - A live row with fewer than 131072 samples. This occurs at low sample rates, with a manual
   **Avg** value, or for one row after a retune.
 - A waterfall view with less than 16 M FFT input samples, for example a view that you zoomed in.
+- An FFT of the Analysis window with fewer than 262144 points. On an M5, the CPU is as fast or
+  faster for these FFTs. Thus on a Mac, only a template search with a long template uses the GPU.
 
 With `-v`, the log shows each change of the live spectrum between the GPU and the CPU, and the
 reason.
@@ -2768,6 +3197,7 @@ A session file keeps these items:
 | The layout | The panel sizes, the overview strip, and which time plots show and fit their Y axis |
 | The channel | On or off, the offset, the bandwidth, the taps, the decimation, and the AM, FM and PM settings and the squelch |
 | Markers and bookmarks | The time and frequency markers, the point markers (P1 and P2), and all the bookmarks |
+| The Analysis window | Open or closed, the open tab, the region, the channel filter switch, **Max samples**, and the settings of each tab. Not the results: wvt calculates them again |
 
 A session does not keep the live mode, the signal generator, the audio window or the export
 window.
@@ -2823,7 +3253,8 @@ session file. `...` shows where members are not shown:
   "channel": {"enabled": true, "offset_hz": 300000, "bandwidth_hz": 150000, ...},
   "markers": {...},
   "points": {"shown": true, "p1": {"plot": "am", "t_s": 10.12}, "p2": {"plot": "waterfall", "t_s": 10.15, "f_hz": 100300000}},
-  "bookmarks": [{"name": "burst", "t0_s": 10.1, "t1_s": 10.2}]
+  "bookmarks": [{"name": "burst", "t0_s": 10.1, "t1_s": 10.2}],
+  "analysis": {"open": true, "tab": "pulses", "region": "view", ...}
 }
 ```
 
@@ -2832,6 +3263,8 @@ session file. `...` shows where members are not shown:
   waterfall has `t_s` and `f_hz`. A marker on the spectrum has `f_hz`. A marker on a time plot has
   `t_s`.
 - A member that is not in the file gets its default value. Only `recording` is necessary.
+- `analysis` keeps the Analysis window on one line. Its `tab` and `region` use the names of
+  `--analyze` and of the region (`view`, `markers`, `bookmark` or `segment`).
 - wvt refuses a session file from a newer wvt (a larger `wvt_session` number).
 - The self-check `build/session_check` tests the write and the read, a moved folder, and the
   session files and recordings that wvt must tell apart.

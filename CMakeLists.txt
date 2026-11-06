@@ -129,6 +129,8 @@ add_executable(wvt
   src/io/snapshot.cpp
   src/dsp/measure.cpp
   src/app/app_measure.cpp
+  src/dsp/analysis.cpp
+  src/app/app_analysis.cpp
   src/app/file_dialog.cpp
   ${FONT_CPP})
 target_include_directories(wvt PRIVATE src third_party/stb ${PLATFORM_INCLUDES})
@@ -817,8 +819,8 @@ target_link_libraries(extract_check PRIVATE wvt_gpu imgui_implot Threads::Thread
 target_compile_options(extract_check PRIVATE ${WVT_WARNINGS})
 
 # GPU self-test and benchmark (CPU times; GPU vs CPU once a GPU backend exists)
-add_executable(gpu_check tools/gpu_check.cpp src/dsp/engine.cpp src/dsp/dsp.cpp src/io/iq_file.cpp src/common/json.cpp src/common/ui_util.cpp
-  src/common/log.cpp)
+add_executable(gpu_check tools/gpu_check.cpp src/dsp/engine.cpp src/dsp/dsp.cpp src/dsp/analysis.cpp src/io/iq_file.cpp
+  src/common/json.cpp src/common/ui_util.cpp src/common/log.cpp)
 target_include_directories(gpu_check PRIVATE src)
 target_link_libraries(gpu_check PRIVATE wvt_gpu imgui_implot Threads::Threads)
 target_compile_options(gpu_check PRIVATE ${WVT_WARNINGS})
@@ -842,6 +844,14 @@ target_compile_options(session_check PRIVATE ${WVT_WARNINGS})
 add_executable(measure_check tools/measure_check.cpp src/dsp/measure.cpp)
 target_include_directories(measure_check PRIVATE src)
 target_compile_options(measure_check PRIVATE ${WVT_WARNINGS})
+
+# Analysis self-test (issue #111): each kind of the Analysis window on known signals
+add_executable(analysis_check tools/analysis_check.cpp src/dsp/analysis.cpp src/dsp/engine.cpp src/dsp/dsp.cpp
+  src/io/iq_file.cpp src/siggen/siggen.cpp src/io/recorder.cpp src/common/json.cpp
+  src/common/ui_util.cpp src/common/log.cpp)
+target_include_directories(analysis_check PRIVATE src)
+target_link_libraries(analysis_check PRIVATE wvt_gpu imgui_implot Threads::Threads)
+target_compile_options(analysis_check PRIVATE ${WVT_WARNINGS})
 
 # Configuration file self-test (issue #88)
 add_executable(config_check tools/config_check.cpp src/app/config.cpp src/common/paths.cpp src/net/zmq_wire.cpp)
@@ -906,7 +916,7 @@ endif()
 # ---------------------------------------------------------------------------
 enable_testing()
 set(WVT_CHECKS siggen_check audio_check log_check segment_check gpu_check extract_check snapshot_check device_check
-  clipboard_check session_check measure_check config_check skiq_check zmq_check)
+  clipboard_check session_check measure_check config_check skiq_check zmq_check analysis_check)
 if(WVT_BB_SIM)
   list(APPEND WVT_CHECKS bb_check)
 endif()
@@ -918,6 +928,13 @@ set_tests_properties(clipboard_check PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME session_roundtrip COMMAND ${CMAKE_COMMAND} -DWVT=$<TARGET_FILE:wvt> -DIQGEN=$<TARGET_FILE:iqgen>
   -DDIR=${CMAKE_BINARY_DIR}/session_roundtrip -P ${CMAKE_SOURCE_DIR}/tools/session_roundtrip.cmake)
 set_tests_properties(session_roundtrip PROPERTIES SKIP_REGULAR_EXPRESSION "skipped")
+# The Analysis window (issue #111): --analyze for each kind without a window,
+# and each tab drawn in the window (needs an X server).
+add_test(NAME analysis_cli COMMAND ${CMAKE_COMMAND} -DWVT=$<TARGET_FILE:wvt> -DDIR=${CMAKE_BINARY_DIR}/analysis_cli
+  -DMODE=cli -P ${CMAKE_SOURCE_DIR}/tools/analysis_run.cmake)
+add_test(NAME analysis_window COMMAND ${CMAKE_COMMAND} -DWVT=$<TARGET_FILE:wvt> -DDIR=${CMAKE_BINARY_DIR}/analysis_window
+  -DMODE=window -P ${CMAKE_SOURCE_DIR}/tools/analysis_run.cmake)
+set_tests_properties(analysis_window PROPERTIES SKIP_REGULAR_EXPRESSION "skipped")
 # The configuration file (issue #88): the defaults written and shown without a file.
 add_test(NAME config_write COMMAND wvt --no-log-file --no-config --write-config -)
 add_test(NAME config_show COMMAND wvt --no-log-file --no-config --show-config)

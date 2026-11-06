@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "common/json.h"
 #include "dsp/measure.h"
 #include "io/iq_file.h"
 
@@ -58,6 +59,10 @@ struct Session {
         double t0 = 0, t1 = 0;
     };
     std::vector<Bookmark> bookmarks;
+
+    // The Analysis window (issue #111): an object that the App writes and
+    // reads (App::analysisToJson). Null when the file has none.
+    JsonValue analysis;
 };
 
 // "rec.sigmf-meta" -> "rec.wvtsession.json", beside the recording.

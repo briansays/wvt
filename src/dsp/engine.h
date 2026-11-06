@@ -246,6 +246,37 @@ ChanDesign chanDesign(const DemodReq& r);
 bool channelizeCpu(const ChanJob& job, cf* y, const CancelFn& cancelled, bool threaded = true);
 
 // ---------------------------------------------------------------------------
+// Channel samples (issue #111): the complex output of the channel filter, or
+// the file's samples when the filter is off, for the analysis window. Output
+// j sits at input sample j * decim(), so reads at any j agree with each other
+// and with the time plots. Immutable after construction: one reader can be
+// shared by many threads.
+// ---------------------------------------------------------------------------
+class ChannelReader {
+public:
+    ChannelReader(const Source& src, bool enable, double offset, double bw, int taps = 0, int decim = 0);
+    const Source& source() const { return r_.src; }
+    bool filtered() const { return r_.chanEnable; }
+    int decim() const { return cd_.decim; }
+    int taps() const { return cd_.taps; }
+    double rate() const { return r_.src.fs / cd_.decim; }
+    // The channel center (absolute Hz): what 0 Hz of the output is.
+    double center() const { return r_.src.fc + (r_.chanEnable ? r_.chanOffset : 0.0); }
+    // The first output at or after input sample s.
+    int64_t outIndex(int64_t s) const { return s >= 0 ? (s + cd_.decim - 1) / cd_.decim : -((-s) / cd_.decim); }
+    double timeOf(double j) const { return j * cd_.decim / r_.src.fs; }
+    // Reads outputs [j, j + n) into y. False when cancelled. threaded = false
+    // runs on this thread only (for callers that are already parallel).
+    bool read(int64_t j, int64_t n, cf* y, const CancelFn& cancelled, bool threaded = true,
+              Progress* progress = nullptr) const;
+
+private:
+    DemodReq r_;
+    ChanDesign cd_;
+    std::vector<float> h_;
+};
+
+// ---------------------------------------------------------------------------
 // Time segment of a file (issue #16)
 // ---------------------------------------------------------------------------
 // Turns a segment typed in seconds into samples [s0, s1) of a file with n

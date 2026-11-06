@@ -122,7 +122,9 @@ std::string sessionToJson(const Session& s) {
     for (size_t i = 0; i < s.bookmarks.size(); ++i)
         j += std::string(i ? "," : "") + "\n    {\"name\": " + jsonQuote(s.bookmarks[i].name) + ", \"t0_s\": " +
              n(s.bookmarks[i].t0) + ", \"t1_s\": " + n(s.bookmarks[i].t1) + "}";
-    j += s.bookmarks.empty() ? "]\n}\n" : "\n  ]\n}\n";
+    j += s.bookmarks.empty() ? "]" : "\n  ]";
+    if (s.analysis.type == JsonValue::Type::Object) j += ",\n  \"analysis\": " + jsonWrite(s.analysis);
+    j += "\n}\n";
     return j;
 }
 
@@ -246,6 +248,7 @@ bool sessionFromJson(const std::string& text, const std::string& sessionPath, Se
     }
     if (const JsonValue* bm = v.get("bookmarks"); bm && bm->type == JsonValue::Type::Array)
         for (const JsonValue& x : bm->arr) o.bookmarks.push_back({x.string("name"), x.number("t0_s"), x.number("t1_s")});
+    if (const JsonValue* a = v.get("analysis"); a && a->type == JsonValue::Type::Object) o.analysis = *a;
     s = std::move(o);
     return true;
 }

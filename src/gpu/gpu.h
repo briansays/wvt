@@ -111,6 +111,14 @@ struct ChanJob {
 GpuStatus gpuChannelize(const ChanJob& job, float* y, const std::function<bool()>& cancelled);
 bool gpuChannelUsable();  // gpuChannelize would try the GPU
 
+// Batched complex FFTs for the analysis tools (issue #111): `batch`
+// transforms of n points (a power of two) in place in data (interleaved re,
+// im), forward (e^-i) or inverse (e^+i), not scaled. The template search and
+// the cyclostationary analysis use it for their FFT blocks. Same status and
+// fallback rules as gpuSpectrogram, with its own "failed a short time ago" state.
+GpuStatus gpuFftBatch(float* data, int n, int batch, bool inverse, const std::function<bool()>& cancelled);
+bool gpuFftUsable();  // gpuFftBatch would try the GPU
+
 // One line per path that fell back to the CPU, e.g. "waterfall: uses the CPU
 // after an error, tries the GPU again in 2 s (...)". Empty when nothing failed
 // or every path that failed works again.
@@ -124,8 +132,12 @@ struct GpuLimits {
     double liveMaxRate = 100e6; // live auto averaging, samples/s (the CPU has 20e6)
     double liveMinInput = 0;    // live: smaller rows stay on the CPU
     double chanMinMacs = 2e7;   // channel filter: smaller jobs (multiply-adds) stay on the CPU
+    double fftMinPoints = 1 << 20;  // analysis FFT batches: fewer points (n x batch) stay on the CPU
+    int fftMinSize = 0;             // analysis FFT batches: shorter transforms stay on the CPU
 };
 GpuLimits gpuLimits();
+// For gpu_check: use these limits in place of the backend's (nullptr = the backend's again).
+void gpuSetLimitsForTest(const GpuLimits* l);
 
 // One line per CUDA device for --list-devices, or one line that says why
 // there are none.

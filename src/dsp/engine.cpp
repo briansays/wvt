@@ -298,6 +298,64 @@ bool channelizeCpu(const ChanJob& job, cf* y, const CancelFn& cancelled, bool th
     return !ab;
 }
 
+// Channel outputs j in [j0, j0 + M): output j sits at input sample j*D. The
+// file's samples when the channel filter is off. False when cancelled.
+static bool readChannelOutputs(const DemodReq& r, const ChanDesign& cd, const std::vector<float>& h, int64_t j0,
+                               int64_t M, cf* y, const CancelFn& cancelled, bool threaded, Progress* progress) {
+    const Source& src = r.src;
+    if (!r.chanEnable) {
+        src.file->read(src.fp, j0, M, y);
+        if (progress) progress->add(M);
+        return !cancelled();
+    }
+    const int D = cd.decim;
+    const int N = (int)h.size();
+    ChanJob job;
+    job.file = src.file.get();
+    job.fp = src.fp;
+    job.inStart = j0 * D - N / 2;
+    job.outLen = M;
+    job.decim = D;
+    job.frac = r.chanOffset / src.fs;
+    job.h = h.data();
+    job.taps = N;
+    job.progress = progress;
+    // The GPU pays off only on large jobs (a few ms of CPU work).
+    bool done = false;
+    const int64_t before = progress ? progress->done() : 0;
+    if (threaded && (double)M * N >= gpuLimits().chanMinMacs && gpuChannelUsable()) {
+        const GpuStatus st = gpuChannelize(job, reinterpret_cast<float*>(y), cancelled);
+        if (st == GpuStatus::Cancelled) return false;
+        done = st == GpuStatus::Ok;
+    }
+    if (progress && !done) progress->setDone(before);  // after a GPU failure
+    if (!done && !channelizeCpu(job, y, cancelled, threaded)) return false;
+    return !cancelled();
+}
+
+ChannelReader::ChannelReader(const Source& src, bool enable, double offset, double bw, int taps, int decim) {
+    r_.src = src;
+    r_.chanEnable = enable;
+    r_.chanOffset = offset;
+    r_.chanBw = bw;
+    r_.taps = taps;
+    r_.decim = decim;
+    cd_ = chanDesign(r_);
+    if (enable) {
+        const double b = std::clamp(bw, src.fs * 1e-5, src.fs);
+        h_ = designLowpass(cd_.taps, 0.5 * b / src.fs);
+    }
+}
+
+bool ChannelReader::read(int64_t j, int64_t n, cf* y, const CancelFn& cancelled, bool threaded, Progress* progress) const {
+    if (n <= 0) return true;
+    if (!r_.src.file) {
+        std::fill(y, y + n, cf(0, 0));
+        return true;
+    }
+    return readChannelOutputs(r_, cd_, h_, j, n, y, cancelled, threaded, progress);
+}
+
 namespace {
 
 struct RawChannels {
@@ -316,32 +374,8 @@ bool processRange(const DemodReq& r, const ChanDesign& cd, const std::vector<flo
     if (M < 2) return true;
     const int64_t j0 = jA - 1;
     std::vector<cf> y(M);
-
-    if (!r.chanEnable) {
-        src.file->read(src.fp, j0, M, y.data());
-    } else {
-        const int N = (int)h.size();
-        ChanJob job;
-        job.file = src.file.get();
-        job.fp = src.fp;
-        job.inStart = j0 * D - N / 2;
-        job.outLen = M;
-        job.decim = D;
-        job.frac = r.chanOffset / src.fs;
-        job.h = h.data();
-        job.taps = N;
-        job.progress = progress;
-        if (progress) progress->reset(M);
-        // The GPU pays off only on large jobs (a few ms of CPU work).
-        bool done = false;
-        if (threaded && (double)M * N >= gpuLimits().chanMinMacs && gpuChannelUsable()) {
-            const GpuStatus st = gpuChannelize(job, reinterpret_cast<float*>(y.data()), cancelled);
-            if (st == GpuStatus::Cancelled) return false;
-            done = st == GpuStatus::Ok;
-        }
-        if (progress && !done) progress->reset(M);  // after a GPU failure
-        if (!done && !channelizeCpu(job, y.data(), cancelled, threaded)) return false;
-    }
+    if (progress) progress->reset(M);
+    if (!readChannelOutputs(r, cd, h, j0, M, y.data(), cancelled, threaded, progress)) return false;
     if (cancelled()) return false;
 
     const double fr = src.fs / D;

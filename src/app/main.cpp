@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "app/app.h"
+#include "dsp/analysis.h"
 #include "common/build_info.h"
 #include "app/cli.h"
 #include "app/config.h"
@@ -314,6 +315,98 @@ static int runAudioExport(const std::string& path, const CliOverrides& ov, bool 
 }
 
 // Exports a time range (and band) of a file to a new file (issue #18).
+// --analyze KIND --analyze-out F (issue #111): one analysis of the file, as
+// text, without a window. The region is --view (else the segment), through
+// --chan when it is given.
+static int runAnalyze(const std::string& path, const CliOverrides& ov, double seg0, double seg1, bool haveView, double t0,
+                      double t1, bool haveChan, double chanOff, double chanBw, AnaKind kind, const std::string& opts,
+                      const std::string& out, GpuMode gpuMode, int gpuDevice) {
+    FileMetaGuess g = guessMeta(path);
+    std::string err;
+    if (!ov.haveFmt && !metaReadable(g, err)) {
+        LOG_ERROR("analysis", "%s; -f FMT reads it anyway", err.c_str());
+        return 1;
+    }
+    auto f = IqFile::open(g.dataPath, err);
+    if (!f) {
+        LOG_ERROR("analysis", "%s", err.c_str());
+        return 1;
+    }
+    AnaReq r;
+    r.kind = kind;
+    Source& src = r.reg.src;
+    src.file = f;
+    if (g.haveFmt) { src.fp.fmt = g.fmt; src.fp.bigEndian = g.bigEndian; }
+    if (g.haveRate) src.fs = g.rate;
+    if (g.haveFc) src.fc = g.fc;
+    if (ov.haveFmt) { src.fp.fmt = ov.fmt; src.fp.bigEndian = ov.bigEndian; }
+    if (ov.haveRate) src.fs = ov.rate;
+    if (ov.haveFc) src.fc = ov.fc;
+    src.fp.headerBytes = ov.header >= 0 ? ov.header : 0;
+    src.fp.swapIQ = ov.swapIQ;
+    if (!g.haveRate && !ov.haveRate) LOG_WARN("analysis", "sample rate unknown, assuming %s (use -r)", fmtSI(src.fs, "S/s", 4).c_str());
+    const int64_t n = f->numSamples(src.fp);
+    SegmentRange seg = segmentRange(seg0, seg1, src.fs, n);
+    if (!seg.err.empty()) {
+        LOG_ERROR("analysis", "%s", seg.err.c_str());
+        return 2;
+    }
+    if (!seg.warn.empty()) LOG_WARN("analysis", "%s", seg.warn.c_str());
+    r.reg.s0 = haveView ? std::clamp<int64_t>((int64_t)std::floor(t0 * src.fs), seg.s0, seg.s1) : seg.s0;
+    r.reg.s1 = haveView ? std::clamp<int64_t>((int64_t)std::ceil(t1 * src.fs), seg.s0, seg.s1) : seg.s1;
+    if (haveChan) {
+        r.reg.chanEnable = true;
+        r.reg.chanOffset = chanOff;
+        r.reg.chanBw = chanBw;
+    }
+    r.corr.searchS0 = seg.s0;
+    r.corr.searchS1 = seg.s1;
+    if (!anaSetOptions(r, opts, err)) {
+        LOG_ERROR("analysis", "%s", err.c_str());
+        return 2;
+    }
+    if (kind == AnaKind::Correlation && r.corr.search) {
+        r.corr.searchS0 = std::clamp(r.corr.searchS0, seg.s0, seg.s1);
+        r.corr.searchS1 = std::clamp(r.corr.searchS1, seg.s0, seg.s1);
+    }
+    if (!gpuInit(gpuMode, gpuDevice, err)) {  // the channel filter and the analysis FFTs can use it
+        LOG_ERROR("gpu", "%s", err.c_str());
+        return 1;
+    }
+    signal(SIGINT, [](int) { g_interrupted = 1; });
+    auto res = computeAnalysis(r, [] { return g_interrupted != 0; });
+    if (!res) {
+        LOG_ERROR("analysis", "cancelled");
+        return 1;
+    }
+    const std::string text = analysisReport(*res);
+    if (out == "-") {
+        fputs(text.c_str(), stdout);
+    } else {
+        FILE* o = fopen(out.c_str(), "wx");
+        if (!o) {
+            LOG_ERROR("analysis", "cannot make %s: %s%s", out.c_str(), errnoText(errno).c_str(),
+                      errno == EEXIST ? " (wvt does not replace a file)" : "");
+            return 1;
+        }
+        fputs(text.c_str(), o);
+        if (fclose(o) != 0) {
+            LOG_ERROR("analysis", "cannot write %s", out.c_str());
+            return 1;
+        }
+        logStatus("analysis", "%s written (%s, %.0f ms)", out.c_str(), anaKindName(kind), res->seconds * 1e3);
+    }
+    if (!res->err.empty()) {
+        LOG_ERROR("analysis", "%s", res->err.c_str());
+        return 1;
+    }
+    if (kind == AnaKind::Correlation && !res->corr.err.empty()) {
+        LOG_ERROR("analysis", "%s", res->corr.err.c_str());
+        return 1;
+    }
+    return 0;
+}
+
 static int runExtract(const std::string& path, const CliOverrides& ov, double seg0, double seg1, bool haveRange, double t0,
                       double t1, bool haveBand, double fLo, double fHi, bool ci16, bool sigmf, bool overwrite,
                       const std::string& out) {
@@ -455,6 +548,9 @@ static int runAudioLive(const StreamConfig& dev, const AudioParams& ap, const st
 int main(int argc, char** argv) {
     CliOverrides ov;
     std::string path, shotPath, sessionOut;
+    std::string analyzeOut, analyzeOpts;
+    bool haveAnalyze = false;
+    AnaKind analyzeKind = AnaKind::Measure;
     bool software = false, showHelp = false;
     bool haveChan = false, haveView = false, haveSeg = false;
     std::string extractOut;
@@ -656,6 +752,18 @@ int main(int argc, char** argv) {
     });
     cli.add(nullptr, "--screenshot", "F", "render, write a PPM screenshot to F and exit", text(shotPath));
     cli.add(nullptr, "--session-out", "F", "open the file and options, write a file session to F and exit", text(sessionOut));
+    cli.add(nullptr, "--analyze", "KIND",
+            "open the Analysis window on this tab: measure | spectrum | histogram |\n"
+            "constellation | pulses | correlation | symbols | cyclo | demod\n"
+            "(with --analyze-out: no window; the region is --view, else the segment)",
+            [&](const char* v) {
+                if (!anaKindFromName(v, analyzeKind)) return bad("--analyze: unknown kind '%s'", v);
+                return haveAnalyze = true;
+            });
+    cli.add(nullptr, "--analyze-out", "F", "write the --analyze result to F as text and CSV (- = the terminal) and exit",
+            text(analyzeOut));
+    static const std::string analyzeOptHelp = std::string("settings of the analysis, e.g. nfft=65536,band=10k:20k:\n") + analysisOptionHelp();
+    cli.add(nullptr, "--analyze-opt", "K=V,...", analyzeOptHelp.c_str(), text(analyzeOpts));
     cli.add(nullptr, "--gpu", "auto|on|off", "GPU processing, CUDA or Metal (default auto, or $WVT_GPU);\non = stop if no GPU can be used",
             [&](const char* v) {
                 if (!parseGpuMode(v, gpuMode)) return bad("--gpu wants auto, on or off");
@@ -1441,6 +1549,14 @@ int main(int argc, char** argv) {
     ap.bw = haveChan ? chanBw : audioModeDefaultBw((AudioMode)ap.mode);
     ap.offset = haveChan ? chanOff : 0;
     if (ap.mode == (int)AudioMode::WFM) ap.deemph = (int)Deemphasis::Us75;
+    if (!analyzeOut.empty()) {
+        if (!haveAnalyze || path.empty()) {
+            LOG_ERROR("main", "--analyze-out needs --analyze KIND and a file");
+            return 2;
+        }
+        return runAnalyze(path, ov, seg0, seg1, haveView, view0, view1, haveChan, chanOff, chanBw, analyzeKind,
+                          analyzeOpts, analyzeOut, gpuMode, gpuDevice);
+    }
     if (!extractOut.empty()) {
         if (path.empty()) {
             LOG_ERROR("main", "--extract-out needs a file");
@@ -1530,6 +1646,11 @@ int main(int argc, char** argv) {
             if (haveView) app.setView(view0, view1);
             if (haveChan) app.setChannel(chanOff, chanBw);
             if (openExportWin) app.openExport();
+            if (haveAnalyze) {
+                std::string aerr;
+                if (!app.setAnalysisOptions(analyzeOpts, aerr)) LOG_ERROR("main", "--analyze-opt: %s", aerr.c_str());
+                app.openAnalysis((int)analyzeKind);
+            }
         }
         if (haveAudio) {
             if (haveDevice && haveChan) app.setChannel(chanOff, chanBw);

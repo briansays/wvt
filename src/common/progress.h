@@ -13,6 +13,9 @@ public:
         total_.store(total, std::memory_order_relaxed);
     }
     void add(int64_t n) { done_.fetch_add(n, std::memory_order_relaxed); }
+    int64_t done() const { return done_.load(std::memory_order_relaxed); }
+    // Puts the work done back to n (a step that failed and runs again).
+    void setDone(int64_t n) { done_.store(n, std::memory_order_relaxed); }
     // 0 to 1, or -1 while the job has not said how much work it has.
     float fraction() const {
         const int64_t t = total_.load(std::memory_order_relaxed);

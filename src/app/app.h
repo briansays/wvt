@@ -6,6 +6,7 @@
 
 #include "app/config.h"
 #include "audio/audio_engine.h"
+#include "dsp/analysis.h"
 #include "dsp/engine.h"
 #include "dsp/extract.h"
 #include "dsp/measure.h"
@@ -80,6 +81,11 @@ public:
     void afterRender();
     // Opens the snapshot window (File > Save plot snapshots..., the status bar button).
     void openSnapshot() { snapOpen_ = true; }
+    // The Analysis window (issue #111), on tab `kind` (an AnaKind; -1 = as it was).
+    void openAnalysis(int kind = -1);
+    // --analyze-opt for the window's settings (anaSetOptions).
+    bool setAnalysisOptions(const std::string& list, std::string& err);
+    bool analysisBusy() const;
 
 private:
     // UI sections
@@ -227,6 +233,32 @@ private:
     std::string pointDeltas(bool full) const;  // P2 minus P1
     std::string pointReadout() const;          // for the status bar
 
+    // the Analysis window (app_analysis.cpp, issue #111)
+    void drawAnalysisWindow();
+    void pollAnalysis();
+    void clearAnalysis();  // a new file or format: the results are for the old one
+    // The window's state in a file session (issue #111), and back.
+    JsonValue analysisToJson() const;
+    void analysisFromJson(const JsonValue& v);
+    bool analysisRegion(AnaRegion& g, std::string& why) const;
+    bool analysisTemplate(double& t0, double& t1, std::string& why) const;
+    // A density or dB image as texture `slot`, made again when key (the result) changes.
+    void analysisTexture(int slot, const void* key, const std::vector<float>& v, int w, int h, bool logScale, float lo,
+                         float hi);
+    void drawAnMeasure(const AnaRes* r);
+    void drawAnSpectrum(const AnaRes* r);
+    void drawAnHistogram(const AnaRes* r);
+    void drawAnConstellation(const AnaRes* r);
+    void drawAnPulses(const AnaRes* r);
+    void drawAnCorrelation(const AnaRes* r);
+    void drawAnSymbols(const AnaRes* r);
+    void drawAnCyclo(const AnaRes* r);
+    void drawAnDemod(const AnaRes* r);
+    // The Symbols tab's cursors on a time plot of the viewer: drag S0 to move
+    // the timing, and the second handle to change the rate.
+    void drawSymbolCursors();
+    bool symbolCursorsReady() const;
+
     // plot snapshots (app_snapshot.cpp, issue #13)
     void drawSnapshotWindow();
     void snapNote(SnapPlot p, ImVec2 a, ImVec2 b);  // where plot p is drawn on this frame
@@ -315,7 +347,7 @@ private:
     bool sessOpen_ = false, sessOverwrite_ = false, sessMsgErr_ = false;
     char sessPath_[2048] = {};
     std::string sessMsg_;
-    bool snapSel_[kSnapPlots] = {true, true, true, true, true, true, true};
+    bool snapSel_[kSnapPlots] = {true, true, true, true, true, true, true, true};
     char snapDir_[1024] = "~/wvt-recordings/";
     int snapCountdown_ = 0;  // frames until the capture; 0 = none due
     ImVec2 snapMouse_;       // the pointer, put back after the capture
@@ -476,6 +508,40 @@ private:
     char txAntenna_[32] = {};
     bool txArmed_ = false;
     std::string txErr_;
+
+    // --- the Analysis window (issue #111) ---
+    std::unique_ptr<Worker<AnaReq, AnaRes>> anWorker_;
+    bool anOpen_ = false;
+    int anTab_ = 0, anTabWant_ = -1;
+    int anRegion_ = 0;  // 0 view, 1 time markers, 2 bookmark, 3 whole segment
+    int anBookmark_ = 0;
+    bool anUseChan_ = true;  // the viewer's channel filter, when it is on
+    double anMaxSamples_ = 16e6;
+    AnaReq anReq_;  // the settings of each tab (the kind and the region are set each frame)
+    std::shared_ptr<AnaRes> anRes_[kAnaKinds];
+    struct AnTex {
+        ImTextureID id = 0;
+        const void* key = nullptr;
+        int cmap = -1;
+        float lo = 0, hi = 0;
+    };
+    AnTex anTex_[3];  // constellation density, eye, spectral correlation
+    bool anSpecMax_ = true, anSpecMin_ = false;
+    const AnaRes* anFitFor_[kAnaKinds] = {};  // the result each plot was last fitted to (issue #112)
+    int anHistQty_ = 0;
+    bool anHistLog_ = false;
+    bool anConsSymbols_ = false, anConsDensity_ = true;
+    int anPulseSel_ = -1;
+    int anTmplSrc_ = 0, anTmplBookmark_ = 0;  // correlation template: time markers or a bookmark
+    bool anSearchView_ = false;               // search the view, else the whole segment
+    double anCycloRange_ = 40;
+    bool anViewerCursors_ = false;  // the symbol cursors on the viewer's time plots
+    bool anBitsHex_ = false, anBitsForHex_ = false;
+    const AnaRes* anBitsFor_ = nullptr;
+    std::string anBitsText_;
+    char anBitsPath_[1024] = "~/wvt-recordings/bits.txt";
+    std::string anBitsMsg_;
+    bool anBitsMsgErr_ = false;
 
     // --- audio ---
     bool auOpen_ = false;

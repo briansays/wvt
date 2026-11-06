@@ -296,3 +296,24 @@ std::string jsonNumber(double v) {
     }
     return b;
 }
+
+std::string jsonWrite(const JsonValue& v) {
+    switch (v.type) {
+        case JsonValue::Type::Null: return "null";
+        case JsonValue::Type::Bool: return v.b ? "true" : "false";
+        case JsonValue::Type::Number: return jsonNumber(v.num);
+        case JsonValue::Type::String: return jsonQuote(v.str);
+        case JsonValue::Type::Array: {
+            std::string s = "[";
+            for (size_t i = 0; i < v.arr.size(); ++i) s += (i ? ", " : "") + jsonWrite(v.arr[i]);
+            return s + "]";
+        }
+        case JsonValue::Type::Object: {
+            std::string s = "{";
+            for (size_t i = 0; i < v.obj.size(); ++i)
+                s += (i ? ", " : "") + jsonQuote(v.obj[i].first) + ": " + jsonWrite(v.obj[i].second);
+            return s + "}";
+        }
+    }
+    return "null";
+}

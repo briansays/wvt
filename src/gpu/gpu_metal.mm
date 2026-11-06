@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <tuple>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -302,14 +303,14 @@ struct FftGraph {
     MPSGraphTensor *in = nil, *out = nil;
 };
 struct GraphCache {
-    std::map<std::pair<int, int>, FftGraph> graphs;
-    FftGraph& get(int n, int batch) API_AVAILABLE(macos(14.0)) {
-        FftGraph& g = graphs[{n, batch}];
+    std::map<std::tuple<int, int, bool>, FftGraph> graphs;
+    FftGraph& get(int n, int batch, bool inverse = false) API_AVAILABLE(macos(14.0)) {
+        FftGraph& g = graphs[{n, batch, inverse}];
         if (!g.graph) {
             g.graph = [MPSGraph new];
             g.in = [g.graph placeholderWithShape:@[ @(batch), @(n) ] dataType:MPSDataTypeComplexFloat32 name:nil];
             MPSGraphFFTDescriptor* d = [MPSGraphFFTDescriptor descriptor];
-            d.inverse = NO;
+            d.inverse = inverse ? YES : NO;
             d.scalingMode = MPSGraphFFTScalingModeNone;
             g.out = [g.graph fastFourierTransformWithTensor:g.in axes:@[ @1 ] descriptor:d name:nil];
         }
@@ -449,6 +450,10 @@ GpuLimits gpuBackendLimits() {
     l.specBudget = 512e6;
     l.specMinInput = 16e6;
     l.liveMinInput = 131072;  // smaller rows (an RTL-SDR at 2.4 MS/s) are as fast on one CPU core
+    // Analysis FFTs (issue #111): vDSP on all the cores is faster up to 64 K
+    // points (1024: 4.0 ms CPU, 5.1 ms GPU for 8 M points; 16 K: 3.7 against
+    // 6.7 ms); at 512 K the GPU is 1.6 times faster (11.5 against 7.2 ms).
+    l.fftMinSize = 1 << 18;
     return l;
 }
 
@@ -806,4 +811,57 @@ GpuStatus gpuBackendLiveRun(GpuLiveImpl* L, const uint8_t* raw, const FormatPara
         memcpy(pw, c.acc.ptr<float>(), (size_t)n * 4);
     }
     return GpuStatus::Ok;
+}
+
+// ---------------------------------------------------------------------------
+// Batched FFTs for the analysis tools (issue #111): MPSGraph on shared buffers
+// ---------------------------------------------------------------------------
+namespace {
+struct FftContext {
+    id<MTLCommandQueue> queue = nil;
+    Shared xin, xout;
+    GraphCache graphs;
+};
+thread_local FftContext t_fft;
+}  // namespace
+
+GpuStatus gpuBackendFftBatch(float* data, int n, int batch, bool inverse, const std::function<bool()>& cancelled,
+                             std::string& err, bool& oom) {
+    if (@available(macOS 14.0, *)) {
+    } else {
+        return GpuStatus::Unavailable;
+    }
+    @autoreleasepool {
+        FftContext& c = t_fft;
+        if (!c.queue) c.queue = [g_device newCommandQueue];
+        if (!c.queue || log2Of(n) < 0) {
+            err = "bad FFT job";
+            return GpuStatus::Failed;
+        }
+        const int64_t maxBatch = std::max<int64_t>(1, kChunkSamples / n);
+        const int planBatch = batchFor(std::min<int64_t>(batch, maxBatch), maxBatch);
+        const size_t bytes = (size_t)planBatch * n * 8;
+        if (!c.xin.reserve(bytes) || !c.xout.reserve(bytes)) {
+            err = "out of GPU memory for the FFT buffers";
+            oom = true;
+            return GpuStatus::Failed;
+        }
+        FftGraph& g = c.graphs.get(n, planBatch, inverse);
+        MPSGraphTensorData* tin = [[MPSGraphTensorData alloc] initWithMTLBuffer:c.xin.buf shape:@[ @(planBatch), @(n) ]
+                                                                       dataType:MPSDataTypeComplexFloat32];
+        MPSGraphTensorData* tout = [[MPSGraphTensorData alloc] initWithMTLBuffer:c.xout.buf shape:@[ @(planBatch), @(n) ]
+                                                                        dataType:MPSDataTypeComplexFloat32];
+        for (int64_t b0 = 0; b0 < batch; b0 += planBatch) {
+            if (cancelled()) return GpuStatus::Cancelled;
+            const int64_t m = std::min<int64_t>(planBatch, batch - b0);
+            float* p = data + 2 * b0 * n;
+            std::memcpy(c.xin.ptr<float>(), p, (size_t)m * n * 8);
+            MPSCommandBuffer* cb = [MPSCommandBuffer commandBufferFromCommandQueue:c.queue];
+            [g.graph encodeToCommandBuffer:cb feeds:@{g.in : tin} targetOperations:nil resultsDictionary:@{g.out : tout}
+                       executionDescriptor:nil];
+            if (!finish(cb, err, oom)) return GpuStatus::Failed;
+            std::memcpy(p, c.xout.ptr<float>(), (size_t)m * n * 8);
+        }
+        return GpuStatus::Ok;
+    }
 }
