@@ -137,9 +137,14 @@ bool App::analysisBusy() const { return anWorker_ && anWorker_->busy(); }
 void App::pollAnalysis() {
     if (!anWorker_) return;
     while (auto r = anWorker_->take()) {
+        // A job that ran while a new file or format opened is for the old one.
+        const Source& rs = r->req.reg.src;
+        if (rs.file != file_ || !(rs.fp == fp_) || rs.fs != fs_ || rs.fc != fc_) continue;
         const int k = (int)r->req.kind;
         if (k >= 0 && k < kAnaKinds) anRes_[k] = r;
-        for (AnTex& t : anTex_) t.key = nullptr;  // a new result can have the address of an old one
+        // A new result can have the address of an old one.
+        for (AnTex& t : anTex_) t.key = nullptr;
+        anBitsFor_ = nullptr;
         if (!r->err.empty()) LOG_DEBUG("analysis", "%s: %s", anaKindName(r->req.kind), r->err.c_str());
         else LOG_DEBUG("analysis", "%s: %lld samples in %.0f ms", anaKindName(r->req.kind), (long long)r->used, r->seconds * 1e3);
     }
@@ -147,6 +152,8 @@ void App::pollAnalysis() {
 
 void App::clearAnalysis() {
     for (auto& r : anRes_) r.reset();
+    anBitsFor_ = nullptr;
+    anPulseSel_ = -1;
     if (anWorker_) anWorker_->invalidate();
 }
 
