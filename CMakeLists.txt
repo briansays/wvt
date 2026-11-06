@@ -129,6 +129,7 @@ add_executable(wvt
   src/io/snapshot.cpp
   src/dsp/measure.cpp
   src/app/app_measure.cpp
+  src/dsp/analysis.cpp
   src/app/file_dialog.cpp
   ${FONT_CPP})
 target_include_directories(wvt PRIVATE src third_party/stb ${PLATFORM_INCLUDES})
@@ -843,6 +844,14 @@ add_executable(measure_check tools/measure_check.cpp src/dsp/measure.cpp)
 target_include_directories(measure_check PRIVATE src)
 target_compile_options(measure_check PRIVATE ${WVT_WARNINGS})
 
+# Analysis self-test (issue #111): each kind of the Analysis window on known signals
+add_executable(analysis_check tools/analysis_check.cpp src/dsp/analysis.cpp src/dsp/engine.cpp src/dsp/dsp.cpp
+  src/io/iq_file.cpp src/siggen/siggen.cpp src/io/recorder.cpp src/common/json.cpp
+  src/common/ui_util.cpp src/common/log.cpp)
+target_include_directories(analysis_check PRIVATE src)
+target_link_libraries(analysis_check PRIVATE wvt_gpu imgui_implot Threads::Threads)
+target_compile_options(analysis_check PRIVATE ${WVT_WARNINGS})
+
 # Configuration file self-test (issue #88)
 add_executable(config_check tools/config_check.cpp src/app/config.cpp src/common/paths.cpp src/net/zmq_wire.cpp)
 target_include_directories(config_check PRIVATE src)
@@ -906,7 +915,7 @@ endif()
 # ---------------------------------------------------------------------------
 enable_testing()
 set(WVT_CHECKS siggen_check audio_check log_check segment_check gpu_check extract_check snapshot_check device_check
-  clipboard_check session_check measure_check config_check skiq_check zmq_check)
+  clipboard_check session_check measure_check config_check skiq_check zmq_check analysis_check)
 if(WVT_BB_SIM)
   list(APPEND WVT_CHECKS bb_check)
 endif()
