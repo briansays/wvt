@@ -706,7 +706,7 @@ new end. The status bar then shows a warning. To see the new length, open the fi
 | Menu | Items |
 |---|---|
 | **File** | Open file, export region, save plot snapshots, save file session, quit |
-| **View** | Time markers, frequency markers, point markers, relative frequency, peak hold, the overview strip, the time plots to show, show everything |
+| **View** | Time markers, frequency markers, symbol cursors, point markers, relative frequency, peak hold, the overview strip, the time plots to show, show everything |
 | **Tools** | Signal generator, audio, analysis, use the GPU |
 | **Help** | Keyboard and mouse, about wvt |
 
@@ -1214,6 +1214,16 @@ The plots are:
   detector.
 - **The spectrum of x^N.** For an M-PSK signal with N = M, the strongest line is at N times the
   carrier offset. The line over the plots shows the carrier offset.
+
+You can also show the cursors on the I/Q, AM, FM and PM plots of the file viewer. To do this,
+tick **Cursors in the viewer**, or select **View → Symbol cursors**. The cursors stay when you close the Analysis
+window. On a time plot:
+
+- Drag the red cursor **S0** to move the timing.
+- Drag the orange cursor (**S** and a number) to change the rate. S0 stays, and the cursors
+  between them stay equally spaced.
+
+The cursors show when no more than 2000 symbols are in the view. Zoom in to see them.
 
 **Copy symbol values** copies the trace at each cursor (up to 100000 values) as text.
 **Use in Demodulation** opens the **Demodulation** tab with this rate.

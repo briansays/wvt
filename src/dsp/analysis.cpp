@@ -1374,6 +1374,21 @@ int nextPow2(int64_t n) {
     return (int)p;
 }
 
+SymbolCursors symbolCursors(double rate, double t0, double lo, double hi, int maxCursors) {
+    SymbolCursors c;
+    if (!(rate > 0) || !std::isfinite(t0) || !(hi > lo)) return c;
+    const double T = 1 / rate, span = hi - lo;
+    if (span / T > maxCursors) return c;
+    const int64_t kA = (int64_t)std::ceil((lo + 0.02 * span - t0) / T);
+    const int64_t last = (int64_t)std::floor((hi - t0) / T);
+    for (int64_t k = kA; k <= last; ++k) c.xs.push_back(t0 + (double)k * T);
+    if (c.xs.empty()) return c;
+    c.n = (int)std::max<int64_t>(1, (int64_t)((double)c.xs.size() * 0.8) - 1);
+    c.s0 = c.xs.front();
+    c.handle = c.s0 + c.n * T;
+    return c;
+}
+
 double windowEnbw(int window, int n) {
     const std::vector<float> w = makeWindow((WindowType)window, n);
     double s = 0, s2 = 0;

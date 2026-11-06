@@ -462,6 +462,24 @@ void testDemod() {
     check(match(r3->digital.bits, ob, 1) > 0.999, fmt("OOK bits match %.4f", match(r3->digital.bits, ob, 1)));
 }
 
+void testCursors() {
+    printf("symbol cursors\n");
+    // 1 kBd, centers at 0.25 ms + k ms, a plot of 0 to 20 ms
+    SymbolCursors c = symbolCursors(1000, 0.25e-3, 0, 20e-3);
+    // centers at 1.25, 2.25 ... 19.25 ms (0.25 ms is in the left 2 %)
+    check(c.xs.size() == 19 && near(c.s0, 1.25e-3, 1e-12), fmt("19 cursors, S0 at %.4f ms (1.25)", c.s0 * 1e3));
+    check(c.n == 14 && near(c.handle, c.s0 + 14e-3, 1e-12), fmt("the handle is %.0f symbols after S0 (14)", c.n));
+    check(near(rateFromHandle(c.s0, c.s0 + 14e-3 * 1.01, c.n), 1000 / 1.01, 1e-6), "dragging the handle 1 % out lowers the rate 1 %");
+    check(rateFromHandle(c.s0, c.s0 - 1e-3, c.n) == 0, "a handle before S0 gives no rate");
+    check(symbolCursors(1e6, 0, 0, 1).xs.empty(), "too many cursors in view: none");
+    check(symbolCursors(0, 0, 0, 1).xs.empty() && symbolCursors(1000, NAN, 0, 1).xs.empty(), "no rate or no time: none");
+    // the cursors follow t0 at any offset, also far into the file
+    c = symbolCursors(9600, 3600.0 + 0.3 / 9600, 3600.0, 3600.01);
+    bool on = !c.xs.empty();
+    for (double x : c.xs) on &= std::abs(std::remainder((x - 3600.0) * 9600 - 0.3, 1.0)) < 1e-6;
+    check(on, "an hour into the file, each cursor is on a symbol center");
+}
+
 void testReport() {
     printf("report\n");
     const double fs = 1e6;
@@ -502,6 +520,7 @@ int main() {
     testSymbols();
     testCyclo();
     testDemod();
+    testCursors();
     testReport();
     std::string cmd = "rm -rf '" + g_dir + "'";
     if (system(cmd.c_str()) != 0) printf("could not remove %s\n", g_dir.c_str());

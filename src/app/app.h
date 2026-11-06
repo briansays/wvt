@@ -254,6 +254,10 @@ private:
     void drawAnSymbols(const AnaRes* r);
     void drawAnCyclo(const AnaRes* r);
     void drawAnDemod(const AnaRes* r);
+    // The Symbols tab's cursors on a time plot of the viewer: drag S0 to move
+    // the timing, and the second handle to change the rate.
+    void drawSymbolCursors();
+    bool symbolCursorsReady() const;
 
     // plot snapshots (app_snapshot.cpp, issue #13)
     void drawSnapshotWindow();
@@ -530,6 +534,7 @@ private:
     int anTmplSrc_ = 0, anTmplBookmark_ = 0;  // correlation template: time markers or a bookmark
     bool anSearchView_ = false;               // search the view, else the whole segment
     double anCycloRange_ = 40;
+    bool anViewerCursors_ = false;  // the symbol cursors on the viewer's time plots
     bool anBitsHex_ = false, anBitsForHex_ = false;
     const AnaRes* anBitsFor_ = nullptr;
     std::string anBitsText_;

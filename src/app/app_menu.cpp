@@ -103,6 +103,10 @@ void App::drawMenuBar() {
             ImGui::SetItemTooltip("Two draggable time cursors shown on every plot");
         }
         ImGui::MenuItem("Frequency markers", "F", &fMarkers_);
+        if (!liveMode_) {
+            ImGui::MenuItem("Symbol cursors", nullptr, &anViewerCursors_, symbolCursorsReady());
+            ImGui::SetItemTooltip("The symbol centers of the Symbols tab (Tools > Analysis) on the time plots");
+        }
         ImGui::SetItemTooltip("Two draggable frequency cursors on the spectrum and waterfall");
         if (!liveMode_) {
             ImGui::MenuItem("Point markers", nullptr, &pointsShown_);

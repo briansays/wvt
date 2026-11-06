@@ -65,7 +65,7 @@ endif()
 
 foreach(k IN LISTS KINDS)
   execute_process(COMMAND ${WVT} --no-log-file --no-config --software --geometry 1400x900 ${meta} --view 0:0.002
-                          --analyze ${k} --screenshot ${DIR}/${k}.ppm
+                          --analyze ${k} --analyze-opt cursors=1 --screenshot ${DIR}/${k}.ppm
                   RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE out)
   if(out MATCHES "cannot open X display")
     message("${out}no X server: skipped")

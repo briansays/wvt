@@ -1129,6 +1129,7 @@ bool App::beginTimePlot(const char* id, const char* ylabel, float h, bool autoY,
 
 void App::endTimePlot(SnapPlot p) {
     drawTimeMarkersVertical();
+    drawSymbolCursors();
     drawExportRegion(false);
     drawPlayhead(true);
     const MeasPlot mp = p == SnapPlot::IQ ? MeasPlot::I : p == SnapPlot::AM ? MeasPlot::AM : p == SnapPlot::FM ? MeasPlot::FM : MeasPlot::PM;

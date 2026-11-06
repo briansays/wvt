@@ -316,3 +316,16 @@ double windowEnbw(int window, int n);
 double strongestLine(const std::vector<float>& v, double fs, double lo, double hi, std::vector<double>* f = nullptr,
                      std::vector<double>* db = nullptr, double* snrDb = nullptr, std::complex<double>* phasor = nullptr);
 int nextPow2(int64_t n);
+
+// Symbol cursors in a plot that shows [lo, hi] (s): the symbol centers
+// t0 + k / rate in it (none when more than maxCursors), S0 (the first one
+// after the left 2 % of the plot) and the rate handle, n symbols after S0
+// (80 % of the way across).
+struct SymbolCursors {
+    std::vector<double> xs;
+    double s0 = 0, handle = 0;
+    int n = 0;
+};
+SymbolCursors symbolCursors(double rate, double t0, double lo, double hi, int maxCursors = 2000);
+// The rate that puts the handle, n symbols after s0, at x. 0 when x is not after s0.
+inline double rateFromHandle(double s0, double x, int n) { return n > 0 && x > s0 ? n / (x - s0) : 0; }

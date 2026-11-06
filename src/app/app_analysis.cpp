@@ -126,7 +126,18 @@ void App::openAnalysis(int kind) {
 bool App::setAnalysisOptions(const std::string& list, std::string& err) {
     AnaReq r = anReq_;
     r.reg.src.fs = fs_;
-    if (!anaSetOptions(r, list, err)) return false;
+    // cursors=0|1 is the window's (the symbol cursors in the viewer), not a setting of a tab.
+    std::string rest;
+    size_t a = 0;
+    while (a <= list.size()) {
+        size_t e = list.find(',', a);
+        if (e == std::string::npos) e = list.size();
+        const std::string kv = list.substr(a, e - a);
+        if (kv.rfind("cursors=", 0) == 0) anViewerCursors_ = kv.substr(8) != "0";
+        else if (!kv.empty()) rest += (rest.empty() ? "" : ",") + kv;
+        a = e + 1;
+    }
+    if (!anaSetOptions(r, rest, err)) return false;
     anReq_ = r;
     anMaxSamples_ = (double)r.reg.maxSamples;
     return true;
@@ -271,7 +282,7 @@ JsonValue App::analysisToJson() const {
     j += ", \"symbols\": {\"detector\": " + q(symMethodName((SymMethod)r.sym.method)) + ", \"rate\": " + n(r.sym.rate) +
          ", \"min_rate\": " + n(r.sym.minRate) + ", \"max_rate\": " + n(r.sym.maxRate) + ", \"have_t0\": " +
          b(r.sym.haveT0) + ", \"t0_s\": " + n(r.sym.t0) + ", \"trace\": " + q(symTraceName((SymTrace)r.sym.trace)) +
-         ", \"power\": " + i(r.sym.power) + "}";
+         ", \"power\": " + i(r.sym.power) + ", \"viewer_cursors\": " + b(anViewerCursors_) + "}";
     j += ", \"cyclo\": {\"np\": " + i(r.cyclo.np) + ", \"blocks\": " + i(r.cyclo.maxP) + ", \"range_db\": " +
          n(anCycloRange_) + "}";
     j += ", \"demod\": {\"mode\": " + q(demodModeName((DemodMode)r.digital.mode)) + ", \"rate\": " + n(r.digital.rate) +
@@ -357,6 +368,7 @@ void App::analysisFromJson(const JsonValue& v) {
         r.sym.trace = indexOf<SymTrace>(o->string("trace"), (int)SymTrace::Count, symTraceName, def.sym.trace);
         const int p = (int)num(o, "power", 4, 2, 8);
         r.sym.power = p == 2 || p == 8 ? p : 4;
+        anViewerCursors_ = o->boolean("viewer_cursors");
     }
     if (const JsonValue* o = v.get("cyclo")) {
         r.cyclo.np = pow2(o, "np", def.cyclo.np, 16, 256);
@@ -1085,6 +1097,10 @@ void App::drawAnSymbols(const AnaRes* r) {
         if (ImGui::SmallButton("Use the estimated timing")) p.haveT0 = false;
     }
     ImGui::BeginDisabled(s.symV.empty());
+    ImGui::Checkbox("Cursors in the viewer", &anViewerCursors_);
+    ImGui::SetItemTooltip("Show the symbol cursors on the I/Q, AM, FM and PM plots of the viewer.\n"
+                          "There, drag S0 to move the timing, and the second handle to change the rate.");
+    ImGui::SameLine();
     if (ImGui::Button("Copy symbol values")) {
         std::string t;
         t.reserve(s.symV.size() * 10);
@@ -1186,6 +1202,46 @@ void App::drawAnSymbols(const AnaRes* r) {
         ImPlot::SetNextLineStyle(kColB);
         ImPlot::PlotInfLines("Peak", e, 1);
         ImPlot::EndPlot();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Symbol cursors on the viewer's time plots
+// ---------------------------------------------------------------------------
+bool App::symbolCursorsReady() const {
+    const auto& r = anRes_[(int)AnaKind::Symbols];
+    return r && r->err.empty() && (r->sym.rate > 0 || anReq_.sym.rate > 0);
+}
+
+void App::drawSymbolCursors() {
+    if (!anViewerCursors_ || liveMode_ || !symbolCursorsReady()) return;
+    const SymbolRes& s = anRes_[(int)AnaKind::Symbols]->sym;
+    SymbolParams& p = anReq_.sym;
+    // The settings first: a drag shows at once, before the tab calculates again.
+    const double rate = p.rate > 0 ? p.rate : s.rate;
+    const double t0 = p.haveT0 ? p.t0 : s.t0;
+    if (!(rate > 0) || !std::isfinite(t0)) return;
+    const ImPlotRect lim = ImPlot::GetPlotLimits();
+    const SymbolCursors c = symbolCursors(rate, t0, lim.X.Min, lim.X.Max);
+    if (c.xs.empty()) return;  // none in view, or too dense to show
+    ImPlot::SetNextLineStyle(ImVec4(1.f, 1.f, 1.f, 0.22f));
+    ImPlot::PlotInfLines("##symcur", c.xs.data(), (int)c.xs.size(), ImPlotItemFlags_NoFit);
+    const ImVec4 colB(1.f, 0.6f, 0.2f, 0.8f);
+    double a = c.s0, b = c.handle;
+    const bool movedA = ImPlot::DragLineX(40, &a, kColCursor, 2.f);
+    const bool movedB = ImPlot::DragLineX(41, &b, colB, 2.f);
+    ImPlot::TagX(a, kColCursor, "S0");
+    ImPlot::TagX(b, colB, "S%d", c.n);
+    if (movedA && a != c.s0) {
+        p.t0 = a;
+        p.haveT0 = true;
+        if (!(p.rate > 0)) p.rate = rate;
+    } else if (movedB && b != c.handle) {
+        if (const double r = rateFromHandle(c.s0, b, c.n); r > 0) {
+            p.rate = r;
+            p.t0 = c.s0;
+            p.haveT0 = true;
+        }
     }
 }
 
