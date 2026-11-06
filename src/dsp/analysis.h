@@ -56,7 +56,7 @@ struct MeasureRes {
 
 // --- spectrum (Welch) ----------------------------------------------------
 struct SpectrumParams {
-    int nfft = 65536;
+    int nfft = 4096;  // issue #113: the larger sizes are a choice
     int window = (int)WindowType::BlackmanHarris;
     double overlap = 0.5;
     bool band = false;  // channel power and ACPR in [fLo, fHi]
