@@ -5,12 +5,12 @@
 # Order: built-in default < this file < environment variable < command-line option.
 
 # ---- folders ----------------------------------------------------------------
-recording.folder    = ~/wvt/recordings/
+recording.folder    = ~/wvt-recordings/
 recording.name      = wvt                # file names: <name>_<date>_<time>_<fc>_<rate>
-snapshot.folder     = ~/wvt/snapshot/
-siggen.folder       = ~/wvt/siggen/
+snapshot.folder     = ~/wvt-recordings/
+siggen.folder       = ~/wvt-recordings/
 siggen.name         = siggen
-audio.folder        = ~/wvt/audio/
+audio.folder        = ~/wvt-recordings/
 
 # ---- file formats -----------------------------------------------------------
 recording.format    = sigmf              # sigmf | raw
@@ -41,7 +41,13 @@ gpu                 = auto               # auto | on | off   (env WVT_GPU)
 # gpu.device        = 0
 ui.scale            = 1                  # 0.5 to 4         (env WVT_SCALE)
 ui.geometry         = 1600x950           # window size WxH
-log.folder        = ~/wvt/logs/        # (env WVT_LOG_DIR)
+# log.folder        = ~/wvt/logs/        # (env WVT_LOG_DIR)
+
+# ---- network stream (--publish, Publish, the ZMQ stream device) -------------
+# zmq.address       = 192.168.1.20:5600  # a.b.c.d[:port] or [iface;]group[:port]
+zmq.ttl             = 1                  # multicast hops: 1 = the local network
+# zmq.format        = gnuradio_sub_cf32  # the ZMQ stream device's message format: wvt | NAME of <config folder>/zmq_NAME.ini
+# publish.format    = gnuradio_sub_cf32  # the publisher's message format: wvt | NAME of <config folder>/zmq_NAME.ini
 
 # ---- transmit limits (only stricter than the environment and the options) ---
 # tx.max_gain_db    = 60
@@ -50,21 +56,21 @@ log.folder        = ~/wvt/logs/        # (env WVT_LOG_DIR)
 # ---- SDRs -------------------------------------------------------------------
 # sdr.default: a type (the first profile and the first device of that type)
 # or a profile index. Not set: the first device that the scan finds.
-sdr.default       = b205
+# sdr.default       = b205
 
 # Profiles: sdr.N.<field>, N from 0 to 99. A device uses the first profile whose type
 # fits it and whose serial and args, where set, match it.
 # Types: b200 b205 b210 x310 n310 x410 usrp bb60 mpcie m2 m2-2280 z3u x2 x4 nv100 sidekiq rtlsdr sim.
 
 # Profile 0, an example:
-sdr.0.type        = b205
+# sdr.0.type        = b205
 # sdr.0.serial      = 31DDAD7            # only this unit
-sdr.0.fc          = 100e6
-sdr.0.rate        = 61.44e6
-sdr.0.gain_db     = 0                  # BB60: sdr.0.ref_level_dbm
-sdr.0.agc         = off
-sdr.0.port        = TX/RX              # USRP antenna or Sidekiq RF port
-sdr.0.bandwidth   = auto
-sdr.0.ref         = internal           # USRP: internal | external | gpsdo
-sdr.0.channel     = 0                  # USRP
+# sdr.0.fc          = 100e6
+# sdr.0.rate        = 61.44e6
+# sdr.0.gain_db     = 0                  # BB60: sdr.0.ref_level_dbm
+# sdr.0.agc         = off
+# sdr.0.port        = TX/RX              # USRP antenna or Sidekiq RF port
+# sdr.0.bandwidth   = auto
+# sdr.0.ref         = internal           # USRP: internal | external | gpsdo
+# sdr.0.channel     = 0                  # USRP
 # Also: atten, amp (BB60), ext_ref (BB60, Sidekiq), direct_sampling, bias_tee, ppm (RTL-SDR).

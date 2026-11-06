@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "common/log.h"
+#include "common/paths.h"
 #include "net/zmq_wire.h"
 
 namespace {
@@ -358,6 +359,12 @@ const std::vector<Key>& keys() {
          "network stream (--publish, Publish, the ZMQ stream device)"},
         {"zmq.ttl", {Kind::Whole, 1, 255}, "multicast hops: 1 = the local network",
          [](WvtConfig& c, const Value& v) { c.zmqTtl = (int)v.whole; }, [](const WvtConfig& c) { return std::to_string(c.zmqTtl); }},
+        {"zmq.format", {Kind::Text}, "the ZMQ stream device's message format: wvt | NAME of <config folder>/zmq_NAME.ini",
+         [](WvtConfig& c, const Value& v) { c.zmqFormat = v.text; }, [](const WvtConfig& c) { return c.zmqFormat; },
+         "gnuradio_sub_cf32", "wvt, the built-in format"},
+        {"publish.format", {Kind::Text}, "the publisher's message format: wvt | NAME of <config folder>/zmq_NAME.ini",
+         [](WvtConfig& c, const Value& v) { c.publishFormat = v.text; }, [](const WvtConfig& c) { return c.publishFormat; },
+         "gnuradio_sub_cf32", "wvt, the built-in format"},
         // transmit limits
         {"tx.max_gain_db", {Kind::Number, -100, 200}, "", [](WvtConfig& c, const Value& v) { c.txMaxGainDb = v.num; },
          [](const WvtConfig& c) { return std::isnan(c.txMaxGainDb) ? std::string() : fmtValue(c.txMaxGainDb); }, "60", "no limit",
@@ -725,33 +732,82 @@ bool loadConfigFile(const std::string& path, WvtConfig& cfg, std::vector<std::st
     return true;
 }
 
-std::string configPath(const std::string& option, bool& required) {
+std::string configHomeDir() { return expandTilde("~/.config/wvt"); }
+
+bool configFindDir(const std::string& option, const std::string& exeDir, ConfigDir& out, std::string& err) {
+    out = {};
+    if (!option.empty()) {
+        const std::string d = expandTilde(option);
+        if (!isDirectory(d)) {
+            err = "--config-dir " + option + ": no such folder";
+            return false;
+        }
+        out = {d, "--config-dir"};
+        return true;
+    }
+    if (!exeDir.empty()) {
+        if (const std::string d = configJoin(exeDir, "config"); isDirectory(d)) {
+            out = {d, "next to the program"};
+            return true;
+        }
+        if (const std::string d = configJoin(exeDir, "../config"); isDirectory(d)) {
+            out = {canonicalPath(d), "above the program"};
+            return true;
+        }
+    }
+    if (const std::string d = configHomeDir(); d.rfind('~', 0) != 0 && isDirectory(d)) out = {d, "home folder"};
+    return true;
+}
+
+std::string configUnusedNote(const ConfigDir& dir) {
+    const std::string home = configHomeDir();
+    if (dir.path.empty() || home.rfind('~', 0) == 0 || !isDirectory(home)) return {};
+    if (canonicalPath(dir.path) == canonicalPath(home)) return {};
+    std::vector<std::string> files = listFiles(home, "zmq_", ".ini");
+    if (isRegularFile(home + "/wvt.conf")) files.insert(files.begin(), "wvt.conf");
+    if (files.empty()) return {};
+    std::string list;
+    for (size_t i = 0; i < files.size() && i < 3; ++i) list += (i ? ", " : "") + files[i];
+    if (files.size() > 3) list += ", ...";
+    return home + " is not used (" + list + "), because wvt uses the config folder " + dir.path + " (" + dir.why + ")";
+}
+
+std::string configPath(const std::string& option, const ConfigDir& dir, bool& required) {
     required = true;
     if (!option.empty()) return expandTilde(option);
     if (const char* e = envVar("WVT_CONFIG"); e && *e) return expandTilde(e);
     required = false;
-    if (const char* x = envVar("XDG_CONFIG_HOME"); x && *x) return std::string(x) + "/wvt/wvt.conf";
-    return expandTilde("~/.config/wvt/wvt.conf");
+    if (dir.path.empty()) return {};
+    return configJoin(dir.path, "wvt.conf");
 }
 
-bool configTakeArgs(std::vector<char*>& args, std::string& path, bool& noConfig, std::string& err) {
+bool configTakeArgs(std::vector<char*>& args, std::string& path, std::string& dir, bool& noConfig, std::string& err) {
     std::vector<char*> keep;
+    // --NAME VALUE or --NAME=VALUE; false when the value is missing.
+    auto take = [&](size_t& i, const std::string& a, const std::string& name, const char* what, std::string& out) {
+        if (a == name) {
+            if (i + 1 >= args.size() || !args[i + 1]) {
+                err = name + " wants a " + what;
+                return false;
+            }
+            out = args[++i];
+        } else {
+            out = a.substr(name.size() + 1);
+            if (out.empty()) {
+                err = name + " wants a " + what;
+                return false;
+            }
+        }
+        return true;
+    };
     for (size_t i = 0; i < args.size(); ++i) {
         const std::string a = args[i] ? args[i] : "";
         if (i > 0 && a == "--no-config") {
             noConfig = true;
-        } else if (i > 0 && a == "--config") {
-            if (i + 1 >= args.size() || !args[i + 1]) {
-                err = "--config wants a file";
-                return false;
-            }
-            path = args[++i];
-        } else if (i > 0 && a.rfind("--config=", 0) == 0) {
-            path = a.substr(9);
-            if (path.empty()) {
-                err = "--config wants a file";
-                return false;
-            }
+        } else if (i > 0 && (a == "--config" || a.rfind("--config=", 0) == 0)) {
+            if (!take(i, a, "--config", "file", path)) return false;
+        } else if (i > 0 && (a == "--config-dir" || a.rfind("--config-dir=", 0) == 0)) {
+            if (!take(i, a, "--config-dir", "folder", dir)) return false;
         } else {
             keep.push_back(args[i]);
         }

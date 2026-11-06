@@ -2,6 +2,7 @@
 // waterfall, status bar.
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 
@@ -9,6 +10,7 @@
 #include "app/file_dialog.h"
 #include "common/log.h"
 #include "app/platform_x11.h"
+#include "net/zmq_format.h"
 #include "net/zmq_wire.h"
 
 namespace {
@@ -49,13 +51,11 @@ const char* driverName(const std::string& d) {
     return "Simulator";
 }
 
-// True when two stream addresses are the same IP and port: a publisher to the
-// address that the zmq device receives on would send the stream back to itself.
-bool sameStreamAddress(const std::string& a, const std::string& b) {
-    StreamAddress x, y;
-    std::string err;
-    return parseStreamAddress(a.empty() ? defaultStreamAddress() : a, x, err) &&
-           parseStreamAddress(b.empty() ? defaultStreamAddress() : b, y, err) && x.ip == y.ip && x.port == y.port;
+// Format ids are compared in any case, as findStreamFormat does.
+bool sameFormatId(const std::string& a, const std::string& b) {
+    return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) {
+               return std::tolower((unsigned char)x) == std::tolower((unsigned char)y);
+           });
 }
 
 }  // namespace
@@ -148,7 +148,10 @@ void App::selectDevice(const DeviceInfo& d) {
     const bool gainMeaningChanged = driverChanged && (d.driver == "bb" || devCfg_.driver == "bb");
     devCfg_.driver = d.driver;
     devCfg_.args = d.args;
-    snprintf(devArgs_, sizeof devArgs_, "%s", d.args.c_str());
+    // The list's ZMQ entry has zmq.address, the address of the built-in
+    // format; a format file has its own (the hint of the Address field).
+    if (d.driver == "zmq" && !isBuiltinFormatId(devCfg_.format)) devCfg_.args.clear();
+    snprintf(devArgs_, sizeof devArgs_, "%s", devCfg_.args.c_str());
     if (driverChanged) {
         std::string err, warn;
         devCfg_.rate = snapSampleRate(d.driver, devCfg_.rate);
@@ -210,8 +213,9 @@ bool App::startDevice(const StreamConfig& cfg) {
 bool App::startPublishing(const PublishConfig& cfg) {
     snprintf(pubAddr_, sizeof pubAddr_, "%s", cfg.address.c_str());
     pubTtl_ = cfg.ttl;
+    pubFormat_ = cfg.format;
     std::string err;
-    if (live_ && live_->running() && live_->config().driver == "zmq" && sameStreamAddress(live_->config().args, cfg.address))
+    if (publishLoops(cfg.address))
         err = "the stream would come back to this wvt: the device receives on that address";
     else if (!live_ || !live_->running())
         err = "start a device before publishing";
@@ -246,6 +250,85 @@ bool App::startRecording(const RecordConfig& cfg) {
 // ---------------------------------------------------------------------------
 // Toolbar
 // ---------------------------------------------------------------------------
+void App::scanZmqFormats() {
+    zmqFormats_ = scanStreamFormats(streamFormatDir());
+    zmqFormatsScanned_ = true;
+}
+
+// A Format combo (issue #101): the built-in format and the zmq_*.ini files of
+// the config folder. A file with an error, or (publish) a format that wvt
+// cannot send, is listed disabled, with the reason in its tooltip. The list
+// is read again each time the combo opens (`wasOpen` keeps the state). True
+// when the user chose another format; `cur` is then its id.
+bool App::zmqFormatCombo(const char* id, std::string& cur, bool publish, bool& wasOpen) {
+    if (!zmqFormatsScanned_) scanZmqFormats();
+    const std::string curId = isBuiltinFormatId(cur) ? "wvt" : cur;
+    std::string preview = curId + " (not found)";
+    std::string tip = "No format with this name in " + (streamFormatDir().empty() ? "(no config folder)" : streamFormatDir());
+    if (const StreamFormatEntry* e = findStreamFormat(zmqFormats_, curId)) {
+        preview = e->format.builtin ? "wvt (built-in)" : e->format.name;
+        tip = e->ok() ? streamFormatSummary(e->format) : "Error: " + e->error;
+    }
+    const bool open = ImGui::BeginCombo(id, preview.c_str());
+    if (!open) {
+        wasOpen = false;
+        tooltipAlways((std::string(publish ? "The message format to send" : "The message format of the stream") +
+                       ": wvt, or a zmq_*.ini file in the config folder\n" + tip)
+                          .c_str());
+        return false;
+    }
+    if (!wasOpen) {  // just opened: read the folder again
+        scanZmqFormats();
+        wasOpen = true;
+    }
+    std::string chosen;
+    for (const auto& e : zmqFormats_) {
+        const StreamFormat& f = e.format;
+        std::string why = e.error;
+        if (why.empty() && publish) checkPublishFormat(f, why);
+        const std::string text = (f.builtin ? "wvt (built-in)" : why.empty() ? f.name : f.id + " (error)") + "##" + f.id;
+        ImGui::BeginDisabled(!why.empty());
+        if (ImGui::Selectable(text.c_str(), sameFormatId(f.id, curId))) chosen = f.id;
+        ImGui::EndDisabled();
+        std::string t = f.builtin ? "The wvt stream: another wvt receives it (ZMQ stream)" : f.path;
+        if (!f.description.empty()) t += "\n" + f.description;
+        t += "\n" + (why.empty() ? streamFormatSummary(f) : (e.ok() ? "Cannot publish: " : "Error: ") + why);
+        for (const auto& w : e.warnings) t += "\nWarning: " + w;
+        tooltipAlways(t.c_str());
+    }
+    if (zmqFormats_.size() == 1)
+        ImGui::TextDisabled(streamFormatDir().empty() ? "No config folder: no format files"
+                                                      : "No zmq_*.ini files in the config folder");
+    ImGui::EndCombo();
+    if (chosen.empty() || sameFormatId(chosen, curId)) return false;
+    cur = chosen;
+    return true;
+}
+
+// The Format combo of the ZMQ stream device.
+void App::drawZmqFormat(bool running) {
+    label("Format", fieldW(16));
+    if (!zmqFormatCombo("##zfmt", devCfg_.format, false, zmqFormatOpen_)) return;
+    // The address of the old format means nothing to the new one: the
+    // built-in format starts on zmq.address, a file on its own address.
+    const std::string addr = isBuiltinFormatId(devCfg_.format) ? cfg_.zmqAddress : std::string();
+    snprintf(devArgs_, sizeof devArgs_, "%s", addr.c_str());
+    devCfg_.args = addr;
+    LOG_INFO("app", "ZMQ format %s", devCfg_.format.c_str());
+    if (running) restartDevice();
+}
+
+// True when publishing to `address` with the publish format sends the stream
+// back to this wvt: the live device is a ZMQ stream that receives there.
+bool App::publishLoops(const std::string& address) {
+    if (!live_ || !live_->running() || live_->config().driver != "zmq") return false;
+    if (!zmqFormatsScanned_) scanZmqFormats();
+    const StreamConfig& c = live_->config();
+    const StreamFormatEntry* rx = findStreamFormat(zmqFormats_, isBuiltinFormatId(c.format) ? "wvt" : c.format);
+    const StreamFormatEntry* tx = findStreamFormat(zmqFormats_, isBuiltinFormatId(pubFormat_) ? "wvt" : pubFormat_);
+    return rx && tx && rx->ok() && tx->ok() && publishReachesSubscriber(rx->format, c.args, tx->format, address);
+}
+
 void App::drawDeviceToolbar() {
     const ImGuiStyle& st = ImGui::GetStyle();
     const bool running = live_ && live_->running();
@@ -292,15 +375,31 @@ void App::drawDeviceToolbar() {
     }
     const bool zmq = devCfg_.driver == "zmq";
     if (zmq) {
+        drawZmqFormat(running);
+        // The current format decides what the address means.
+        const StreamFormatEntry* fe = findStreamFormat(zmqFormats_, isBuiltinFormatId(devCfg_.format) ? "wvt" : devCfg_.format);
+        const bool dish = !fe || fe->format.socket == FormatSocket::Dish;
+        const std::string hint = fe && !fe->format.builtin ? fe->format.address : std::string();
         label("Address", fieldW(16));
-        if (ImGui::InputText("##zaddr", devArgs_, sizeof devArgs_, ImGuiInputTextFlags_EnterReturnsTrue) && running)
+        if (ImGui::InputTextWithHint("##zaddr", hint.c_str(), devArgs_, sizeof devArgs_, ImGuiInputTextFlags_EnterReturnsTrue) &&
+            running)
             restartDevice();
-        tooltipAlways("Where this wvt receives the stream (Enter applies):\n"
-                      "  an address of this computer, e.g. 192.168.1.20:5600 or 127.0.0.1:5600\n"
-                      "    (send to it from the source)\n"
-                      "  or a multicast group, e.g. 239.10.0.1:5600 (the same group as the source),\n"
-                      "    on one interface: en0;239.10.0.1:5600\n"
-                      "The port is 5600 when not given. Start waits up to 3 s for the stream.");
+        if (dish)
+            tooltipAlways("Where this wvt receives the stream (Enter applies):\n"
+                          "  an address of this computer, e.g. 192.168.1.20:5600 or 127.0.0.1:5600\n"
+                          "    (send to it from the source)\n"
+                          "  or a multicast group, e.g. 239.10.0.1:5600 (the same group as the source),\n"
+                          "    on one interface: en0;239.10.0.1:5600\n"
+                          "The port is 5600 when not given. Start waits up to 3 s for the stream.");
+        else if (fe->format.bind)
+            tooltipAlways("Where this wvt listens for the source (Enter applies): host:port,\n"
+                          "e.g. 127.0.0.1:5555, or *:5555 for all interfaces.\n"
+                          "Empty: the address of the format file (the gray text).\n"
+                          "Start waits up to 3 s for the first message.");
+        else
+            tooltipAlways("The source to connect to (Enter applies): host:port, e.g. 192.168.1.30:5555.\n"
+                          "Empty: the address of the format file (the gray text).\n"
+                          "Start waits up to 3 s for the first message.");
     }
     ImGui::EndDisabled();
 
@@ -585,40 +684,59 @@ void App::drawPublishBar() {
     // A publisher that stops by itself (a send error) has no UI event; catch its edge here.
     if (pubWasActive_ && !ps.active && !ps.error.empty()) pubErr_ = ps.error;
     pubWasActive_ = ps.active;
-    if (!pubAddr_[0]) snprintf(pubAddr_, sizeof pubAddr_, "%s", defaultStreamAddress().c_str());
-    const bool loop = running && live_->config().driver == "zmq" && sameStreamAddress(live_->config().args, pubAddr_);
+    const bool builtin = isBuiltinFormatId(pubFormat_);
+    // The built-in format sends to this computer's address by default; a format file has its own address.
+    if (!pubAddr_[0] && builtin) snprintf(pubAddr_, sizeof pubAddr_, "%s", defaultStreamAddress().c_str());
+    const bool loop = running && publishLoops(pubAddr_);
 
     flow(ImGui::CalcTextSize("Stop publishing").x + ImGui::GetStyle().FramePadding.x * 2 + ImGui::GetFrameHeight() * 1.5f);
     if (!ps.active) {
         ImGui::BeginDisabled(!running || loop);
-        if (ImGui::Button("Publish")) startPublishing({pubAddr_, pubTtl_});
+        if (ImGui::Button("Publish")) startPublishing({pubAddr_, pubTtl_, pubFormat_});
         ImGui::EndDisabled();
         tooltipAlways(!running ? "Start a device first"
                       : loop   ? "This wvt receives the stream on that address: publishing there would send it back.\n"
                                  "Choose another address in the options."
-                               : "Send the stream over the network (ZMQ on UDP) to the address in the options.\n"
-                                 "Another wvt receives it with the device ZMQ stream. Recording still works.");
+                      : builtin ? "Send the stream over the network (ZMQ on UDP) to the address in the options.\n"
+                                  "Another wvt receives it with the device ZMQ stream. Recording still works."
+                                : "Send the stream over ZMQ in the format of the options (a zmq_*.ini file).\n"
+                                  "Recording still works.");
     } else if (ImGui::Button("Stop publishing")) {
         live_->stopPublishing();
         status_ = "Stopped publishing";
     }
     ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
-    settingsButton("##pubopts", "Where to publish: the subscriber's address or a multicast group");
+    settingsButton("##pubopts", "Where and how to publish: the format, the subscriber's address or a multicast group");
     if (ImGui::BeginPopup("##pubopts")) {
         ImGui::BeginDisabled(ps.active);
         if (beginForm("##pubform", 5.5f, 18)) {
-            row("Address", "The address of the subscriber (the computer that runs the other wvt),\n"
-                           "e.g. 192.168.1.50:5600, or a multicast group, e.g. 239.10.0.1:5600,\n"
-                           "optionally on one interface: en0;239.10.0.1:5600. The port is 5600 when not given.");
-            ImGui::InputText("##pubaddr", pubAddr_, sizeof pubAddr_);
-            StreamAddress a;
-            std::string err;
-            const bool ok = parseStreamAddress(pubAddr_, a, err);
-            if (!ok) {
-                row("", nullptr);
-                ImGui::TextColored(kColErr, "%s", err.c_str());
+            row("Format", "The message format: wvt for another wvt, or a zmq_*.ini file\n"
+                          "in the config folder for another program (issue #101).");
+            if (zmqFormatCombo("##pubfmt", pubFormat_, true, pubFormatOpen_)) {
+                // As for the device: the built-in format starts on zmq.address, a file on its own address.
+                snprintf(pubAddr_, sizeof pubAddr_, "%s", isBuiltinFormatId(pubFormat_) ? cfg_.zmqAddress.c_str() : "");
+                LOG_INFO("app", "publish format %s", pubFormat_.c_str());
             }
-            if (ok && a.multicast) {
+            const StreamFormatEntry* fe = findStreamFormat(zmqFormats_, isBuiltinFormatId(pubFormat_) ? "wvt" : pubFormat_);
+            const bool dish = !fe || fe->format.socket == FormatSocket::Dish;
+            const bool listens = fe && !dish && !fe->format.bind;  // the subscriber connects: wvt listens
+            row("Address", dish      ? "The address of the subscriber (the computer that runs the other wvt),\n"
+                                       "e.g. 192.168.1.50:5600, or a multicast group, e.g. 239.10.0.1:5600,\n"
+                                       "optionally on one interface: en0;239.10.0.1:5600. The port is 5600 when not given."
+                           : listens ? "Where this wvt listens for subscribers: host:port, e.g. 127.0.0.1:5555,\n"
+                                       "or *:5555 for all interfaces. Empty: the address of the format file."
+                                     : "The subscriber to send to: host:port, e.g. 192.168.1.50:5555.\n"
+                                       "Empty: the address of the format file.");
+            const std::string hint = fe && !fe->format.builtin ? fe->format.address : std::string();
+            ImGui::InputTextWithHint("##pubaddr", hint.c_str(), pubAddr_, sizeof pubAddr_);
+            FormatEndpoint ep;
+            std::string err;
+            const bool ok = fe && fe->ok() && publishEndpoint(fe->format, pubAddr_, ep, err);
+            if (!ok && fe) {
+                row("", nullptr);
+                ImGui::TextColored(kColErr, "%s", (fe->ok() ? err : fe->error).c_str());
+            }
+            if (ok && dish && ep.udp.multicast) {
                 row("TTL", "Multicast hops: 1 keeps the stream on the local network.");
                 if (ImGui::InputInt("##pubttl", &pubTtl_)) pubTtl_ = std::clamp(pubTtl_, 1, 255);
             }
@@ -631,7 +749,7 @@ void App::drawPublishBar() {
     std::string text;
     ImVec4 col = ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled);
     if (ps.active) {
-        text = "PUB " + ps.address + "  " + fmtSI(ps.bytesPerSec, "B", 3) + "/s";
+        text = "PUB " + (ps.format == "wvt" ? "" : ps.format + " ") + ps.address + "  " + fmtSI(ps.bytesPerSec, "B", 3) + "/s";
         if (ps.skipped > 0) text += "  skipped " + fmtSI((double)ps.skipped, "S", 3);
         col = ImVec4(0.45f, 0.8f, 1.f, 1.f);
     } else if (!pubErr_.empty()) {
@@ -639,6 +757,11 @@ void App::drawPublishBar() {
         col = kColErr;
     } else {
         text = std::string(pubAddr_);
+        if (!builtin) {  // the format, and its file's address when the field is empty
+            const StreamFormatEntry* fe = findStreamFormat(zmqFormats_, pubFormat_);
+            if (text.empty() && fe) text = fe->format.address;
+            text = (fe ? fe->format.name : pubFormat_) + (text.empty() ? "" : " " + text);
+        }
     }
     flow(ImGui::CalcTextSize(text.c_str()).x);
     ImGui::AlignTextToFramePadding();

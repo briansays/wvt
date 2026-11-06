@@ -15,6 +15,8 @@ struct StreamConfig {
     std::string args;            // rtlsdr: index or serial; uhd: device args ("serial=...", "addr=192.168.10.2"); bb: serial;
                                  // skiq: serial, or "#N" for card number N; zmq: the stream address
                                  // ("127.0.0.1:5600", "239.10.0.1:5600"; empty = the default address)
+    std::string format;          // zmq: the message format (issue #101): "wvt" or empty = the built-in format,
+                                 // else the id of a zmq_<id>.ini file in the config folder
     double fc = 100e6;
     double rate = 2.4e6;
     bool agc = false;

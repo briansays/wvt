@@ -39,13 +39,16 @@ Refer to [Configuration file](config.md).
 | Option | Function |
 |---|---|
 | `--config FILE` | Read this configuration file. If it does not exist, wvt stops |
+| `--config-dir DIR` | Use this config folder. If it does not exist, wvt stops |
 | `--no-config` | Read no configuration file. wvt uses the built-in defaults |
-| `--write-config FILE` | Write a configuration file with all the keys, then stop. `-` writes to the terminal |
+| `--write-config [FILE]` | Write a configuration file with all the keys, then stop. `-` writes to the terminal. Without FILE: `wvt.conf` in the config folder |
 | `--force` | With `--write-config`: replace a file that exists |
 | `--show-config` | Show each setting, its value and its source, then stop |
 
-Without `--config`, wvt reads `$WVT_CONFIG`. If that is not set, wvt reads
-`$XDG_CONFIG_HOME/wvt/wvt.conf` or `~/.config/wvt/wvt.conf`, if the file exists.
+Without `--config`, wvt reads `$WVT_CONFIG`. If that is not set, wvt reads `wvt.conf` in the
+config folder, if the file exists. The config folder is the first that exists of `--config-dir`,
+`config/` next to the program, `config/` in the folder above it, and `~/.config/wvt/`. Refer to
+[The config folder](config.md#the-config-folder).
 
 The SDR profiles of the file (`sdr.N.*`) also apply on the command line:
 
@@ -79,18 +82,25 @@ The SDR profiles of the file (`sdr.N.*`) also apply on the command line:
 | `--bias-tee` | RTL-SDR: supply power to an LNA or an active antenna through the coax | [Live devices](live.md) |
 | `--direct-sampling I\|Q` | RTL-SDR: HF direct sampling (v3: `Q`) | [Live devices](live.md) |
 | `--ppm N` | RTL-SDR frequency correction | [Live devices](live.md) |
+| `--zmq-format NAME` | The message format of `--device zmq`: `wvt` (the built-in format), or the `NAME` of `zmq_NAME.ini` in the config folder (default `zmq.format`, else `wvt`) | [ZMQ message formats](zmq-formats.md) |
+| `--list-zmq-formats` | Show the ZMQ message formats of the config folder, with their errors, then stop. The exit code is 1 if a file has an error | [ZMQ message formats](zmq-formats.md#check-a-file) |
 | `--list-devices` | Show the devices and the GPUs, then stop | [Live devices](live.md) |
 | `--record PREFIX` | Record to `PREFIX_<date>_<time>_<fc>_<rate>.<ext>` | [Live devices](live.md#recording) |
 | `--record-format sigmf\|raw` | The file type (default `sigmf`) | [Live devices](live.md#recording) |
 | `--record-sample native\|cf32` | The sample format (default `native`) | [Live devices](live.md#recording) |
 | `--record-duration T` | Stop after `T` seconds | [Live devices](live.md#recording) |
 | `--no-gui` | Record or publish without a window. Ctrl+C stops | [Live devices](live.md#recording) |
-| `--publish ADDR` | Send the live stream over the network to `ADDR`: the subscriber's `a.b.c.d[:PORT]`, or a multicast group `[IFACE;]GROUP[:PORT]` (port 5600 by default) | [Live devices](live.md#stream-over-the-network) |
+| `--publish ADDR` | Send the live stream over the network to `ADDR`: the subscriber's `a.b.c.d[:PORT]`, or a multicast group `[IFACE;]GROUP[:PORT]` (port 5600 by default). With a tcp `--publish-format`: `HOST:PORT`, `*:PORT`, or `""` for the address of the format file | [Live devices](live.md#stream-over-the-network) |
+| `--publish-format NAME` | The message format of `--publish`: `wvt` (the built-in format), or the `NAME` of `zmq_NAME.ini` in the config folder (default `publish.format`, else `wvt`) | [ZMQ message formats](zmq-formats.md#publish-with-a-format) |
 | `--publish-ttl N` | The multicast hops, 1 to 255 (default `zmq.ttl`, 1) | [Live devices](live.md#stream-over-the-network) |
 
 `--device zmq[:ADDR]` receives the stream of another wvt on `ADDR`: an address of this computer or
 a multicast group. Without `ADDR`, it uses `zmq.address`, else this computer's address. It does not
 accept `-c`, `-r`, `--gain` or the other device options.
+
+With `--zmq-format NAME`, `--device zmq` receives the messages of another program.
+`ADDR` is then the address for the format, for example `zmq:192.168.1.30:5555`. Without `ADDR`, wvt
+uses the address in the format file. Refer to [Receive other formats](live.md#receive-other-formats).
 
 ## Signal generator
 

@@ -398,6 +398,11 @@ the local network). While wvt publishes, the row shows the address and the data 
   subscriber sees each skip as a gap.
 - If you change the sample rate or a device option, the device restarts and wvt publishes again.
 
+To send to another program, select a format file in **Format** in the ⚙ options. The other program
+receives with the socket of the file, for example a ZMQ SUB socket, and wvt sends with the matching
+socket. If the file has an address, you can leave **Address** empty. For the details, refer to
+[Publish with a format](zmq-formats.md#publish-with-a-format).
+
 On a computer without a display, use `--publish` with `--no-gui`. Press Ctrl+C to stop:
 
 ```sh
@@ -406,6 +411,9 @@ wvt --device uhd -c 915M -r 10M --gain 40 --publish 192.168.1.50:5600 --no-gui
 
 # Publish and record at the same time; the run stops after 60 s
 wvt --device rtlsdr -c 100.1M -r 2.4M --publish 239.10.0.1 --record ~/caps/fm --record-duration 60 --no-gui
+
+# Send raw ci16 on a ZMQ PUSH socket, on the address of the format file
+wvt --device rtlsdr -c 433.92M -r 1M --publish "" --publish-format raw_pull_ci16 --no-gui
 ```
 
 ### Receive
@@ -432,6 +440,37 @@ With `--device zmq`, wvt does not accept `-c`, `-r`, `--gain` or the other devic
 To try it on one computer, start two wvt windows. Publish from the first one to `127.0.0.1:5600`,
 and receive on `127.0.0.1:5600` in the second one.
 
+### Receive other formats
+
+The **ZMQ stream** device can also receive samples from other programs, for example a GNU Radio
+*ZMQ PUB Sink*. A format file in the [config folder](config.md#the-config-folder) tells wvt the
+structure of the messages. The file can use a ZMQ SUB or PULL socket on TCP, or a DISH socket on
+UDP. For the files, refer to [ZMQ message formats](zmq-formats.md).
+
+1. Put the format file, `zmq_NAME.ini`, in the config folder.
+2. In the **Device** list, select **ZMQ stream**.
+3. In the **Format** list, select the format. wvt reads the folder again each time that you open the
+   list.
+4. In **Address**, type the address of the source, and press Enter. If you leave the field empty,
+   wvt uses the address of the format file. The field shows it in gray.
+5. Click **Start**. wvt waits up to 3 s for the first message.
+
+The format `wvt (built-in)` is the stream of another wvt. If you change the format, wvt clears
+**Address**. `zmq.address` is the address of the built-in format only.
+
+From the command line:
+
+```sh
+wvt --list-zmq-formats                                   # the formats, with their errors
+wvt --device zmq --zmq-format gnuradio_sub_cf32          # the address of the format file
+wvt --device zmq:192.168.1.30:5555 --zmq-format gnuradio_sub_cf32
+```
+
+To use a format each time, set [`zmq.format`](config.md#network-stream) in the configuration file.
+
+The frequency, the rate and the gain come from the message header, or from the format file when the
+header does not have them. To send in a format file, refer to [Publish](#publish).
+
 ### Messages
 
 | Message | Cause | What to do |
@@ -442,6 +481,9 @@ and receive on `127.0.0.1:5600` in the second one.
 | *the source stopped publishing* | The publisher stopped | Start publishing again, then click **Start** |
 | *the source started again with another rate* | The publisher changed its rate | Click **Start** |
 | *waiting for the source* | No message for more than 2 s | Check the publisher and the network |
+| *no message from ADDR in 3 s (format NAME; ...)* | A format file: nothing arrives. With `mode = connect`, a wrong address also gives this message | Start the source. Check the address and the port |
+| *N messages arrived on ADDR, but none is of the format NAME* | The messages do not agree with the format file. The message shows the last reason | Select the correct format, or correct the file. Refer to [ZMQ message formats](zmq-formats.md) |
+| *no ZMQ format 'NAME'* | There is no `zmq_NAME.ini` in the config folder | Run `wvt --list-zmq-formats` to see the formats and the folder |
 
 ### Bandwidth
 

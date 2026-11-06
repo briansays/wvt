@@ -25,8 +25,10 @@
 #include "imgui.h"
 #include "implot.h"
 #include "common/log.h"
+#include "common/paths.h"
 #include "app/platform_x11.h"
 #include "common/ui_util.h"
+#include "net/zmq_format.h"
 #include "net/zmq_wire.h"
 
 extern const unsigned char g_embedded_font[];
@@ -37,6 +39,9 @@ static volatile sig_atomic_t g_interrupted = 0;
 // Records and / or publishes (issue #96) from a device without a window.
 // Prints progress once a second. With a recording, the run ends when the
 // recording ends (--record-duration); publishing ends with it.
+// The value that a bare --write-config gets: wvt.conf in the config folder.
+static char kWriteConfigDefault[] = "\x01config-folder";
+
 static int runHeadless(const StreamConfig& dev, const RecordConfig* rc, const PublishConfig* pub) {
     LiveEngine live(nullptr);
     std::string err;
@@ -61,8 +66,8 @@ static int runHeadless(const StreamConfig& dev, const RecordConfig* rc, const Pu
     signal(SIGTERM, [](int) { g_interrupted = 1; });
     if (pub) {
         const auto ps = live.publisher().status();
-        logStatus("stream", "publishing to %s, stream ID %08x, TTL %d (Ctrl+C to stop)", ps.address.c_str(),
-                ps.streamId, pub->ttl);
+        logStatus("stream", "publishing to %s, format %s, stream ID %08x, TTL %d (Ctrl+C to stop)", ps.address.c_str(),
+                  ps.format.c_str(), ps.streamId, pub->ttl);
     }
     if (rc) logStatus("record", "recording to %s (Ctrl+C to stop)", live.recorder().status().dataPath.c_str());
     auto next = std::chrono::steady_clock::now();
@@ -114,7 +119,7 @@ static int runHeadless(const StreamConfig& dev, const RecordConfig* rc, const Pu
         auto ps = live.publisher().status();
         logStatus("stream", "sent %lld samples in %lld messages to %s%s", (long long)ps.samples,
                 (long long)ps.messages, ps.address.c_str(),
-                ps.skipped ? (", skipped " + std::to_string(ps.skipped) + " (the network was too slow)").c_str() : "");
+                ps.skipped ? (", skipped " + std::to_string(ps.skipped) + " (the network was too slow, or no subscriber was connected)").c_str() : "");
         if (!ps.error.empty()) failed = 1;  // the publisher logged why
     }
     if (!devErr.empty()) {
@@ -381,6 +386,32 @@ static int runExtract(const std::string& path, const CliOverrides& ov, double se
 }
 
 // Records the demodulated audio of a live stream to WAV until Ctrl+C or the duration ends.
+// --list-zmq-formats (issue #101): each format of the folder, its errors and
+// warnings. "*" marks the one that zmq.format selects. Exit 1 if a file has
+// an error, so a script can check new files.
+static int listZmqFormats(const std::string& dir, const std::string& selected) {
+    printf("ZMQ message formats (%s):\n", dir.empty() ? "no config folder: the built-in format only" : dir.c_str());
+    int errors = 0;
+    const auto list = scanStreamFormats(dir);
+    const StreamFormatEntry* sel = findStreamFormat(list, isBuiltinFormatId(selected) ? "wvt" : selected);
+    for (const auto& e : list) {
+        const StreamFormat& f = e.format;
+        printf("%s %-22s %s\n", &e == sel ? "*" : " ", f.id.c_str(), f.builtin ? "the wvt stream (built-in)" : f.name.c_str());
+        if (!f.path.empty()) printf("      file:  %s\n", f.path.c_str());
+        if (!e.ok()) {
+            printf("      error: %s\n", e.error.c_str());
+            ++errors;
+            continue;
+        }
+        printf("      %s\n", streamFormatSummary(f).c_str());
+        for (const auto& w : e.warnings) printf("      warning: %s\n", w.c_str());
+    }
+    if (!sel) printf("zmq.format %s: no such format\n", selected.c_str());
+    else if (!sel->ok()) printf("zmq.format %s: the file has an error\n", selected.c_str());
+    else printf("* = zmq.format, the default of --device zmq\n");
+    return errors || !sel || !sel->ok() ? 1 : 0;
+}
+
 static int runAudioLive(const StreamConfig& dev, const AudioParams& ap, const std::string& out, double seconds) {
     LiveEngine live(nullptr);
     std::string err;
@@ -435,7 +466,7 @@ int main(int argc, char** argv) {
         return c != std::string::npos && parseSI(str.substr(0, c).c_str(), a) && parseSI(str.substr(c + 1).c_str(), b);
     };
     StreamConfig dev;
-    bool haveDevice = false, haveRecord = false, noGui = false, haveGain = false;
+    bool haveDevice = false, haveRecord = false, noGui = false, haveGain = false, haveZmqFormat = false, havePubFormat = false;
     PublishConfig pubCfg;  // --publish (issue #96)
     bool havePublish = false;
     std::vector<std::string> devGiven;  // device fields set by options; an SDR profile leaves them (issue #88)
@@ -461,12 +492,16 @@ int main(int argc, char** argv) {
     const std::vector<std::string> cmdLine(argv, argv + argc);  // before the option parsers take theirs
     WvtConfig cfg;
     std::vector<std::string> cfgWarnings;
-    std::string cfgOption, cfgFile, cfgErr;
+    std::string cfgOption, cfgDirOption, cfgFile, cfgErr;
+    ConfigDir cfgDir;  // the config folder (issue #101)
     bool noConfig = false;
-    if (configTakeArgs(args, cfgOption, noConfig, cfgErr) && !noConfig) {
+    if (configTakeArgs(args, cfgOption, cfgDirOption, noConfig, cfgErr) &&
+        configFindDir(cfgDirOption, executableDir(), cfgDir, cfgErr) && !noConfig) {
         bool required = false;
-        cfgFile = configPath(cfgOption, required);
-        if (required || access(cfgFile.c_str(), F_OK) == 0) {
+        cfgFile = configPath(cfgOption, cfgDir, required);
+        if (cfgFile.empty()) {
+            // no config folder and no --config: the built-in defaults
+        } else if (required || access(cfgFile.c_str(), F_OK) == 0) {
             if (!loadConfigFile(cfgFile, cfg, cfgWarnings, cfgErr) && !required) {
                 cfgWarnings.push_back(cfgErr);  // the default file exists but cannot be read
                 cfgErr.clear();
@@ -479,6 +514,7 @@ int main(int argc, char** argv) {
     rc.cf32 = cfg.recordingCf32;
     rc.maxSeconds = cfg.recordingMaxSeconds;
     pubCfg.ttl = cfg.zmqTtl;
+    pubCfg.format = cfg.publishFormat;
     gc.fmt = cfg.siggenSample;
     extractCi16 = cfg.exportBandCi16;
     bool haveRecordFormat = false;  // --record-format also sets the generator file format
@@ -512,11 +548,22 @@ int main(int argc, char** argv) {
         return 2;
     }
     for (const auto& w : cfgWarnings) LOG_WARN("config", "%s", w.c_str());
+    setStreamFormatDir(cfgDir.path);  // the zmq_*.ini message formats (issue #101)
+    if (cfgDir.path.empty()) LOG_DEBUG("config", "no config folder");
+    else LOG_INFO("config", "config folder %s (%s)", cfgDir.path.c_str(), cfgDir.why.c_str());
+    if (const std::string note = configUnusedNote(cfgDir); !note.empty()) LOG_INFO("config", "%s", note.c_str());
     if (noConfig) LOG_INFO("config", "no configuration file (--no-config)");
     else if (cfgFile.empty()) LOG_DEBUG("config", "no configuration file; built-in defaults");
     else LOG_INFO("config", "read %s: %zu settings", cfgFile.c_str(), cfg.origin.size());
     if (const char* e = envVar("WVT_GPU"); e && *e && !parseGpuMode(e, gpuMode))
         LOG_WARN("main", "WVT_GPU=%s is not auto, on or off; using auto", e);
+    // --write-config without FILE (the last word, or an option after it; "-"
+    // alone is the terminal): the parser wants a value, so give it a marker.
+    for (size_t i = 1; i < args.size(); ++i) {
+        if (std::strcmp(args[i], "--write-config") != 0) continue;
+        const char* next = i + 1 < args.size() ? args[i + 1] : nullptr;
+        if (!next || (next[0] == '-' && next[1] != '\0')) args.insert(args.begin() + (std::ptrdiff_t)i + 1, kWriteConfigDefault);
+    }
     argc = (int)args.size();
     args.push_back(nullptr);
     argv = args.data();
@@ -623,11 +670,16 @@ int main(int argc, char** argv) {
              "print log messages to the console: debug | info | warn | error\n(default info; without -v only warnings and errors print)");
     cli.note(nullptr, "--log-dir", "DIR", "log file folder (default $WVT_LOG_DIR, then $TMPDIR, then /tmp)");
     cli.note(nullptr, "--no-log-file", nullptr, "don't write wvt_log_<date>_<time>.log");
-    cli.note(nullptr, "--config", "FILE", "configuration file (default $WVT_CONFIG, then ~/.config/wvt/wvt.conf)");
+    cli.note(nullptr, "--config", "FILE", "configuration file (default $WVT_CONFIG, then wvt.conf in the config folder)");
+    cli.note(nullptr, "--config-dir", "DIR",
+             "config folder (default: the first that exists of config/ next to the program,\n"
+             "config/ in the folder above it, ~/.config/wvt)");
     cli.note(nullptr, "--no-config", nullptr, "read no configuration file: the built-in defaults");
     std::string writeConfig;
     bool showConfig = false, forceWrite = false;
-    cli.add(nullptr, "--write-config", "FILE", "write a configuration file with every key (- = the terminal) and exit",
+    cli.add(nullptr, "--write-config", "[FILE]",
+            "write a configuration file with every key and exit\n"
+            "(- = the terminal; no FILE = wvt.conf in the config folder, else ~/.config/wvt/wvt.conf)",
             text(writeConfig));
     cli.add(nullptr, "--force", nullptr, "with --write-config: replace an existing file", flag(forceWrite));
     cli.add(nullptr, "--show-config", nullptr, "print each setting, its value and where it came from, and exit",
@@ -643,7 +695,8 @@ int main(int argc, char** argv) {
             "rtlsdr[:INDEX|SERIAL] | uhd[:ARGS] | bb[:SERIAL] | skiq[:SERIAL|#N] | zmq[:ADDR] | sim\n"
             "e.g. --device uhd  --device uhd:addr=192.168.10.2  --device rtlsdr:0  --device bb  --device skiq:#0\n"
             "zmq receives the stream of another wvt (--publish) on ADDR, an address of this computer\n"
-            "or a multicast group (default: zmq.address, else this computer's address, port 5600)",
+            "or a multicast group (default: zmq.address, else this computer's address, port 5600);\n"
+            "with --zmq-format, ADDR is where the format receives (default: the format file's address)",
             [&](const char* v) {
                 const std::string s = v;
                 const size_t c = s.find(':');
@@ -651,6 +704,18 @@ int main(int argc, char** argv) {
                 dev.args = c == std::string::npos ? "" : s.substr(c + 1);
                 return haveDevice = true;
             });
+    cli.add(nullptr, "--zmq-format", "NAME",
+            "the message format of --device zmq: wvt (the built-in format) or the NAME of\n"
+            "<config folder>/zmq_NAME.ini (default: zmq.format, else wvt); see --list-zmq-formats",
+            [&](const char* v) {
+                dev.format = v;
+                return haveZmqFormat = true;
+            });
+    cli.action(nullptr, "--list-zmq-formats", "print the ZMQ message formats of the config folder, with their errors, and exit",
+               [&](const char*) {
+                   exitNow = listZmqFormats(streamFormatDir(), cfg.zmqFormat);
+                   return true;
+               });
     cli.add(nullptr, "--gain", "DB|auto", "receiver gain (default 30 dB)", [&](const char* v) {
         if (std::string(v) == "auto") dev.agc = true;
         else if (!parseSI(v, dev.gain)) return bad("bad gain");
@@ -765,13 +830,18 @@ int main(int argc, char** argv) {
     cli.section("network stream (needs --device):");
     cli.add(nullptr, "--publish", "ADDR",
             "send the live stream over ZMQ on UDP to ADDR: the subscriber's address a.b.c.d[:PORT],\n"
-            "or a multicast group [IFACE;]GROUP[:PORT] (default port 5600); receive it with --device zmq",
+            "or a multicast group [IFACE;]GROUP[:PORT] (default port 5600); receive it with --device zmq.\n"
+            "With a tcp --publish-format: HOST:PORT (*:PORT listens on all interfaces), or \"\" for the file's address",
             [&](const char* v) {
-                StreamAddress a;
-                std::string err;
-                if (!parseStreamAddress(v, a, err)) return bad("--publish: %s", err.c_str());
                 pubCfg.address = v;
                 return havePublish = true;
+            });
+    cli.add(nullptr, "--publish-format", "NAME",
+            "the message format of --publish: wvt (the built-in format) or the NAME of\n"
+            "<config folder>/zmq_NAME.ini (default: publish.format, else wvt); see --list-zmq-formats",
+            [&](const char* v) {
+                pubCfg.format = v;
+                return havePubFormat = true;
             });
     cli.add(nullptr, "--publish-ttl", "N", "multicast hops (default zmq.ttl, 1: the local network only)", [&](const char* v) {
         long long n;
@@ -1064,7 +1134,9 @@ int main(int argc, char** argv) {
             fputs(text.c_str(), stdout);
             return 0;
         }
-        const std::string out = expandHome(writeConfig);
+        const std::string out = writeConfig == kWriteConfigDefault
+                                    ? configJoin(cfgDir.path.empty() ? configHomeDir() : cfgDir.path, "wvt.conf")
+                                    : expandHome(writeConfig);
         if (access(out.c_str(), F_OK) == 0 && !forceWrite) {
             LOG_ERROR("config", "%s exists; add --force to replace it", out.c_str());
             return 2;
@@ -1110,6 +1182,7 @@ int main(int argc, char** argv) {
         eff.siggenSample = gc.fmt;
         eff.exportBandCi16 = extractCi16;
         eff.zmqTtl = pubCfg.ttl;
+        eff.publishFormat = pubCfg.format;
         eff.txMaxGainDb = txc.limits.maxGain;
         eff.txAllow.clear();
         for (const TxBand& b : txc.limits.allow) eff.txAllow.emplace_back(b.lo, b.hi);
@@ -1126,11 +1199,14 @@ int main(int argc, char** argv) {
         source("siggen.sample", nullptr, "--gen-sample");
         source("export.band_sample", nullptr, "--extract-format");
         source("zmq.ttl", nullptr, "--publish-ttl");
+        source("publish.format", nullptr, "--publish-format");
         for (const char* k : {"tx.max_gain_db", "tx.allow"}) {
             const bool tx = std::string(k) == "tx.allow";
             const bool env = envVar(tx ? "WVT_TX_ALLOW" : "WVT_TX_MAX_GAIN") && *envVar(tx ? "WVT_TX_ALLOW" : "WVT_TX_MAX_GAIN");
             if (env || given(tx ? "--tx-allow" : "--tx-max-gain")) from[k] = "the strictest of the file, the environment and the options";
         }
+        printf("# config folder: %s\n", cfgDir.path.empty() ? "none" : (cfgDir.path + " (" + cfgDir.why + ")").c_str());
+        if (const std::string note = configUnusedNote(cfgDir); !note.empty()) printf("# %s\n", note.c_str());
         printf("# configuration file: %s\n", noConfig ? "none (--no-config)" : cfgFile.empty() ? "none" : cfgFile.c_str());
         fputs(configShowText(eff, from).c_str(), stdout);
         return 0;
@@ -1262,21 +1338,55 @@ int main(int argc, char** argv) {
             LOG_WARN("config", "sdr.default %s: no such device found", cfg.sdrDefault.c_str());
         }
     }
+    // The publisher's format (issue #101) and its address, checked here for a clear message.
+    if (havePubFormat && !havePublish) {
+        LOG_ERROR("main", "--publish-format is for --publish");
+        return 2;
+    }
+    StreamFormat pubFmt;
+    if (havePublish) {
+        std::string err;
+        FormatEndpoint ep;
+        if (!resolveStreamFormat(pubCfg.format, pubFmt, err) || !checkPublishFormat(pubFmt, err)) {
+            LOG_ERROR("main", "%s%s", err.c_str(), havePubFormat ? "" : " (publish.format in the configuration file)");
+            return 2;
+        }
+        if (!publishEndpoint(pubFmt, pubCfg.address, ep, err)) {
+            LOG_ERROR("main", "--publish: %s", err.c_str());
+            return 2;
+        }
+    }
+    if (haveZmqFormat && !(haveDevice && dev.driver == "zmq")) {
+        LOG_ERROR("main", "--zmq-format is for --device zmq");
+        return 2;
+    }
+    if (!haveZmqFormat) dev.format = cfg.zmqFormat;
     // A zmq stream (issue #96) has the tuning of its source.
     if (haveDevice && dev.driver == "zmq") {
-        if (dev.args.empty()) dev.args = cfg.zmqAddress;  // empty: this computer's address
+        // The message format (issue #101), checked here for a clear message.
+        StreamFormat fmt;
+        std::string err;
+        if (!resolveStreamFormat(dev.format, fmt, err)) {
+            LOG_ERROR("main", "%s%s", err.c_str(), haveZmqFormat ? "" : " (zmq.format in the configuration file)");
+            return 2;
+        }
+        LOG_INFO("main", "ZMQ format %s: %s", fmt.id.c_str(), streamFormatSummary(fmt).c_str());
+        // zmq.address is the address of the built-in format; a format file has its own.
+        const bool builtin = isBuiltinFormatId(dev.format);
+        if (dev.args.empty() && builtin) dev.args = cfg.zmqAddress;  // empty: this computer's address
+        FormatEndpoint ep;
+        if (!formatEndpoint(fmt, dev.args, ep, err)) {
+            LOG_ERROR("main", "--device zmq: %s", err.c_str());
+            return 2;
+        }
         if (ov.haveFc || ov.haveRate || !devGiven.empty()) {
             LOG_ERROR("main", "--device zmq takes the frequency, rate and gain from the source: "
                               "drop -c, -r, --gain and the other device options");
             return 2;
         }
-        StreamAddress in, out;
-        std::string err;
-        const std::string inText = dev.args.empty() ? defaultStreamAddress() : dev.args;
-        if (havePublish && parseStreamAddress(inText, in, err) && parseStreamAddress(pubCfg.address, out, err) &&
-            in.ip == out.ip && in.port == out.port) {
+        if (havePublish && publishReachesSubscriber(fmt, dev.args, pubFmt, pubCfg.address)) {
             LOG_ERROR("main", "--publish %s would send the stream back to this wvt (--device zmq receives on %s)",
-                      pubCfg.address.c_str(), in.text().c_str());
+                      pubCfg.address.c_str(), ep.text.c_str());
             return 2;
         }
     }

@@ -2,6 +2,7 @@
 // numbers in base units and the refused SI suffixes, "~", unknown keys and
 // bad values with their line numbers, duplicates, SDR profiles, sdr.default,
 // and the file search order.
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -12,6 +13,7 @@
 #include <vector>
 
 #include "app/config.h"
+#include "common/paths.h"
 
 namespace {
 int failures = 0;
@@ -229,6 +231,12 @@ int main() {
     {
         const Parsed d = parse("");
         check(d.cfg.zmqAddress.empty() && d.cfg.zmqTtl == 1, "defaults: no address (this computer's), TTL 1");
+        check(d.cfg.zmqFormat.empty(), "default: no zmq.format (the built-in format)");
+        const Parsed f = parse("zmq.format = gnuradio_sub_cf32\n");
+        check(f.warnings.empty() && f.cfg.zmqFormat == "gnuradio_sub_cf32", "zmq.format" + list(f));
+        const Parsed pf = parse("publish.format = raw_pull_ci16\n");
+        check(pf.warnings.empty() && pf.cfg.publishFormat == "raw_pull_ci16" && d.cfg.publishFormat.empty(),
+              "publish.format (default: the built-in format)" + list(pf));
         const Parsed p = parse("zmq.address = 192.168.1.20:5601\nzmq.ttl = 4\n");
         check(p.warnings.empty() && p.cfg.zmqAddress == "192.168.1.20:5601" && p.cfg.zmqTtl == 4,
               "zmq.address and zmq.ttl" + list(p));
@@ -315,16 +323,60 @@ int main() {
 
         bool req = false;
         unsetenv("WVT_CONFIG");
-        setenv("XDG_CONFIG_HOME", "/xdg", 1);
-        check(configPath("/opt/a.conf", req) == "/opt/a.conf" && req, "--config first, required");
+        const ConfigDir folder{"/cfg", "next to the program"};
+        check(configPath("/opt/a.conf", folder, req) == "/opt/a.conf" && req, "--config first, required");
         setenv("WVT_CONFIG", "/etc/b.conf", 1);
-        check(configPath("", req) == "/etc/b.conf" && req, "then $WVT_CONFIG, required");
+        check(configPath("", folder, req) == "/etc/b.conf" && req, "then $WVT_CONFIG, required");
         unsetenv("WVT_CONFIG");
-        check(configPath("", req) == "/xdg/wvt/wvt.conf" && !req, "then $XDG_CONFIG_HOME/wvt/wvt.conf, optional");
-        unsetenv("XDG_CONFIG_HOME");
+        check(configPath("", folder, req) == "/cfg/wvt.conf" && !req, "then wvt.conf in the config folder, optional");
+        check(configPath("", ConfigDir{}, req).empty() && !req, "no config folder: no file");
         setenv("HOME", "/home/u", 1);
-        check(configPath("", req) == "/home/u/.config/wvt/wvt.conf" && !req, "then ~/.config/wvt/wvt.conf");
-        check(configPath("~/c.conf", req) == "/home/u/c.conf", "~ in --config");
+        check(configPath("~/c.conf", folder, req) == "/home/u/c.conf", "~ in --config");
+    }
+
+    printf("config folder\n");
+    {
+        // A temporary tree:
+        //   T/home/.config/wvt/{wvt.conf,zmq_a.ini}   the home folder
+        //   T/portable/{wvt,config/}                  a program with config/ next to it
+        //   T/repo/{build/wvt,config/}                the repository layout
+        //   T/bare/                                   a program without a config/
+        const char* tmp = getenv("TMPDIR");
+        std::string t = std::string(tmp && *tmp ? tmp : "/tmp") + "/wvt_config_dir_" + std::to_string(getpid());
+        for (const char* d : {"", "/home", "/home/.config", "/home/.config/wvt", "/portable", "/portable/config", "/repo",
+                              "/repo/build", "/repo/config", "/bare"})
+            mkdir((t + d).c_str(), 0755);
+        t = canonicalPath(t);
+        for (const char* f : {"/home/.config/wvt/wvt.conf", "/home/.config/wvt/zmq_a.ini"})
+            if (FILE* fp = fopen((t + f).c_str(), "w")) fclose(fp);
+        setenv("HOME", (t + "/home").c_str(), 1);
+        ConfigDir d;
+        std::string err;
+
+        check(!configFindDir(t + "/missing", t + "/portable", d, err) && !err.empty(), "--config-dir that does not exist: error");
+        err.clear();
+        check(configFindDir(t + "/bare", t + "/portable", d, err) && d.path == t + "/bare" && d.why == "--config-dir",
+              "--config-dir first");
+        check(configFindDir("", t + "/portable", d, err) && d.path == t + "/portable/config" && d.why == "next to the program",
+              "then config/ next to the program");
+        check(configFindDir("", t + "/repo/build", d, err) && d.path == t + "/repo/config" && d.why == "above the program",
+              "then config/ above the program (the repository from build/)");
+        const std::string repoNote = configUnusedNote(d);
+        check(repoNote.find("wvt.conf") != std::string::npos && repoNote.find("zmq_a.ini") != std::string::npos,
+              "a note when ~/.config/wvt has files that are not used: " + repoNote);
+        check(configFindDir("", t + "/bare", d, err) && d.path == t + "/home/.config/wvt" && d.why == "home folder",
+              "then ~/.config/wvt");
+        check(configUnusedNote(d).empty(), "no note when ~/.config/wvt is the folder");
+        check(configFindDir("", "", d, err) && d.why == "home folder", "no program folder: ~/.config/wvt");
+        setenv("HOME", (t + "/bare").c_str(), 1);
+        check(configFindDir("", t + "/bare", d, err) && d.path.empty(), "no folder at all: empty");
+        check(configUnusedNote(ConfigDir{t + "/repo/config", "above the program"}).empty(),
+              "no note when ~/.config/wvt does not exist");
+
+        for (const char* f : {"/home/.config/wvt/wvt.conf", "/home/.config/wvt/zmq_a.ini"}) unlink((t + f).c_str());
+        for (const char* r : {"/home/.config/wvt", "/home/.config", "/home", "/portable/config", "/portable", "/repo/build",
+                              "/repo/config", "/repo", "/bare", ""})
+            rmdir((t + r).c_str());
     }
 
     printf("matching devices\n");
@@ -425,15 +477,21 @@ int main() {
 
     printf("options\n");
     {
-        std::string a0 = "wvt", a1 = "--config", a2 = "/x.conf", a3 = "file.iq", a4 = "--no-config", a5 = "--config=/y.conf";
-        std::vector<char*> args = {a0.data(), a1.data(), a2.data(), a3.data(), a4.data(), a5.data()};
-        std::string path, err;
+        std::string a0 = "wvt", a1 = "--config", a2 = "/x.conf", a3 = "file.iq", a4 = "--no-config", a5 = "--config=/y.conf",
+                    a6 = "--config-dir", a7 = "/d1", a8 = "--config-dir=/d2";
+        std::vector<char*> args = {a0.data(), a1.data(), a2.data(), a3.data(), a4.data(),
+                                   a5.data(), a6.data(), a7.data(), a8.data()};
+        std::string path, dir, err;
         bool none = false;
-        check(configTakeArgs(args, path, none, err) && args.size() == 2 && std::string(args[1]) == "file.iq" &&
-                  path == "/y.conf" && none,
-              "--config FILE, --config=FILE and --no-config come out of argv");
+        check(configTakeArgs(args, path, dir, none, err) && args.size() == 2 && std::string(args[1]) == "file.iq" &&
+                  path == "/y.conf" && dir == "/d2" && none,
+              "--config FILE, --config=FILE, --config-dir DIR, --config-dir=DIR and --no-config come out of argv");
         std::vector<char*> bad = {a0.data(), a1.data()};
-        check(!configTakeArgs(bad, path, none, err) && !err.empty(), "--config without a file");
+        check(!configTakeArgs(bad, path, dir, none, err) && !err.empty(), "--config without a file");
+        std::vector<char*> badDir = {a0.data(), a6.data()};
+        err.clear();
+        check(!configTakeArgs(badDir, path, dir, none, err) && err.find("--config-dir") != std::string::npos,
+              "--config-dir without a folder");
         check(configJoin("~/rec/", "wvt") == "~/rec/wvt" && configJoin("/data", "siggen") == "/data/siggen",
               "configJoin with and without a trailing /");
     }

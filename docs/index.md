@@ -34,6 +34,7 @@ export
 snapshots
 sessions
 live
+zmq-formats
 siggen
 audio
 gpu
