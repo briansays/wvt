@@ -13,7 +13,7 @@ that share one time axis. When you pan or zoom one plot, all the other plots fol
 - **Live devices:** wvt streams from an RTL-SDR v3, a USRP (B200 family, N3xx, X3xx, X4xx), a Signal Hound BB60 or an Epiq
   Sidekiq (M.2, mPCIe, X2, X4, NV100), and records the
   stream to SigMF or raw IQ files. It can publish the stream over the network (ZMQ on UDP) to
-  another wvt.
+  another wvt, and receive samples over ZMQ from wvt or from other programs such as GNU Radio.
 - **Signal generator:** CW, pulsed, swept, playback and chain waveforms, to a file, to the live
   view, or transmitted with a USRP.
 - **Audio:** AM, NFM, WFM, USB, LSB and CW demodulation to the speakers or to a WAV file.
@@ -62,6 +62,7 @@ sphinx-build -W -b html docs build/docs      # then open build/docs/index.html
 | [Plot snapshots](docs/snapshots.md) | Save the plots as PNG files |
 | [File sessions](docs/sessions.md) | Save the view, the plots and the channel, and open them again later |
 | [Live devices](docs/live.md) | RTL-SDR and USRP setup, the live view, recording, the network stream |
+| [ZMQ message formats](docs/zmq-formats.md) | Receive samples from other programs over ZMQ |
 | [Signal generator](docs/siggen.md) | Waveforms, sweeps, playback, chains, outputs, transmit safety |
 | [Audio](docs/audio.md) | Demodulation, playback and WAV files |
 | [GPU processing](docs/gpu.md) | CUDA and Metal, run-time selection, fallback |

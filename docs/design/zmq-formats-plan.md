@@ -1,6 +1,6 @@
 # Plan: ZMQ message formats from configuration files (issue #101)
 
-Status: phases 1 (config folder), 2 (format files and decoder), 3 (subscriber device) and 4 (selection) implemented on `zmq-formats` (2026-11-05). Phases 5 and 6 not started.
+Status: phases 1 (config folder), 2 (format files and decoder), 3 (subscriber device), 4 (selection) and 5 (docs) implemented on `zmq-formats` (2026-11-05). Phase 6 (publisher) not started.
 
 ## 1. Goal
 

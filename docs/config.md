@@ -24,8 +24,8 @@ with the defaults.
 
 ## The config folder
 
-The config folder holds the user configuration files of wvt: `wvt.conf`, and later other files
-such as ZMQ message formats. wvt uses the first of these folders that exists, and only that one:
+The config folder holds the user configuration files of wvt: `wvt.conf`, and the
+[ZMQ message formats](zmq-formats.md) (`zmq_*.ini`). wvt uses the first of these folders that exists, and only that one:
 
 1. The `--config-dir DIR` option. If the folder does not exist, wvt stops.
 2. `config/` in the folder of the program.
@@ -161,10 +161,12 @@ If a key is in the file two times, wvt uses the last line, with a warning.
 |---|---|---|
 | `zmq.address` | This computer's address, port 5600 (else `127.0.0.1:5600`) | The default address of the [network stream](live.md#stream-over-the-network) on this computer. The publisher (**Publish**) sends to it; the **ZMQ stream** device receives on it. `a.b.c.d[:port]`, or a multicast group `[iface;]group[:port]` |
 | `zmq.ttl` | `1` | Multicast hops, 1 to 255. `1` keeps the stream on the local network. `--publish-ttl` changes it |
+| `zmq.format` | `wvt`, the built-in format | The [message format](zmq-formats.md) of the **ZMQ stream** device: `wvt`, or the `NAME` of `zmq_NAME.ini` in the config folder. `--zmq-format` changes it |
 
 On the computer that publishes, set `zmq.address` to the address of the subscriber. On the
 subscriber, leave it empty (this computer's address) or set it to the address to receive on.
 With a multicast group, set the same group on both computers. `--publish` always needs its
+address. `zmq.address` is the address of the built-in format only. A format file has its own
 address.
 
 ### Transmit limits

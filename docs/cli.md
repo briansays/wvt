@@ -82,6 +82,8 @@ The SDR profiles of the file (`sdr.N.*`) also apply on the command line:
 | `--bias-tee` | RTL-SDR: supply power to an LNA or an active antenna through the coax | [Live devices](live.md) |
 | `--direct-sampling I\|Q` | RTL-SDR: HF direct sampling (v3: `Q`) | [Live devices](live.md) |
 | `--ppm N` | RTL-SDR frequency correction | [Live devices](live.md) |
+| `--zmq-format NAME` | The message format of `--device zmq`: `wvt` (the built-in format), or the `NAME` of `zmq_NAME.ini` in the config folder (default `zmq.format`, else `wvt`) | [ZMQ message formats](zmq-formats.md) |
+| `--list-zmq-formats` | Show the ZMQ message formats of the config folder, with their errors, then stop. The exit code is 1 if a file has an error | [ZMQ message formats](zmq-formats.md#check-a-file) |
 | `--list-devices` | Show the devices and the GPUs, then stop | [Live devices](live.md) |
 | `--record PREFIX` | Record to `PREFIX_<date>_<time>_<fc>_<rate>.<ext>` | [Live devices](live.md#recording) |
 | `--record-format sigmf\|raw` | The file type (default `sigmf`) | [Live devices](live.md#recording) |
@@ -94,6 +96,10 @@ The SDR profiles of the file (`sdr.N.*`) also apply on the command line:
 `--device zmq[:ADDR]` receives the stream of another wvt on `ADDR`: an address of this computer or
 a multicast group. Without `ADDR`, it uses `zmq.address`, else this computer's address. It does not
 accept `-c`, `-r`, `--gain` or the other device options.
+
+With `--zmq-format NAME`, `--device zmq` receives the messages of another program.
+`ADDR` is then the address for the format, for example `zmq:192.168.1.30:5555`. Without `ADDR`, wvt
+uses the address in the format file. Refer to [Receive other formats](live.md#receive-other-formats).
 
 ## Signal generator
 
