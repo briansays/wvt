@@ -237,6 +237,9 @@ private:
     void drawAnalysisWindow();
     void pollAnalysis();
     void clearAnalysis();  // a new file or format: the results are for the old one
+    // The window's state in a file session (issue #111), and back.
+    JsonValue analysisToJson() const;
+    void analysisFromJson(const JsonValue& v);
     bool analysisRegion(AnaRegion& g, std::string& why) const;
     bool analysisTemplate(double& t0, double& t1, std::string& why) const;
     // A density or dB image as texture `slot`, made again when key (the result) changes.

@@ -83,6 +83,7 @@ Session App::sessionFromState() const {
     s.points = pointsShown_;
     std::copy(std::begin(pts_), std::end(pts_), s.pt);
     for (const Bookmark& b : bookmarks_) s.bookmarks.push_back({b.name, b.t0, b.t1});
+    s.analysis = analysisToJson();
     return s;
 }
 
@@ -168,6 +169,7 @@ bool App::openSession(const std::string& path) {
     bookmarks_.clear();
     for (const Session::Bookmark& b : s.bookmarks) bookmarks_.push_back({b.name, b.t0, b.t1});
     bookmarkSel_ = -1;
+    analysisFromJson(s.analysis);
     // The view last: setView() keeps it inside the segment.
     if (s.t1 > s.t0) setView(s.t0, s.t1);
     if (s.f1 > s.f0) {

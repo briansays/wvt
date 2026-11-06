@@ -48,3 +48,7 @@ std::string jsonQuote(const std::string& s);
 // A JSON number: the fewest digits (%g, 15 to 17) that read back as the same
 // double ("0.1", "915000000", "1e+21"). NaN and infinity are not JSON: "null".
 std::string jsonNumber(double v);
+
+// v as compact JSON on one line ({"a": 1, "b": [true, null]}), members in
+// their order. For a value that a file keeps as it read it.
+std::string jsonWrite(const JsonValue& v);

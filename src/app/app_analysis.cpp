@@ -231,6 +231,152 @@ bool App::analysisTemplate(double& t0, double& t1, std::string& why) const {
 }
 
 // ---------------------------------------------------------------------------
+// File sessions: the window's state as the "analysis" object
+// ---------------------------------------------------------------------------
+namespace {
+const char* kRegionKeys[] = {"view", "markers", "bookmark", "segment"};
+
+// The index of name in names (an enum's name function), or def.
+template <class E>
+int indexOf(const std::string& name, int count, const char* (*fn)(E), int def) {
+    for (int i = 0; i < count; ++i)
+        if (name == fn((E)i)) return i;
+    return def;
+}
+}  // namespace
+
+JsonValue App::analysisToJson() const {
+    const AnaReq& r = anReq_;
+    auto n = [](double v) { return jsonNumber(v); };
+    auto b = [](bool v) { return std::string(v ? "true" : "false"); };
+    auto q = [](const char* s) { return jsonQuote(s); };
+    auto i = [](int v) { return std::to_string(v); };
+    std::string j = "{\"open\": " + b(anOpen_) + ", \"tab\": " + q(anaKindName((AnaKind)anTab_)) +
+                    ", \"region\": " + q(kRegionKeys[std::clamp(anRegion_, 0, 3)]) + ", \"bookmark\": " + i(anBookmark_) +
+                    ", \"channel\": " + b(anUseChan_) + ", \"max_samples\": " + n(anMaxSamples_);
+    j += ", \"measure\": {\"nfft\": " + i(r.measure.nfft) + ", \"window\": " + q(windowName((WindowType)r.measure.window)) + "}";
+    j += ", \"spectrum\": {\"nfft\": " + i(r.spectrum.nfft) + ", \"window\": " + q(windowName((WindowType)r.spectrum.window)) +
+         ", \"overlap\": " + n(r.spectrum.overlap) + ", \"max\": " + b(anSpecMax_) + ", \"min\": " + b(anSpecMin_) + "}";
+    j += ", \"histogram\": {\"bins\": " + i(r.hist.bins) + ", \"show\": " + q(histQtyName((HistQty)anHistQty_)) +
+         ", \"log\": " + b(anHistLog_) + "}";
+    j += ", \"constellation\": {\"carrier\": " + q(carrierFixName((CarrierFix)r.cons.carrier)) + ", \"manual_hz\": " +
+         n(r.cons.manualHz) + ", \"power\": " + i(r.cons.power) + ", \"normalize\": " + b(r.cons.normalize) +
+         ", \"symbols\": " + b(anConsSymbols_) + ", \"density\": " + b(anConsDensity_) + "}";
+    j += ", \"pulses\": {\"auto\": " + b(r.pulse.autoThreshold) + ", \"threshold_db\": " + n(r.pulse.thresholdDb) +
+         ", \"hysteresis_db\": " + n(r.pulse.hysteresisDb) + ", \"min_width_s\": " + n(r.pulse.minWidthS) +
+         ", \"smooth\": " + i(r.pulse.smooth) + "}";
+    j += ", \"correlation\": {\"search\": " + b(r.corr.search) + ", \"template\": " + q(anTmplSrc_ ? "bookmark" : "markers") +
+         ", \"template_bookmark\": " + i(anTmplBookmark_) + ", \"look_in\": " + q(anSearchView_ ? "view" : "segment") +
+         ", \"threshold\": " + n(r.corr.threshold) + "}";
+    j += ", \"symbols\": {\"detector\": " + q(symMethodName((SymMethod)r.sym.method)) + ", \"rate\": " + n(r.sym.rate) +
+         ", \"min_rate\": " + n(r.sym.minRate) + ", \"max_rate\": " + n(r.sym.maxRate) + ", \"have_t0\": " +
+         b(r.sym.haveT0) + ", \"t0_s\": " + n(r.sym.t0) + ", \"trace\": " + q(symTraceName((SymTrace)r.sym.trace)) +
+         ", \"power\": " + i(r.sym.power) + "}";
+    j += ", \"cyclo\": {\"np\": " + i(r.cyclo.np) + ", \"blocks\": " + i(r.cyclo.maxP) + ", \"range_db\": " +
+         n(anCycloRange_) + "}";
+    j += ", \"demod\": {\"mode\": " + q(demodModeName((DemodMode)r.digital.mode)) + ", \"rate\": " + n(r.digital.rate) +
+         ", \"auto\": " + b(r.digital.autoThreshold) + ", \"threshold\": " + n(r.digital.threshold) +
+         ", \"differential\": " + b(r.digital.differential) + ", \"loop\": " + n(r.digital.loopGain) +
+         ", \"hex\": " + b(anBitsHex_) + ", \"file\": " + jsonQuote(anBitsPath_) + "}}";
+    JsonValue v;
+    std::string err;
+    if (!parseJson(j, v, err)) LOG_ERROR("analysis", "session state is not JSON: %s", err.c_str());
+    return v;
+}
+
+void App::analysisFromJson(const JsonValue& v) {
+    if (v.type != JsonValue::Type::Object) return;
+    AnaReq& r = anReq_;
+    const AnaReq def;
+    auto num = [](const JsonValue* o, const char* k, double d, double lo, double hi) {
+        const double x = o ? o->number(k, d) : d;
+        return std::isfinite(x) ? std::clamp(x, lo, hi) : d;
+    };
+    auto pow2 = [&](const JsonValue* o, const char* k, int d, int lo, int hi) {
+        return std::clamp(nextPow2((int64_t)num(o, k, d, lo, hi)), lo, hi);
+    };
+    auto win = [](const JsonValue* o, int d) {
+        return o ? indexOf<WindowType>(o->string("window"), (int)WindowType::Count, windowName, d) : d;
+    };
+    anOpen_ = v.boolean("open");
+    AnaKind k;
+    anTab_ = anaKindFromName(v.string("tab"), k) ? (int)k : 0;
+    anTabWant_ = anTab_;
+    anRegion_ = 0;
+    for (int i = 0; i < 4; ++i)
+        if (v.string("region") == kRegionKeys[i]) anRegion_ = i;
+    anBookmark_ = (int)num(&v, "bookmark", 0, 0, 1e6);
+    anUseChan_ = v.boolean("channel", true);
+    anMaxSamples_ = num(&v, "max_samples", 16e6, 1e4, 256e6);
+    if (const JsonValue* o = v.get("measure")) {
+        r.measure.nfft = pow2(o, "nfft", def.measure.nfft, 64, 1 << 20);
+        r.measure.window = win(o, def.measure.window);
+    }
+    if (const JsonValue* o = v.get("spectrum")) {
+        r.spectrum.nfft = pow2(o, "nfft", def.spectrum.nfft, 64, 1 << 20);
+        r.spectrum.window = win(o, def.spectrum.window);
+        r.spectrum.overlap = num(o, "overlap", def.spectrum.overlap, 0, 0.95);
+        anSpecMax_ = o->boolean("max", true);
+        anSpecMin_ = o->boolean("min", false);
+    }
+    if (const JsonValue* o = v.get("histogram")) {
+        r.hist.bins = (int)num(o, "bins", def.hist.bins, 10, 4096);
+        anHistQty_ = indexOf<HistQty>(o->string("show"), (int)HistQty::Count, histQtyName, 0);
+        anHistLog_ = o->boolean("log");
+    }
+    if (const JsonValue* o = v.get("constellation")) {
+        r.cons.carrier = indexOf<CarrierFix>(o->string("carrier"), (int)CarrierFix::Count, carrierFixName, def.cons.carrier);
+        r.cons.manualHz = num(o, "manual_hz", 0, -1e12, 1e12);
+        const int p = (int)num(o, "power", 4, 2, 8);
+        r.cons.power = p == 2 || p == 8 ? p : 4;
+        r.cons.normalize = o->boolean("normalize", true);
+        anConsSymbols_ = o->boolean("symbols");
+        anConsDensity_ = o->boolean("density", true);
+    }
+    if (const JsonValue* o = v.get("pulses")) {
+        r.pulse.autoThreshold = o->boolean("auto", true);
+        r.pulse.thresholdDb = num(o, "threshold_db", def.pulse.thresholdDb, -300, 300);
+        r.pulse.hysteresisDb = num(o, "hysteresis_db", def.pulse.hysteresisDb, 0, 60);
+        r.pulse.minWidthS = num(o, "min_width_s", 0, 0, 1e6);
+        r.pulse.smooth = (int)num(o, "smooth", 1, 1, 65536);
+    }
+    if (const JsonValue* o = v.get("correlation")) {
+        r.corr.search = o->boolean("search");
+        anTmplSrc_ = o->string("template") == "bookmark" ? 1 : 0;
+        anTmplBookmark_ = (int)num(o, "template_bookmark", 0, 0, 1e6);
+        anSearchView_ = o->string("look_in") == "view";
+        r.corr.threshold = num(o, "threshold", def.corr.threshold, 0.05, 1);
+    }
+    if (const JsonValue* o = v.get("symbols")) {
+        r.sym.method = indexOf<SymMethod>(o->string("detector"), (int)SymMethod::Count, symMethodName, def.sym.method);
+        r.sym.rate = num(o, "rate", 0, 0, 1e12);
+        r.sym.minRate = num(o, "min_rate", 0, 0, 1e12);
+        r.sym.maxRate = num(o, "max_rate", 0, 0, 1e12);
+        r.sym.haveT0 = o->boolean("have_t0");
+        r.sym.t0 = num(o, "t0_s", 0, -1e12, 1e12);
+        r.sym.trace = indexOf<SymTrace>(o->string("trace"), (int)SymTrace::Count, symTraceName, def.sym.trace);
+        const int p = (int)num(o, "power", 4, 2, 8);
+        r.sym.power = p == 2 || p == 8 ? p : 4;
+    }
+    if (const JsonValue* o = v.get("cyclo")) {
+        r.cyclo.np = pow2(o, "np", def.cyclo.np, 16, 256);
+        r.cyclo.maxP = pow2(o, "blocks", def.cyclo.maxP, 16, 8192);
+        anCycloRange_ = num(o, "range_db", 40, 5, 120);
+    }
+    if (const JsonValue* o = v.get("demod")) {
+        r.digital.mode = indexOf<DemodMode>(o->string("mode"), (int)DemodMode::Count, demodModeName, def.digital.mode);
+        r.digital.rate = num(o, "rate", 0, 0, 1e12);
+        r.digital.autoThreshold = o->boolean("auto", true);
+        r.digital.threshold = num(o, "threshold", 0, -1e12, 1e12);
+        r.digital.differential = o->boolean("differential");
+        r.digital.loopGain = num(o, "loop", def.digital.loopGain, 0, 0.5);
+        anBitsHex_ = o->boolean("hex");
+        const std::string f = o->string("file");
+        if (!f.empty()) snprintf(anBitsPath_, sizeof anBitsPath_, "%s", f.c_str());
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Textures for the density plots
 // ---------------------------------------------------------------------------
 void App::analysisTexture(int slot, const void* key, const std::vector<float>& v, int w, int h, bool logScale, float lo,

@@ -3171,6 +3171,7 @@ A session file keeps these items:
 | The layout | The panel sizes, the overview strip, and which time plots show and fit their Y axis |
 | The channel | On or off, the offset, the bandwidth, the taps, the decimation, and the AM, FM and PM settings and the squelch |
 | Markers and bookmarks | The time and frequency markers, the point markers (P1 and P2), and all the bookmarks |
+| The Analysis window | Open or closed, the open tab, the region, the channel filter switch, **Max samples**, and the settings of each tab. Not the results: wvt calculates them again |
 
 A session does not keep the live mode, the signal generator, the audio window or the export
 window.
@@ -3226,7 +3227,8 @@ session file. `...` shows where members are not shown:
   "channel": {"enabled": true, "offset_hz": 300000, "bandwidth_hz": 150000, ...},
   "markers": {...},
   "points": {"shown": true, "p1": {"plot": "am", "t_s": 10.12}, "p2": {"plot": "waterfall", "t_s": 10.15, "f_hz": 100300000}},
-  "bookmarks": [{"name": "burst", "t0_s": 10.1, "t1_s": 10.2}]
+  "bookmarks": [{"name": "burst", "t0_s": 10.1, "t1_s": 10.2}],
+  "analysis": {"open": true, "tab": "pulses", "region": "view", ...}
 }
 ```
 
@@ -3235,6 +3237,8 @@ session file. `...` shows where members are not shown:
   waterfall has `t_s` and `f_hz`. A marker on the spectrum has `f_hz`. A marker on a time plot has
   `t_s`.
 - A member that is not in the file gets its default value. Only `recording` is necessary.
+- `analysis` keeps the Analysis window on one line. Its `tab` and `region` use the names of
+  `--analyze` and of the region (`view`, `markers`, `bookmark` or `segment`).
 - wvt refuses a session file from a newer wvt (a larger `wvt_session` number).
 - The self-check `build/session_check` tests the write and the read, a moved folder, and the
   session files and recordings that wvt must tell apart.
