@@ -386,6 +386,32 @@ static int runExtract(const std::string& path, const CliOverrides& ov, double se
 }
 
 // Records the demodulated audio of a live stream to WAV until Ctrl+C or the duration ends.
+// --list-zmq-formats (issue #101): each format of the folder, its errors and
+// warnings. "*" marks the one that zmq.format selects. Exit 1 if a file has
+// an error, so a script can check new files.
+static int listZmqFormats(const std::string& dir, const std::string& selected) {
+    printf("ZMQ message formats (%s):\n", dir.empty() ? "no config folder: the built-in format only" : dir.c_str());
+    int errors = 0;
+    const auto list = scanStreamFormats(dir);
+    const StreamFormatEntry* sel = findStreamFormat(list, isBuiltinFormatId(selected) ? "wvt" : selected);
+    for (const auto& e : list) {
+        const StreamFormat& f = e.format;
+        printf("%s %-22s %s\n", &e == sel ? "*" : " ", f.id.c_str(), f.builtin ? "the wvt stream (built-in)" : f.name.c_str());
+        if (!f.path.empty()) printf("      file:  %s\n", f.path.c_str());
+        if (!e.ok()) {
+            printf("      error: %s\n", e.error.c_str());
+            ++errors;
+            continue;
+        }
+        printf("      %s\n", streamFormatSummary(f).c_str());
+        for (const auto& w : e.warnings) printf("      warning: %s\n", w.c_str());
+    }
+    if (!sel) printf("zmq.format %s: no such format\n", selected.c_str());
+    else if (!sel->ok()) printf("zmq.format %s: the file has an error\n", selected.c_str());
+    else printf("* = zmq.format, the default of --device zmq\n");
+    return errors || !sel || !sel->ok() ? 1 : 0;
+}
+
 static int runAudioLive(const StreamConfig& dev, const AudioParams& ap, const std::string& out, double seconds) {
     LiveEngine live(nullptr);
     std::string err;
@@ -440,7 +466,7 @@ int main(int argc, char** argv) {
         return c != std::string::npos && parseSI(str.substr(0, c).c_str(), a) && parseSI(str.substr(c + 1).c_str(), b);
     };
     StreamConfig dev;
-    bool haveDevice = false, haveRecord = false, noGui = false, haveGain = false;
+    bool haveDevice = false, haveRecord = false, noGui = false, haveGain = false, haveZmqFormat = false;
     PublishConfig pubCfg;  // --publish (issue #96)
     bool havePublish = false;
     std::vector<std::string> devGiven;  // device fields set by options; an SDR profile leaves them (issue #88)
@@ -668,7 +694,8 @@ int main(int argc, char** argv) {
             "rtlsdr[:INDEX|SERIAL] | uhd[:ARGS] | bb[:SERIAL] | skiq[:SERIAL|#N] | zmq[:ADDR] | sim\n"
             "e.g. --device uhd  --device uhd:addr=192.168.10.2  --device rtlsdr:0  --device bb  --device skiq:#0\n"
             "zmq receives the stream of another wvt (--publish) on ADDR, an address of this computer\n"
-            "or a multicast group (default: zmq.address, else this computer's address, port 5600)",
+            "or a multicast group (default: zmq.address, else this computer's address, port 5600);\n"
+            "with --zmq-format, ADDR is where the format receives (default: the format file's address)",
             [&](const char* v) {
                 const std::string s = v;
                 const size_t c = s.find(':');
@@ -676,6 +703,18 @@ int main(int argc, char** argv) {
                 dev.args = c == std::string::npos ? "" : s.substr(c + 1);
                 return haveDevice = true;
             });
+    cli.add(nullptr, "--zmq-format", "NAME",
+            "the message format of --device zmq: wvt (the built-in format) or the NAME of\n"
+            "<config folder>/zmq_NAME.ini (default: zmq.format, else wvt); see --list-zmq-formats",
+            [&](const char* v) {
+                dev.format = v;
+                return haveZmqFormat = true;
+            });
+    cli.action(nullptr, "--list-zmq-formats", "print the ZMQ message formats of the config folder, with their errors, and exit",
+               [&](const char*) {
+                   exitNow = listZmqFormats(streamFormatDir(), cfg.zmqFormat);
+                   return true;
+               });
     cli.add(nullptr, "--gain", "DB|auto", "receiver gain (default 30 dB)", [&](const char* v) {
         if (std::string(v) == "auto") dev.agc = true;
         else if (!parseSI(v, dev.gain)) return bad("bad gain");
@@ -1291,18 +1330,37 @@ int main(int argc, char** argv) {
             LOG_WARN("config", "sdr.default %s: no such device found", cfg.sdrDefault.c_str());
         }
     }
+    if (haveZmqFormat && !(haveDevice && dev.driver == "zmq")) {
+        LOG_ERROR("main", "--zmq-format is for --device zmq");
+        return 2;
+    }
+    if (!haveZmqFormat) dev.format = cfg.zmqFormat;
     // A zmq stream (issue #96) has the tuning of its source.
     if (haveDevice && dev.driver == "zmq") {
-        if (dev.args.empty()) dev.args = cfg.zmqAddress;  // empty: this computer's address
+        // The message format (issue #101), checked here for a clear message.
+        StreamFormat fmt;
+        std::string err;
+        if (!resolveStreamFormat(dev.format, fmt, err)) {
+            LOG_ERROR("main", "%s%s", err.c_str(), haveZmqFormat ? "" : " (zmq.format in the configuration file)");
+            return 2;
+        }
+        LOG_INFO("main", "ZMQ format %s: %s", fmt.id.c_str(), streamFormatSummary(fmt).c_str());
+        // zmq.address is the address of the built-in format; a format file has its own.
+        const bool builtin = isBuiltinFormatId(dev.format);
+        if (dev.args.empty() && builtin) dev.args = cfg.zmqAddress;  // empty: this computer's address
+        FormatEndpoint ep;
+        if (!formatEndpoint(fmt, dev.args, ep, err)) {
+            LOG_ERROR("main", "--device zmq: %s", err.c_str());
+            return 2;
+        }
         if (ov.haveFc || ov.haveRate || !devGiven.empty()) {
             LOG_ERROR("main", "--device zmq takes the frequency, rate and gain from the source: "
                               "drop -c, -r, --gain and the other device options");
             return 2;
         }
         StreamAddress in, out;
-        std::string err;
         const std::string inText = dev.args.empty() ? defaultStreamAddress() : dev.args;
-        if (havePublish && parseStreamAddress(inText, in, err) && parseStreamAddress(pubCfg.address, out, err) &&
+        if (builtin && havePublish && parseStreamAddress(inText, in, err) && parseStreamAddress(pubCfg.address, out, err) &&
             in.ip == out.ip && in.port == out.port) {
             LOG_ERROR("main", "--publish %s would send the stream back to this wvt (--device zmq receives on %s)",
                       pubCfg.address.c_str(), in.text().c_str());

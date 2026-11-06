@@ -12,6 +12,7 @@
 #include "imgui.h"
 #include "implot.h"
 #include "device/live.h"
+#include "net/zmq_format.h"
 #include "siggen/siggen_out.h"
 #include "io/session.h"
 #include "io/snapshot.h"
@@ -154,6 +155,7 @@ private:
     // live mode (app_live.cpp)
     void drawSourceSelector(float width);
     void drawDeviceToolbar();
+    void drawZmqFormat(bool running);  // the Format combo of the ZMQ stream device (issue #101)
     void drawRecordBar();
     void drawPublishBar();
     void drawLiveLeft();
@@ -396,6 +398,11 @@ private:
     DeviceCaps devCaps_;      // of the device last opened (antennas, channels, ranges)
     char devArgs_[256] = {};
     char antenna_[32] = {};
+    // The ZMQ message formats (issue #101), scanned again each time the
+    // Format combo opens, so a new file shows without a restart.
+    std::vector<StreamFormatEntry> zmqFormats_;
+    bool zmqFormatsScanned_ = false;
+    bool zmqFormatOpen_ = false;
     std::string liveErr_;
     double fileFs_ = 1e6, fileFc_ = 0;  // file-mode values while live mode borrows fs_/fc_
     double liveViewFc_ = NAN, liveViewFs_ = NAN;

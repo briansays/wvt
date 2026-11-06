@@ -231,6 +231,9 @@ int main() {
     {
         const Parsed d = parse("");
         check(d.cfg.zmqAddress.empty() && d.cfg.zmqTtl == 1, "defaults: no address (this computer's), TTL 1");
+        check(d.cfg.zmqFormat.empty(), "default: no zmq.format (the built-in format)");
+        const Parsed f = parse("zmq.format = gnuradio_sub_cf32\n");
+        check(f.warnings.empty() && f.cfg.zmqFormat == "gnuradio_sub_cf32", "zmq.format" + list(f));
         const Parsed p = parse("zmq.address = 192.168.1.20:5601\nzmq.ttl = 4\n");
         check(p.warnings.empty() && p.cfg.zmqAddress == "192.168.1.20:5601" && p.cfg.zmqTtl == 4,
               "zmq.address and zmq.ttl" + list(p));

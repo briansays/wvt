@@ -1,6 +1,6 @@
 # Plan: ZMQ message formats from configuration files (issue #101)
 
-Status: phases 1 (config folder), 2 (format files and decoder) and 3 (subscriber device) implemented on `zmq-formats` (2026-11-05). Phases 4 to 6 not started.
+Status: phases 1 (config folder), 2 (format files and decoder), 3 (subscriber device) and 4 (selection) implemented on `zmq-formats` (2026-11-05). Phases 5 and 6 not started.
 
 ## 1. Goal
 
@@ -186,7 +186,10 @@ The repository ships these examples in `config/`:
   and the description. A bad file is disabled, with its error.
 - When a format has a default address and the Address field is empty, the field shows it as the
   hint text.
-- Sessions save and restore the format with the address.
+- Sessions: not done. A session (issue #76) saves the file viewer only, not the live device or
+  its address, so there is no place for the format. `zmq.format` is the saved choice.
+- `zmq.address` is the address of the built-in format. A format file uses its own address: when
+  the format changes, the Address field is emptied and shows the file's address as hint text.
 
 ### Phase 5 — Docs
 

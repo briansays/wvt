@@ -762,8 +762,26 @@ std::string streamFormatDir() {
     return gDir;
 }
 
+bool isBuiltinFormatId(const std::string& id) { return id.empty() || lower(id) == "wvt"; }
+
+std::string streamFormatSummary(const StreamFormat& f) {
+    std::string s = f.socket == FormatSocket::Dish ? "dish" : f.socket == FormatSocket::Sub ? "sub" : "pull";
+    s += f.tcp ? ", tcp " : ", udp ";
+    s += f.bind ? "bind" : "connect";
+    if (!f.address.empty()) {
+        s += ' ';
+        s += f.address;
+    }
+    if (f.builtin) return s + ", the wvt header";
+    s += ", ";
+    s += formatName(f.sampleFmt);
+    if (f.bigEndian) s += " big endian";
+    if (f.swapIQ) s += " (Q, I)";
+    return s;
+}
+
 bool resolveStreamFormat(const std::string& id, StreamFormat& f, std::string& err) {
-    if (id.empty() || lower(id) == "wvt") {
+    if (isBuiltinFormatId(id)) {
         f = builtinStreamFormat();
         return true;
     }

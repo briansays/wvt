@@ -133,6 +133,13 @@ const char* fieldTypeName(FieldType t, bool bigEndian);
 void setStreamFormatDir(const std::string& dir);
 std::string streamFormatDir();
 
+// True for the id of the built-in format: "" or "wvt" (any case).
+bool isBuiltinFormatId(const std::string& id);
+
+// One line about the socket and the samples, for lists and tooltips:
+// "sub, tcp connect 127.0.0.1:5555, cf32".
+std::string streamFormatSummary(const StreamFormat& f);
+
 // The format with this id ("" = "wvt") from streamFormatDir(). False (err
 // set) when there is no such format or its file has an error.
 bool resolveStreamFormat(const std::string& id, StreamFormat& f, std::string& err);

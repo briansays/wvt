@@ -359,6 +359,9 @@ const std::vector<Key>& keys() {
          "network stream (--publish, Publish, the ZMQ stream device)"},
         {"zmq.ttl", {Kind::Whole, 1, 255}, "multicast hops: 1 = the local network",
          [](WvtConfig& c, const Value& v) { c.zmqTtl = (int)v.whole; }, [](const WvtConfig& c) { return std::to_string(c.zmqTtl); }},
+        {"zmq.format", {Kind::Text}, "the ZMQ stream device's message format: wvt | NAME of <config folder>/zmq_NAME.ini",
+         [](WvtConfig& c, const Value& v) { c.zmqFormat = v.text; }, [](const WvtConfig& c) { return c.zmqFormat; },
+         "gnuradio_sub_cf32", "wvt, the built-in format"},
         // transmit limits
         {"tx.max_gain_db", {Kind::Number, -100, 200}, "", [](WvtConfig& c, const Value& v) { c.txMaxGainDb = v.num; },
          [](const WvtConfig& c) { return std::isnan(c.txMaxGainDb) ? std::string() : fmtValue(c.txMaxGainDb); }, "60", "no limit",

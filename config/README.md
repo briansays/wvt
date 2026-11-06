@@ -12,8 +12,9 @@ This folder holds the user configuration files of wvt (issue #101):
   - `zmq_example_header.ini`: a template for a format with a binary header.
   - `zmq_wvt_ci16.ini`: the built-in wvt format, written as a file.
 
-  wvt reads and checks these files now. The *ZMQ stream* device uses them from the next phase
-  of issue #101.
+  Choose one in the **Format** list next to the *ZMQ stream* device's **Address**, with
+  `--zmq-format NAME`, or with `zmq.format = NAME` in `wvt.conf`. `wvt --list-zmq-formats` lists
+  them with any errors.
 
 wvt uses the first of these folders that exists, and only that one:
 

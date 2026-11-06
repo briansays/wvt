@@ -623,6 +623,14 @@ void checkFormats() {
         check(resolveStreamFormat("", f, err) && f.builtin && resolveStreamFormat("WVT", f, err) && f.builtin,
               "\"\" and \"wvt\" are the built-in format");
         check(resolveStreamFormat("gnuradio_sub_cf32", f, err) && f.socket == FormatSocket::Sub, "a file by its id");
+        check(streamFormatSummary(f) == "sub, tcp connect 127.0.0.1:5555, cf32 (complex float32)",
+              "the summary of a file: " + streamFormatSummary(f));
+        check(resolveStreamFormat("example_header", f, err) && streamFormatSummary(f).find("ci16 (complex int16) big endian") != std::string::npos,
+              "the summary says big endian: " + streamFormatSummary(f));
+        check(streamFormatSummary(builtinStreamFormat()) == "dish, udp bind, the wvt header",
+              "the summary of the built-in format: " + streamFormatSummary(builtinStreamFormat()));
+        check(isBuiltinFormatId("") && isBuiltinFormatId("wvt") && isBuiltinFormatId("WVT") && !isBuiltinFormatId("wvt_ci16"),
+              "isBuiltinFormatId");
         check(!resolveStreamFormat("nope", f, err) && err.find("no ZMQ format 'nope'") != std::string::npos,
               "an unknown id: " + err);
         setStreamFormatDir("");

@@ -74,6 +74,9 @@ struct WvtConfig {
     // receives); empty = this computer's address (defaultStreamAddress).
     std::string zmqAddress;
     int zmqTtl = 1;  // multicast hops
+    // The message format of the ZMQ stream device (issue #101): "wvt" or
+    // empty = the built-in format, else the id of <config folder>/zmq_<id>.ini.
+    std::string zmqFormat;
 
     // Transmit limits; they only make the other limits stricter
     double txMaxGainDb = NAN;                         // NaN = no limit from the file
