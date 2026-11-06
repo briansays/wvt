@@ -73,10 +73,10 @@ void decodeWith(const StreamFormat& f, const uint8_t* data, size_t size) {
     FormatExtra x2;
     // A match that overlaps a field can change the field, so the decode may fail; it must not crash.
     if (!decodeStreamMessage(f, out.data(), out.size(), m2, x2, scratch2, why)) return;
-    if (f.count.set && m2.h.count != n) __builtin_trap();
-    if (!f.count.set && m2.h.count != n) __builtin_trap();
+    if (m2.h.count != n) __builtin_trap();
     // The same samples, unless a value was NaN (cf32 and cf64 keep it, the others make it 0).
-    if (m2.h.fmt == m.h.fmt && memcmp(m2.samples, ring.data(), ring.size()) != 0) {
+    // No samples: m2.samples is null, and memcmp must not get a null pointer, even for 0 bytes.
+    if (!ring.empty() && m2.h.fmt == m.h.fmt && memcmp(m2.samples, ring.data(), ring.size()) != 0) {
         bool nan = false;
         if (m.h.fmt == SampleFormat::CF32)
             for (size_t i = 0; i + 4 <= ring.size(); i += 4) {
