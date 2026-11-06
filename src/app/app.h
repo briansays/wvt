@@ -527,6 +527,7 @@ private:
     };
     AnTex anTex_[3];  // constellation density, eye, spectral correlation
     bool anSpecMax_ = true, anSpecMin_ = false;
+    const AnaRes* anFitFor_[kAnaKinds] = {};  // the result each plot was last fitted to (issue #112)
     int anHistQty_ = 0;
     bool anHistLog_ = false;
     bool anConsSymbols_ = false, anConsDensity_ = true;

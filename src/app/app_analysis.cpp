@@ -109,6 +109,21 @@ void optionalSI(const char* id, double& v, const char* unit, float chars, const 
     if (InputSIOptional(id, &x, unit, emW(chars), hint)) v = x > 0 ? x : 0;
 }
 
+// The range of the finite values of v, with a margin of `pad` (for a plot
+// that is fitted once for each result, and then pans and zooms freely).
+void finiteRange(const std::vector<double>& v, double pad, double& lo, double& hi) {
+    lo = INFINITY;
+    hi = -INFINITY;
+    for (double x : v)
+        if (std::isfinite(x)) {
+            lo = std::min(lo, x);
+            hi = std::max(hi, x);
+        }
+    if (!(hi >= lo)) lo = hi = 0;
+    lo -= pad;
+    hi += pad;
+}
+
 bool fileExists(const std::string& p) {
     struct stat st;
     return ::stat(p.c_str(), &st) == 0;
@@ -156,6 +171,7 @@ void App::pollAnalysis() {
         // A new result can have the address of an old one.
         for (AnTex& t : anTex_) t.key = nullptr;
         anBitsFor_ = nullptr;
+        std::fill(std::begin(anFitFor_), std::end(anFitFor_), nullptr);
         if (!r->err.empty()) LOG_DEBUG("analysis", "%s: %s", anaKindName(r->req.kind), r->err.c_str());
         else LOG_DEBUG("analysis", "%s: %lld samples in %.0f ms", anaKindName(r->req.kind), (long long)r->used, r->seconds * 1e3);
     }
@@ -608,13 +624,22 @@ void App::drawAnMeasure(const AnaRes* r) {
     }
     ImGui::SameLine();
     if (ImPlot::BeginPlot("##anmplot", ImVec2(-1, -1), ImPlotFlags_NoLegend)) {
-        ImPlot::SetupAxes("Frequency", "dBFS", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+        // Fitted once for each result (issue #112): then it pans and zooms like
+        // the viewer's spectrum. Double-click fits it again.
+        double lo, hi;
+        finiteRange(m.psdDb, 5, lo, hi);
+        const ImPlotCond cond = anFitFor_[(int)AnaKind::Measure] != r ? ImPlotCond_Always : ImPlotCond_Once;
+        anFitFor_[(int)AnaKind::Measure] = r;
+        ImPlot::SetupAxes("Frequency", "dBFS");
         ImPlot::SetupAxisFormat(ImAxis_X1, formatValueSI, (void*)"Hz");
+        if (!m.f.empty()) ImPlot::SetupAxesLimits(m.f.front(), m.f.back(), lo, hi, cond);
         ImPlot::SetNextLineStyle(kColA);
         ImPlot::PlotLine("Spectrum", m.f.data(), m.psdDb.data(), (int)m.f.size());
+        // Shaded down to the lowest bin. Not -INFINITY: ImPlot makes that the
+        // current axis minimum, which a fit then moves down on each frame (issue #112).
         ImPlot::SetNextFillStyle(kColC, 0.12f);
         ImPlot::PlotShaded("99 %", std::vector<double>{m.obwLo, m.obwHi}.data(),
-                           std::vector<double>{m.noiseDb, m.noiseDb}.data(), 2, -INFINITY);
+                           std::vector<double>{m.noiseDb, m.noiseDb}.data(), 2, lo + 5);
         ImPlot::SetNextLineStyle(kColC);
         double nx[2] = {m.f.empty() ? 0 : m.f.front(), m.f.empty() ? 0 : m.f.back()}, ny[2] = {m.noiseDb, m.noiseDb};
         ImPlot::PlotLine("Noise floor", nx, ny, 2);
@@ -657,9 +682,21 @@ void App::drawAnSpectrum(const AnaRes* r) {
     ImGui::SetItemTooltip("ACPR: the power in the bands of the same width below and above the band\n"
                           "between the frequency markers, relative to the power in that band.");
     if (ImPlot::BeginPlot("##ansplot", ImVec2(-1, -1))) {
-        ImPlot::SetupAxes("Frequency", "dBFS in one bin", 0, ImPlotAxisFlags_AutoFit);
+        double lo, hi, l2, h2;
+        finiteRange(s.avgDb, 5, lo, hi);
+        if (anSpecMax_) {
+            finiteRange(s.maxDb, 5, l2, h2);
+            hi = std::max(hi, h2);
+        }
+        if (anSpecMin_) {
+            finiteRange(s.minDb, 5, l2, h2);
+            lo = std::max(std::min(lo, l2), hi - 200);  // an empty bin is -200 dB
+        }
+        const ImPlotCond cond = anFitFor_[(int)AnaKind::Spectrum] != r ? ImPlotCond_Always : ImPlotCond_Once;
+        anFitFor_[(int)AnaKind::Spectrum] = r;
+        ImPlot::SetupAxes("Frequency", "dBFS in one bin");
         ImPlot::SetupAxisFormat(ImAxis_X1, formatValueSI, (void*)"Hz");
-        if (!s.f.empty()) ImPlot::SetupAxisLimits(ImAxis_X1, s.f.front(), s.f.back(), ImPlotCond_Once);
+        if (!s.f.empty()) ImPlot::SetupAxesLimits(s.f.front(), s.f.back(), lo, hi, cond);
         const int n = (int)s.f.size();
         if (anSpecMax_) {
             ImPlot::SetNextLineStyle(kColB);
