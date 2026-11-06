@@ -52,7 +52,7 @@ jobs:
 
   macos:
     name: macOS (Apple silicon, Metal, RTL-SDR, UHD)
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
