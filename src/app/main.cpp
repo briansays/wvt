@@ -26,6 +26,7 @@
 #include "implot.h"
 #include "common/log.h"
 #include "common/paths.h"
+#include "app/file_dialog.h"
 #include "app/platform_x11.h"
 #include "common/ui_util.h"
 #include "net/zmq_format.h"
@@ -1543,6 +1544,7 @@ int main(int argc, char** argv) {
             bool active = app.busy() || app.audioBusy() || now - lastActivity < std::chrono::milliseconds(600) ||
                           !shotPath.empty() || !sessionOut.empty();
             if (!win.pumpEvents(active ? 1.0 / 60.0 : 0.5) || app.quitRequested()) break;
+            filedlg::pump();  // macOS: the Cocoa events a file dialog leaves queued
             // Any input (or worker wake-up) keeps the loop running at frame rate for a moment.
             if (io.MouseDelta.x != 0 || io.MouseDelta.y != 0 || io.MouseWheel != 0 || ImGui::IsAnyItemActive() ||
                 io.InputQueueCharacters.Size > 0 || ImGui::IsAnyMouseDown())
