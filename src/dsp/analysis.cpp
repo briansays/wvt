@@ -1,5 +1,7 @@
 #include "dsp/analysis.h"
 
+#include "common/ui_util.h"
+
 #include <algorithm>
 #include <atomic>
 #include <cstdarg>
@@ -1045,7 +1047,7 @@ bool doSymbols(const AnaReq& r, const ChannelReader& rd, int64_t j0, int64_t n, 
     s.lineSnrDb = e.snrDb;
     poolMax(s.lineF, s.lineDb, 8192);
     s.rate = p.rate > 0 ? p.rate : s.estRate;
-    s.t0 = std::isfinite(p.t0) ? p.t0 : s.estT0;
+    s.t0 = p.haveT0 ? p.t0 : s.estT0;
     if (cancelled()) return false;
     const int power = p.power == 2 || p.power == 8 ? p.power : 4;
     s.powPeakHz = powerNPeak(y, power, rate, &s.powF, &s.powDb, &s.powPeakDb);
@@ -1491,6 +1493,187 @@ const char* symTraceName(SymTrace t) {
 const char* demodModeName(DemodMode m) {
     static const char* n[] = {"OOK", "2-FSK", "BPSK", "QPSK"};
     return (int)m >= 0 && (int)m < (int)DemodMode::Count ? n[(int)m] : "";
+}
+
+// --------------------------------------------------------------------------
+// Options (--analyze-opt)
+// --------------------------------------------------------------------------
+const char* analysisOptionHelp() {
+    return "nfft=N  window=rect|hann|hamming|blackman|bh|flattop  overlap=PCT  band=LO:HI (Hz)\n"
+           "max-samples=N  bins=N  carrier=none|mean|power|HZ  power=2|4|8  threshold=X\n"
+           "hysteresis=DB  min-width=S  smooth=N  absolute=0|1  template=T0:T1  search=T0:T1\n"
+           "method=envelope|envchange|frequency  rate=BD  t0=S  trace=i|q|am|fm|pm  np=N  blocks=N\n"
+           "mode=ook|fsk|bpsk|qpsk  differential=0|1  loop=G";
+}
+
+bool anaSetOption(AnaReq& r, const std::string& key, const std::string& value, std::string& err) {
+    double v = 0;
+    const bool num = parseSI(value.c_str(), v) && std::isfinite(v);
+    auto needNum = [&](double lo, double hi) {
+        if (!num || v < lo || v > hi) {
+            char b[160];
+            snprintf(b, sizeof b, "%s wants a number from %g to %g (got '%s')", key.c_str(), lo, hi, value.c_str());
+            err = b;
+            return false;
+        }
+        return true;
+    };
+    auto range = [&](double& a, double& b) {
+        const size_t c = value.find(':');
+        if (c == std::string::npos || !parseSI(value.substr(0, c).c_str(), a) || !parseSI(value.substr(c + 1).c_str(), b) ||
+            !(b > a)) {
+            err = key + " wants LO:HI with HI after LO (got '" + value + "')";
+            return false;
+        }
+        return true;
+    };
+    auto pick = [&](std::initializer_list<const char*> names, int& out) {
+        int i = 0;
+        for (const char* n : names) {
+            if (value == n) {
+                out = i;
+                return true;
+            }
+            ++i;
+        }
+        err = key + ": unknown value '" + value + "'";
+        return false;
+    };
+    const double fs = r.reg.src.fs;
+    if (key == "nfft") {
+        if (!needNum(64, 1 << 20)) return false;
+        r.measure.nfft = r.spectrum.nfft = nextPow2((int64_t)v);
+    } else if (key == "window") {
+        int w;
+        if (!pick({"rect", "hann", "hamming", "blackman", "bh", "flattop"}, w)) return false;
+        r.measure.window = r.spectrum.window = w;
+    } else if (key == "overlap") {
+        if (!needNum(0, 95)) return false;
+        r.spectrum.overlap = v / 100;
+    } else if (key == "band") {
+        double a, b;
+        if (!range(a, b)) return false;
+        r.spectrum.band = true;
+        r.spectrum.fLo = a;
+        r.spectrum.fHi = b;
+    } else if (key == "max-samples") {
+        if (!needNum(1e4, 256e6)) return false;
+        r.reg.maxSamples = (int64_t)v;
+    } else if (key == "bins") {
+        if (!needNum(10, 4096)) return false;
+        r.hist.bins = (int)v;
+        r.cons.bins = std::min(512, (int)v);
+    } else if (key == "carrier") {
+        if (value == "none") r.cons.carrier = (int)CarrierFix::None;
+        else if (value == "mean") r.cons.carrier = (int)CarrierFix::MeanFreq;
+        else if (value == "power") r.cons.carrier = (int)CarrierFix::PowerN;
+        else if (num) {
+            r.cons.carrier = (int)CarrierFix::Manual;
+            r.cons.manualHz = v;
+        } else {
+            err = "carrier wants none, mean, power or a frequency (got '" + value + "')";
+            return false;
+        }
+    } else if (key == "power") {
+        if (!num || (v != 2 && v != 4 && v != 8)) {
+            err = "power wants 2, 4 or 8";
+            return false;
+        }
+        r.cons.power = r.sym.power = (int)v;
+    } else if (key == "threshold") {
+        if (!needNum(-300, 1e12)) return false;
+        r.pulse.thresholdDb = v;
+        r.corr.threshold = std::clamp(v, 0.05, 1.0);
+        r.digital.autoThreshold = false;
+        r.digital.threshold = v;
+    } else if (key == "absolute") {
+        r.pulse.autoThreshold = value == "0";
+    } else if (key == "hysteresis") {
+        if (!needNum(0, 60)) return false;
+        r.pulse.hysteresisDb = v;
+    } else if (key == "min-width") {
+        if (!needNum(0, 1e6)) return false;
+        r.pulse.minWidthS = v;
+    } else if (key == "smooth") {
+        if (!needNum(1, 65536)) return false;
+        r.pulse.smooth = (int)v;
+    } else if (key == "template") {
+        double a, b;
+        if (!range(a, b)) return false;
+        r.corr.search = true;
+        r.corr.tmplS0 = (int64_t)std::llround(a * fs);
+        r.corr.tmplS1 = (int64_t)std::llround(b * fs);
+    } else if (key == "search") {
+        double a, b;
+        if (!range(a, b)) return false;
+        r.corr.searchS0 = (int64_t)std::llround(a * fs);
+        r.corr.searchS1 = (int64_t)std::llround(b * fs);
+    } else if (key == "method") {
+        if (!pick({"envelope", "envchange", "frequency"}, r.sym.method)) return false;
+    } else if (key == "rate") {
+        if (!needNum(0, 1e12)) return false;
+        r.sym.rate = r.digital.rate = v;
+    } else if (key == "t0") {
+        if (!needNum(-1e12, 1e12)) return false;
+        r.sym.t0 = v;
+        r.sym.haveT0 = true;
+    } else if (key == "trace") {
+        if (!pick({"i", "q", "am", "fm", "pm"}, r.sym.trace)) return false;
+    } else if (key == "np") {
+        if (!needNum(16, 256)) return false;
+        r.cyclo.np = nextPow2((int64_t)v);
+    } else if (key == "blocks") {
+        if (!needNum(16, 8192)) return false;
+        r.cyclo.maxP = nextPow2((int64_t)v);
+    } else if (key == "mode") {
+        if (!pick({"ook", "fsk", "bpsk", "qpsk"}, r.digital.mode)) return false;
+    } else if (key == "differential") {
+        r.digital.differential = value != "0";
+    } else if (key == "loop") {
+        if (!needNum(0, 0.5)) return false;
+        r.digital.loopGain = v;
+    } else {
+        err = "unknown --analyze-opt key '" + key + "'";
+        return false;
+    }
+    return true;
+}
+
+bool anaSetOptions(AnaReq& r, const std::string& list, std::string& err) {
+    size_t a = 0;
+    while (a < list.size()) {
+        size_t e = list.find(',', a);
+        if (e == std::string::npos) e = list.size();
+        const std::string kv = list.substr(a, e - a);
+        a = e + 1;
+        if (kv.empty()) continue;
+        const size_t q = kv.find('=');
+        if (q == std::string::npos) {
+            err = "--analyze-opt wants KEY=VALUE (got '" + kv + "')";
+            return false;
+        }
+        if (!anaSetOption(r, kv.substr(0, q), kv.substr(q + 1), err)) return false;
+    }
+    return true;
+}
+
+AnaReq anaOnlyKind(const AnaReq& r) {
+    AnaReq o;
+    o.kind = r.kind;
+    o.reg = r.reg;
+    switch (r.kind) {
+        case AnaKind::Measure: o.measure = r.measure; break;
+        case AnaKind::Spectrum: o.spectrum = r.spectrum; break;
+        case AnaKind::Histogram: o.hist = r.hist; break;
+        case AnaKind::Constellation: o.cons = r.cons; break;
+        case AnaKind::Pulses: o.pulse = r.pulse; break;
+        case AnaKind::Correlation: o.corr = r.corr; break;
+        case AnaKind::Symbols: o.sym = r.sym; break;
+        case AnaKind::Cyclo: o.cyclo = r.cyclo; break;
+        case AnaKind::Demod: o.digital = r.digital; break;
+        default: break;
+    }
+    return o;
 }
 
 std::shared_ptr<AnaRes> computeAnalysis(const AnaReq& r, const CancelFn& cancelled, Progress* progress) {

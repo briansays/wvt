@@ -130,6 +130,7 @@ add_executable(wvt
   src/dsp/measure.cpp
   src/app/app_measure.cpp
   src/dsp/analysis.cpp
+  src/app/app_analysis.cpp
   src/app/file_dialog.cpp
   ${FONT_CPP})
 target_include_directories(wvt PRIVATE src third_party/stb ${PLATFORM_INCLUDES})
@@ -927,6 +928,13 @@ set_tests_properties(clipboard_check PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME session_roundtrip COMMAND ${CMAKE_COMMAND} -DWVT=$<TARGET_FILE:wvt> -DIQGEN=$<TARGET_FILE:iqgen>
   -DDIR=${CMAKE_BINARY_DIR}/session_roundtrip -P ${CMAKE_SOURCE_DIR}/tools/session_roundtrip.cmake)
 set_tests_properties(session_roundtrip PROPERTIES SKIP_REGULAR_EXPRESSION "skipped")
+# The Analysis window (issue #111): --analyze for each kind without a window,
+# and each tab drawn in the window (needs an X server).
+add_test(NAME analysis_cli COMMAND ${CMAKE_COMMAND} -DWVT=$<TARGET_FILE:wvt> -DDIR=${CMAKE_BINARY_DIR}/analysis_cli
+  -DMODE=cli -P ${CMAKE_SOURCE_DIR}/tools/analysis_run.cmake)
+add_test(NAME analysis_window COMMAND ${CMAKE_COMMAND} -DWVT=$<TARGET_FILE:wvt> -DDIR=${CMAKE_BINARY_DIR}/analysis_window
+  -DMODE=window -P ${CMAKE_SOURCE_DIR}/tools/analysis_run.cmake)
+set_tests_properties(analysis_window PROPERTIES SKIP_REGULAR_EXPRESSION "skipped")
 # The configuration file (issue #88): the defaults written and shown without a file.
 add_test(NAME config_write COMMAND wvt --no-log-file --no-config --write-config -)
 add_test(NAME config_show COMMAND wvt --no-log-file --no-config --show-config)

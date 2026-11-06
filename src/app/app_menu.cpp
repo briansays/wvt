@@ -133,6 +133,7 @@ void App::drawMenuBar() {
     if (ImGui::BeginMenu("Tools")) {
         ImGui::MenuItem("Signal generator", "Ctrl+G", &sgOpen_);
         ImGui::MenuItem("Audio", "Ctrl+D", &auOpen_);
+        ImGui::MenuItem("Analysis", "Ctrl+Y", &anOpen_, !liveMode_);
         if (gpuInfo().available) {
             ImGui::Separator();
             bool on = gpuEnabled();

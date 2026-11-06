@@ -184,7 +184,8 @@ struct SymbolParams {
     int method = (int)SymMethod::Transitions;
     double minRate = 0, maxRate = 0;  // search range (Hz); 0 = automatic
     double rate = 0;                  // > 0: use this rate in place of the estimate
-    double t0 = NAN;                  // the time of a symbol center; NaN = the estimate
+    bool haveT0 = false;              // t0 is set; else the estimate
+    double t0 = 0;                    // the time of a symbol center (s, file time)
     int trace = (int)SymTrace::FM;    // the trace for the cursors and the eye
     int eyeSymbols = 2;
     int eyeBins = 128;
@@ -283,7 +284,19 @@ struct AnaRes {
     DigitalRes digital;
 };
 
+// r with only the settings of r.kind (the others at their defaults), so that
+// a change on one tab does not make the result of another tab old.
+AnaReq anaOnlyKind(const AnaReq& r);
+
 std::shared_ptr<AnaRes> computeAnalysis(const AnaReq& r, const CancelFn& cancelled, Progress* progress = nullptr);
+
+// --analyze-opt: sets one setting of r from "key" and "value" (times in
+// seconds of file time, at r.reg.src.fs). False with err on a bad key or
+// value. analysisOptionHelp() lists the keys.
+bool anaSetOption(AnaReq& r, const std::string& key, const std::string& value, std::string& err);
+// "key=value,key=value": each one through anaSetOption.
+bool anaSetOptions(AnaReq& r, const std::string& list, std::string& err);
+const char* analysisOptionHelp();
 
 // The result as text (--analyze --analyze-out): a header of "# " lines and
 // CSV rows.

@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-enum class SnapPlot { Overview, Spectrum, Waterfall, IQ, AM, FM, PM, Count };
+enum class SnapPlot { Overview, Spectrum, Waterfall, IQ, AM, FM, PM, Analysis, Count };
 constexpr int kSnapPlots = (int)SnapPlot::Count;
 
 // The name in the file name ("spectrum") and the label in the window ("Spectrum").

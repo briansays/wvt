@@ -44,6 +44,7 @@ App::App(X11Window& win, const WvtConfig& cfg) : win_(win), cfg_(cfg) {
     wfWorker_ = std::make_unique<Worker<WaterfallReq, WaterfallRes>>(computeWaterfall, wake, "waterfall");
     dmWorker_ = std::make_unique<Worker<DemodReq, DemodRes>>(computeDemod, wake, "demod");
     ovWorker_ = std::make_unique<Worker<OverviewReq, OverviewRes>>(computeOverview, wake, "overview");
+    anWorker_ = std::make_unique<Worker<AnaReq, AnaRes>>(computeAnalysis, wake, "analysis");
     cmap_ = ImPlotColormap_Viridis;
     demod_.chanBw = 50e3;
     status_ = "No file loaded - type a path in the File box and press Enter (or run: wvt <file>)";
@@ -111,6 +112,8 @@ App::~App() {
     wfWorker_.reset();
     dmWorker_.reset();
     ovWorker_.reset();
+    anWorker_.reset();
+    for (AnTex& t : anTex_) win_.destroyTexture(t.id);
     win_.destroyTexture(wfTex_);
 }
 
@@ -135,7 +138,8 @@ std::string App::computingText() const {
 
 // While a device streams, the main loop keeps running at frame rate.
 bool App::busy() const {
-    return workersBusy() || (live_ && live_->running()) || sigGenBusy() || exportBusy() || snapCountdown_ > 0;
+    return workersBusy() || (live_ && live_->running()) || sigGenBusy() || exportBusy() || analysisBusy() ||
+           snapCountdown_ > 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -216,6 +220,7 @@ bool App::openFileOnly(const std::string& path, const CliOverrides& o) {
 }
 
 std::string App::onSourceChanged(bool resetView) {
+    clearAnalysis();
     nSamples_ = file_ ? file_->numSamples(fp_) : 0;
     dur_ = fs_ > 0 ? nSamples_ / fs_ : 0;
     // The rate, format or header moves the samples, so map the segment again.
@@ -553,9 +558,11 @@ void App::frame() {
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_G)) sgOpen_ = !sgOpen_;
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_D)) auOpen_ = !auOpen_;
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_E) && !liveMode_ && file_) toggleExport();
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Y) && !liveMode_) anOpen_ = !anOpen_;
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Q)) quit_ = true;
     handleShortcuts();
     ImGui::End();
+    drawAnalysisWindow();
     drawSnapshotWindow();
     drawHelpWindows();
     drawSessionWindow();
