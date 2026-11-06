@@ -381,7 +381,7 @@ static int runAnalyze(const std::string& path, const CliOverrides& ov, double se
     } else {
         FILE* o = fopen(out.c_str(), "wx");
         if (!o) {
-            LOG_ERROR("analysis", "cannot make %s: %s%s", out.c_str(), strerror(errno),
+            LOG_ERROR("analysis", "cannot make %s: %s%s", out.c_str(), errnoText(errno).c_str(),
                       errno == EEXIST ? " (wvt does not replace a file)" : "");
             return 1;
         }

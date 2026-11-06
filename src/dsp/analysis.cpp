@@ -568,8 +568,9 @@ bool doConstellation(const AnaReq& r, const ChannelReader& rd, int64_t j0, int64
     if (p.symbolRate > 0) {
         const double T = 1.0 / p.symbolRate, rate = rd.rate();
         const double tA = rd.timeOf((double)j0), tB = rd.timeOf((double)(j0 + n - 1));
-        double t = p.symbolT0 + std::ceil((tA - p.symbolT0) / T) * T;
-        for (; t <= tB && pts.size() < 4'000'000; t += T) pts.push_back(lerpAt(y, t * rate - (double)j0));
+        const double first = p.symbolT0 + std::ceil((tA - p.symbolT0) / T) * T;
+        for (int64_t k = 0; first + (double)k * T <= tB && pts.size() < 4'000'000; ++k)
+            pts.push_back(lerpAt(y, (first + (double)k * T) * rate - (double)j0));
     } else {
         pts.swap(y);
     }
@@ -1061,8 +1062,9 @@ bool doSymbols(const AnaReq& r, const ChannelReader& rd, int64_t j0, int64_t n, 
     if (s.rate > 0) {
         const double T = 1.0 / s.rate;
         const double tA = tFirst, tB = tFirst + (double)(n - 1) / rate;
-        double t = s.t0 + std::ceil((tA - s.t0) / T) * T;
-        for (; t <= tB && s.symT.size() < 1'000'000; t += T) {
+        const double first = s.t0 + std::ceil((tA - s.t0) / T) * T;
+        for (int64_t k = 0; first + (double)k * T <= tB && s.symT.size() < 1'000'000; ++k) {
+            const double t = first + (double)k * T;
             s.symT.push_back(t);
             s.symV.push_back(lerpAt(tr, (t - tFirst) * rate));
         }

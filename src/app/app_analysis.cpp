@@ -343,7 +343,7 @@ void App::drawAnalysisWindow() {
     // --- the request for the open tab ---
     AnaReq req = anReq_;
     req.kind = (AnaKind)shown;
-    req.reg = reg;
+    req.reg = std::move(reg);
     bool ready = haveReg;
     if (req.kind == AnaKind::Spectrum) {
         req.spectrum.band = fMarkers_;
@@ -576,7 +576,8 @@ void App::drawAnHistogram(const AnaRes* r) {
         ImPlot::PlotLine("Measured", h.ccdfDb.data(), y.data(), (int)y.size());
         // the CCDF of complex Gaussian noise, for reference
         std::vector<double> gx, gy;
-        for (double x = 0; x <= 12; x += 0.1) {
+        for (int i = 0; i <= 120; ++i) {
+            const double x = i * 0.1;
             gx.push_back(x);
             gy.push_back(std::exp(-std::pow(10.0, x / 10)) / std::exp(-1.0));
         }
@@ -986,7 +987,8 @@ void App::drawAnSymbols(const AnaRes* r) {
         if (T > 0 && (lim.X.Max - lim.X.Min) / T < 2000) {
             std::vector<double> cx, cy;
             const double t0 = s.t0 - r->t0;
-            for (double t = t0 + std::ceil((lim.X.Min - t0) / T) * T; t <= lim.X.Max; t += T) cx.push_back(t);
+            const double first = t0 + std::ceil((lim.X.Min - t0) / T) * T;
+            for (int k = 0; first + k * T <= lim.X.Max; ++k) cx.push_back(first + k * T);
             ImPlot::SetNextLineStyle(ImVec4(1, 1, 1, 0.18f));
             ImPlot::PlotInfLines("##cur", cx.data(), (int)cx.size());
             for (double t : cx) {
@@ -1176,7 +1178,7 @@ void App::drawAnDemod(const AnaRes* r) {
             anBitsMsg_ = ok ? "Wrote " + std::to_string(d.bits.size()) + " bits to " + path : "Could not write " + path;
             LOG_INFO("analysis", "%s", anBitsMsg_.c_str());
         } else {
-            anBitsMsg_ = "Could not make " + path + ": " + strerror(errno);
+            anBitsMsg_ = "Could not make " + path + ": " + errnoText(errno);
         }
     }
     if (!anBitsMsg_.empty()) {
