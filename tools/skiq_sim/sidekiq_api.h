@@ -8,6 +8,8 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/types.h>
 // As in the real header: the SKIQ_LOG_* levels are the syslog priorities.
 #include <syslog.h>
@@ -22,6 +24,12 @@
 #define SKIQ_SERIAL_NUM_STRLEN (6)
 #define SKIQ_RX_HEADER_SIZE_IN_WORDS 6
 #define SKIQ_RX_HEADER_SIZE_IN_BYTES (SKIQ_RX_HEADER_SIZE_IN_WORDS * sizeof(uint32_t))
+
+#define SKIQ_TX_HEADER_SIZE_IN_WORDS 4
+#define SKIQ_TX_HEADER_SIZE_IN_BYTES (SKIQ_TX_HEADER_SIZE_IN_WORDS * sizeof(uint32_t))
+#define SKIQ_TX_PACKET_SIZE_INCREMENT_IN_WORDS (256)
+#define SKIQ_MAX_TX_PACKET_SIZE_IN_WORDS 65536
+#define SKIQ_TX_BLOCK_MEMORY_ALIGN 4096
 
 #define RX_TRANSFER_NO_WAIT (0)
 #define RX_TRANSFER_WAIT_FOREVER (-1)
@@ -59,6 +67,20 @@ typedef enum {
     skiq_rx_hdl_D1 = 5,
     skiq_rx_hdl_end = 6
 } skiq_rx_hdl_t;
+
+typedef enum {
+    skiq_tx_hdl_A1 = 0,
+    skiq_tx_hdl_A2 = 1,
+    skiq_tx_hdl_B1 = 2,
+    skiq_tx_hdl_B2 = 3,
+    skiq_tx_hdl_end
+} skiq_tx_hdl_t;
+
+typedef enum {
+    skiq_tx_immediate_data_flow_mode = 0,
+    skiq_tx_with_timestamps_data_flow_mode,
+    skiq_tx_with_timestamps_allow_late_data_flow_mode,
+} skiq_tx_flow_mode_t;
 
 typedef enum { skiq_rx_gain_manual = 0, skiq_rx_gain_auto } skiq_rx_gain_t;
 
@@ -146,8 +168,24 @@ typedef struct {
 } skiq_rx_param_t;
 
 typedef struct {
+    skiq_tx_hdl_t handle;
+    uint16_t atten_quarter_db_max;
+    uint16_t atten_quarter_db_min;
+    uint8_t iq_resolution;
+    uint64_t lo_freq_max;
+    uint64_t lo_freq_min;
+    uint32_t sample_rate_max;
+    uint32_t sample_rate_min;
+    uint8_t num_fixed_rf_ports;
+    skiq_rf_port_t fixed_rf_ports[skiq_rf_port_max];
+    uint8_t num_trx_rf_ports;
+    skiq_rf_port_t trx_rf_ports[skiq_rf_port_max];
+} skiq_tx_param_t;
+
+typedef struct {
     skiq_card_param_t card_param;
     skiq_rx_param_t rx_param[skiq_rx_hdl_end];
+    skiq_tx_param_t tx_param[skiq_tx_hdl_end];
 } skiq_param_t;
 
 typedef struct __attribute__((__packed__, aligned(8))) {
@@ -167,6 +205,25 @@ typedef struct __attribute__((__packed__, aligned(8))) {
     };
     volatile int16_t data[];
 } skiq_rx_block_t;
+
+typedef struct __attribute__((__packed__, aligned(SKIQ_TX_BLOCK_MEMORY_ALIGN))) {
+    uint32_t hdl;
+    uint32_t reserved;
+    uint64_t timestamp;
+    int16_t data[];
+} skiq_tx_block_t;
+
+static inline skiq_tx_block_t *skiq_tx_block_allocate_by_bytes(uint32_t data_size_in_bytes) {
+    skiq_tx_block_t *p = NULL;
+    const size_t size = SKIQ_TX_HEADER_SIZE_IN_BYTES + data_size_in_bytes;
+    if (posix_memalign((void **)&p, SKIQ_TX_BLOCK_MEMORY_ALIGN, size) != 0) return NULL;
+    memset(p, 0, size);
+    return p;
+}
+static inline skiq_tx_block_t *skiq_tx_block_allocate(uint32_t data_size_in_samples) {
+    return skiq_tx_block_allocate_by_bytes(data_size_in_samples * 4);
+}
+static inline void skiq_tx_block_free(skiq_tx_block_t *p_block) { free(p_block); }
 
 EPIQ_API void skiq_register_logging(void (*log_msg)(int32_t priority, const char *message));
 EPIQ_API int32_t skiq_read_libsidekiq_version(uint8_t *p_major, uint8_t *p_minor, uint8_t *p_patch,
@@ -211,5 +268,45 @@ EPIQ_API int32_t skiq_start_rx_streaming(uint8_t card, skiq_rx_hdl_t hdl);
 EPIQ_API int32_t skiq_stop_rx_streaming(uint8_t card, skiq_rx_hdl_t hdl);
 EPIQ_API skiq_rx_status_t skiq_receive(uint8_t card, skiq_rx_hdl_t *p_hdl, skiq_rx_block_t **pp_block,
                                        uint32_t *p_data_len);
+// Transmit (issue #86)
+EPIQ_API int32_t skiq_read_num_tx_chans(uint8_t card, uint8_t *p_num_tx_chans);
+EPIQ_API int32_t skiq_read_tx_rf_ports_avail_for_hdl(uint8_t card, skiq_tx_hdl_t hdl, uint8_t *p_num_fixed_rf_ports,
+                                                     skiq_rf_port_t *p_fixed_rf_port_list, uint8_t *p_num_trx_rf_ports,
+                                                     skiq_rf_port_t *p_trx_rf_port_list);
+EPIQ_API int32_t skiq_read_tx_rf_port_for_hdl(uint8_t card, skiq_tx_hdl_t hdl, skiq_rf_port_t *p_rf_port);
+EPIQ_API int32_t skiq_write_tx_rf_port_for_hdl(uint8_t card, skiq_tx_hdl_t hdl, skiq_rf_port_t rf_port);
+EPIQ_API int32_t skiq_write_tx_sample_rate_and_bandwidth(uint8_t card, skiq_tx_hdl_t hdl, uint32_t rate,
+                                                         uint32_t bandwidth);
+EPIQ_API int32_t skiq_read_tx_sample_rate_and_bandwidth(uint8_t card, skiq_tx_hdl_t hdl, uint32_t *p_rate,
+                                                        double *p_actual_rate, uint32_t *p_bandwidth,
+                                                        uint32_t *p_actual_bandwidth);
+EPIQ_API int32_t skiq_write_tx_LO_freq(uint8_t card, skiq_tx_hdl_t hdl, uint64_t freq);
+EPIQ_API int32_t skiq_read_tx_LO_freq(uint8_t card, skiq_tx_hdl_t hdl, uint64_t *p_freq, double *p_tuned_freq);
+EPIQ_API int32_t skiq_write_tx_attenuation(uint8_t card, skiq_tx_hdl_t hdl, uint16_t attenuation);
+EPIQ_API int32_t skiq_read_tx_attenuation(uint8_t card, skiq_tx_hdl_t hdl, uint16_t *p_attenuation);
+EPIQ_API int32_t skiq_read_tx_iq_resolution(uint8_t card, uint8_t *p_dac_res);
+EPIQ_API int32_t skiq_write_tx_data_flow_mode(uint8_t card, skiq_tx_hdl_t hdl, skiq_tx_flow_mode_t mode);
+EPIQ_API int32_t skiq_write_tx_block_size(uint8_t card, skiq_tx_hdl_t hdl, uint16_t block_size_in_words);
+EPIQ_API int32_t skiq_start_tx_streaming(uint8_t card, skiq_tx_hdl_t hdl);
+EPIQ_API int32_t skiq_stop_tx_streaming(uint8_t card, skiq_tx_hdl_t hdl);
+EPIQ_API int32_t skiq_transmit(uint8_t card, skiq_tx_hdl_t hdl, skiq_tx_block_t *p_block, void *p_user);
+EPIQ_API int32_t skiq_read_tx_num_underruns(uint8_t card, skiq_tx_hdl_t hdl, uint32_t *p_num_underrun);
+
+// Not in the SDK: what the simulated card transmits, for skiq_check.
+typedef struct {
+    bool streaming;
+    skiq_tx_hdl_t hdl;
+    skiq_rf_port_t port;      // of the transmitting handle
+    bool trxTransmit;         // the TRX port operation is transmit
+    uint64_t lo;              // Hz
+    uint32_t rate;            // the shared sample clock
+    uint16_t atten;           // quarter dB, of the transmitting handle
+    uint64_t blocks, samples;
+    uint32_t underruns;
+    int64_t outOfRange;       // values outside the DAC resolution
+    double levelDbfs;         // of the last block, at the DAC resolution
+    double offsetHz;          // the tone's offset from the LO in the last block (in the configured I/Q order)
+} skiq_sim_tx_state_t;
+EPIQ_API void skiq_sim_tx_state(skiq_sim_tx_state_t *p_state);
 
 #endif

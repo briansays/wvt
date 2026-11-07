@@ -162,14 +162,16 @@ static std::string txPlan(const WaveformParams& p, const TxConfig& c, double sec
     std::string len = "until Ctrl+C";
     if (seconds > 0) len = fmtSI(seconds, "s", 6);
     else if (p.mode == GenMode::Chain && p.chainLoops > 0) len = std::to_string(p.chainLoops) + " chain passes";
-    const std::string ch = std::to_string(c.channel);
+    const bool skiq = c.driver == "skiq";
+    const std::string ch = skiq ? std::string() : ", channel " + std::to_string(c.channel);
+    const std::string first = skiq ? "the first Sidekiq found" : "the first USRP found";
     return "  signal     " + describeParams(p) + "\n" +
            "  frequency  " + fmtSI(c.fc + p.offset, "Hz", 9) + " (center " + fmtSI(c.fc, "Hz", 9) + ", band " +
            fmtSI(c.fc - c.rate / 2, "Hz", 9) + " to " + fmtSI(c.fc + c.rate / 2, "Hz", 9) + ")\n" +
            "  rate       " + fmtSI(c.rate, "S/s", 6) + "\n" +
-           "  gain       " + gain + "\n" +
-           "  device     " + (c.args.empty() ? "the first USRP found" : c.args) + ", antenna " +
-           (c.antenna.empty() ? "default" : c.antenna) + ", channel " + ch + "\n" +
+           "  gain       " + gain + (skiq ? " above the most attenuation" : "") + "\n" +
+           "  device     " + (c.args.empty() ? first : (skiq ? "Sidekiq " : "USRP ") + c.args) + ", " +
+           (skiq ? "port " : "antenna ") + (c.antenna.empty() ? "default" : c.antenna) + ch + "\n" +
            "  duration   " + len + "\n" +
            "  limits     " + describeTxLimits(c.limits) + "\n";
 }
@@ -1140,10 +1142,26 @@ int main(int argc, char** argv) {
     });
     cli.add(nullptr, "--gen-annotate", nullptr, "SigMF: one annotation per pulse, play, sweep or chain item",
             flag(gc.annotatePulses));
-    cli.add(nullptr, "--tx", nullptr, "TRANSMIT with a USRP until Ctrl+C (or --gen-duration)", flag(haveTx));
-    cli.add(nullptr, "--tx-gain", "DB", "transmit gain (default 0)", si("--tx-gain", txc.gain));
-    cli.add(nullptr, "--tx-args", "ARGS", "the USRP to transmit with (default: the first USRP)", text(txc.args));
-    cli.add(nullptr, "--tx-antenna", "NAME", "transmit port (default: the channel's first, e.g. TX/RX)", text(txc.antenna));
+    cli.add(nullptr, "--tx", nullptr, "TRANSMIT with a USRP or a Sidekiq until Ctrl+C (or --gen-duration)", flag(haveTx));
+    cli.add(nullptr, "--tx-device", "DEV",
+            "the transmitter: uhd[:ARGS] | skiq[:SERIAL|#N] (default uhd)\n"
+            "e.g. --tx-device uhd:serial=31A2B3C  --tx-device skiq  --tx-device skiq:#0",
+            [&](const char* v) {
+                const std::string s = v;
+                const size_t c = s.find(':');
+                txc.driver = s.substr(0, c);
+                txc.args = c == std::string::npos ? "" : s.substr(c + 1);
+                if (txc.driver != "uhd" && txc.driver != "skiq") return bad("--tx-device: use uhd or skiq");
+                return true;
+            });
+    cli.add(nullptr, "--tx-gain", "DB",
+            "transmit gain (default 0); Sidekiq: dB above the most attenuation, so 0 is the lowest power",
+            si("--tx-gain", txc.gain));
+    cli.add(nullptr, "--tx-args", "ARGS", "the transmitter's device args (USRP: e.g. serial=31A2B3C; Sidekiq: serial or #N;\n"
+            "default: the first device found)", text(txc.args));
+    cli.add(nullptr, "--tx-antenna", "NAME",
+            "transmit port (USRP: e.g. TX/RX, default the channel's first; Sidekiq: e.g. \"J1 (TX A1)\",\n"
+            "default handle A1 on its port)", text(txc.antenna));
     cli.add(nullptr, "--tx-dry-run", nullptr, "show what --tx would transmit, check the limits, and exit", [&](const char*) {
         return haveTx = txDryRun = true;
     });
@@ -1428,6 +1446,7 @@ int main(int argc, char** argv) {
         }
         txc.rate = gp.rate;
         txc.fc = gp.fc;
+        if (txc.driver == "skiq" && dev.extRef && txc.ref.empty()) txc.ref = "external";  // --ext-ref
         if (const int rc = confirmTx(gp, txc, genSeconds, txDryRun, txConfirm); rc != 0) return std::max(rc, 0);
         return runTx(gp, txc, genSeconds);
     }

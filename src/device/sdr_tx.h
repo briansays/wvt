@@ -1,5 +1,6 @@
 #pragma once
-// SDR transmitter abstraction (a USRP through UHD). The device thread
+// SDR transmitter abstraction (a USRP through UHD, or a Sidekiq through
+// libsidekiq, issue #86). The device thread
 // asks for samples with a fill callback and streams them continuously until
 // stop(); stop() ends the burst so the transmitter goes quiet.
 #include <cmath>
@@ -26,15 +27,17 @@ struct TxLimits {
 };
 
 struct TxConfig {
-    std::string driver = "uhd";
-    std::string args;      // empty: the first USRP found
-    std::string antenna;   // empty: the channel's first transmit antenna (TX/RX on the B2xx)
+    std::string driver = "uhd";  // "uhd" | "skiq"
+    std::string args;      // uhd: device args, empty = the first USRP found;
+                           // skiq: serial or "#N", empty = the open card, else the first free one
+    std::string antenna;   // uhd: empty = the channel's first transmit antenna (TX/RX on the B2xx);
+                           // skiq: the TX port, "J1 (TX A1)" or "J1 (TRX A1)"; empty = handle A1, default port
     double fc = 915e6;
     double rate = 1e6;
-    double gain = 0;       // dB; B200/B205: 0-89.75
+    double gain = 0;       // dB; B200/B205: 0-89.75; skiq: dB above the most attenuation
     double bandwidth = 0;  // analog filter, 0 = automatic
-    int channel = 0;       // transmit channel
-    std::string ref;       // clock and time source; empty = device default
+    int channel = 0;       // uhd: transmit channel (a Sidekiq takes the handle from the port)
+    std::string ref;       // clock and time source; empty = device default; skiq: "external" or empty
     TxLimits limits;
 };
 
@@ -71,6 +74,12 @@ public:
 // starting it.
 std::unique_ptr<SdrTx> openTx(const TxConfig& cfg, std::string& err);
 
+// The transmit drivers of this build ("uhd", "skiq").
+std::vector<std::string> txDrivers();
+
 #ifdef WVT_HAVE_UHD
 std::unique_ptr<SdrTx> openUhdTx(const TxConfig& cfg, std::string& err);
+#endif
+#ifdef WVT_HAVE_SKIQ
+std::unique_ptr<SdrTx> openSkiqTx(const TxConfig& cfg, std::string& err);
 #endif

@@ -277,7 +277,39 @@ void skiqConvert(const int16_t* in, int16_t* out, size_t values, int resolution,
     }
 }
 
-std::string skiqPortLabel(const SkiqPort& p) { return p.port + (p.trx ? " (TRX " : " (RX ") + p.handle + ")"; }
+int skiqTxAttenuation(double gainDb, int attenMin, int attenMax) {
+    attenMax = std::max(attenMin, attenMax);
+    if (!std::isfinite(gainDb)) return attenMax;  // the quiet end
+    const long a = attenMax - std::lround(gainDb * 4);
+    return (int)std::clamp<long>(a, attenMin, attenMax);
+}
+
+double skiqTxGainDb(int atten, int attenMax) { return (attenMax - atten) / 4.0; }
+
+void skiqTxConvert(const std::complex<float>* in, int16_t* out, size_t n, int resolution, bool swap) {
+    const int bits = std::clamp(resolution, 2, 16);
+    const float full = (float)((1 << (bits - 1)) - 1);
+    auto conv = [full](float v) {
+        if (!(v == v)) return (int16_t)0;  // NaN
+        return (int16_t)std::lround(std::clamp(v, -1.f, 1.f) * full);
+    };
+    for (size_t k = 0; k < n; ++k) {
+        const int16_t i = conv(in[k].real()), q = conv(in[k].imag());
+        out[2 * k] = swap ? q : i;
+        out[2 * k + 1] = swap ? i : q;
+    }
+}
+
+int skiqTxBlockSamples(double rate) {
+    // A packet is the block plus a 4-word header, in steps of 256 words.
+    const double want = std::isfinite(rate) && rate > 0 ? rate * 0.004 : 0;
+    const long packets = std::clamp<long>(std::lround((want + 4) / 256), 1, 64);
+    return (int)(packets * 256 - 4);
+}
+
+std::string skiqPortLabel(const SkiqPort& p) {
+    return p.port + (p.trx ? " (TRX " : p.tx ? " (TX " : " (RX ") + p.handle + ")";
+}
 
 int skiqFindPort(const std::vector<SkiqPort>& ports, const std::string& name) {
     auto same = [](const std::string& a, const std::string& b) {
@@ -290,6 +322,17 @@ int skiqFindPort(const std::vector<SkiqPort>& ports, const std::string& name) {
     for (size_t i = 0; i < ports.size(); ++i)
         if (same(ports[i].port, name)) return (int)i;
     return -1;
+}
+
+std::vector<std::string> txDrivers() {
+    std::vector<std::string> d;
+#ifdef WVT_HAVE_UHD
+    d.push_back("uhd");
+#endif
+#ifdef WVT_HAVE_SKIQ
+    d.push_back("skiq");
+#endif
+    return d;
 }
 
 std::unique_ptr<SdrTx> openTx(const TxConfig& cfg, std::string& err) {
@@ -308,7 +351,20 @@ std::unique_ptr<SdrTx> openTx(const TxConfig& cfg, std::string& err) {
         return openUhdTx(cfg, err);
     }
 #endif
-    err = cfg.driver == "uhd" ? "this wvt was built without UHD support, so it can't transmit (see README: Live devices)"
-                              : "no transmitter driver '" + cfg.driver + "'";
+#ifdef WVT_HAVE_SKIQ
+    if (cfg.driver == "skiq") {
+        if (cfg.rate > kSkiqMaxRate) {
+            err = "Sidekiq sample rate is limited to " + fmtSI(kSkiqMaxRate, "S/s", 4);
+            return nullptr;
+        }
+        return openSkiqTx(cfg, err);
+    }
+#endif
+    if (cfg.driver == "uhd")
+        err = "this wvt was built without UHD support, so it can't transmit with a USRP (see the manual: Live devices)";
+    else if (cfg.driver == "skiq")
+        err = "this wvt was built without the Sidekiq SDK, so it can't transmit with a Sidekiq (see the manual: Live devices)";
+    else
+        err = "no transmitter driver '" + cfg.driver + "' (use uhd or skiq)";
     return nullptr;
 }

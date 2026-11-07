@@ -2,13 +2,20 @@
 // Targets the cards in an x86-64 Linux host: mPCIe, M.2 and M.2-2280 (AD9361,
 // 12 bits), X2 and X4 (ADRV9009, 16 bits), NV100 (ADRV9002, 16 bits), on PCIe
 // or (mPCIe, M.2) USB. wvt receives on one handle: the one of the chosen RF
-// port (issue #85), A1 by default.
+// port (issue #85), A1 by default. The signal generator transmits on one TX
+// handle (issue #86), also chosen by its port.
 //
 // skiq_init brings up the open card, and skiq_exit shuts the whole library
-// down, so one Sidekiq is open at a time. The card streams blocks of 16-bit
-// I/Q, each with an RF timestamp that counts samples: a jump between blocks is
-// lost samples. A retune is written while the card streams; the RF timestamp
-// of an AD9361 card slips then, so the gap check pauses for a moment after it.
+// down, so one Sidekiq is open at a time. The receiver and the transmitter
+// share it (full duplex) through a reference-counted Card: the first user
+// initializes the card and the last one exits. Settings for the whole card
+// (rate clock, RF port configuration, channel mode, reference) are refused
+// when they would change what the other user runs on.
+//
+// The card streams blocks of 16-bit I/Q, each with an RF timestamp that
+// counts samples: a jump between blocks is lost samples. A retune is written
+// while the card streams; the RF timestamp of an AD9361 card slips then (also
+// on a transmit retune or start), so the gap check pauses for a moment after it.
 #include <sidekiq_api.h>
 
 // sidekiq_api.h includes <syslog.h>, which defines LOG_DEBUG and LOG_INFO as
@@ -25,13 +32,16 @@ constexpr int kSkiqLogError = SKIQ_LOG_ERROR, kSkiqLogWarning = SKIQ_LOG_WARNING
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
 
 #include "common/log.h"
 #include "common/ui_util.h"
 #include "device/sdr_device.h"
+#include "device/sdr_tx.h"
 
 namespace {
 
@@ -39,10 +49,9 @@ constexpr int32_t kRxTimeoutUs = 25000;  // the SDK manual's advice for a blocki
 constexpr double kSettleSec = 0.5;        // no gap check this long after a retune (timestamp slip)
 
 // The library is global to the process: skiq_init, skiq_exit and the device
-// list take this lock.
-std::mutex gLibM;
-bool gOpen = false;      // a SkiqDevice has a card initialized
-DeviceInfo gOpenInfo;    // the open card, for the device list (it can't be probed while open)
+// list take this lock. Recursive: a Card that fails while it opens exits the
+// library in its destructor with the lock held.
+std::recursive_mutex gLibM;
 
 double nowSec() {
     return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -125,56 +134,163 @@ const char* hdlName(skiq_rx_hdl_t h) {
     return h >= 0 && h < skiq_rx_hdl_end ? names[h] : "?";
 }
 
+const char* txHdlName(skiq_tx_hdl_t h) {
+    static const char* names[] = {"A1", "A2", "B1", "B2"};
+    return h >= 0 && h < skiq_tx_hdl_end ? names[h] : "?";
+}
+
+const char* configName(skiq_rf_port_config_t c) { return c == skiq_rf_port_config_trx ? "TRX" : "fixed"; }
+
+// The open card, shared by the receiver and the transmitter (issue #86).
+struct Card {
+    uint8_t num = 0;
+    skiq_param_t param{};
+    skiq_part_t part = skiq_part_invalid;
+    bool usb = false;
+    std::string desc;
+    DeviceInfo info;                 // for the device list (an open card can't be probed)
+    bool fixedOk = true, trxOk = false;  // the RF port configurations of the card
+    // The users, under m. Each user configures the card with m held.
+    std::mutex m;
+    bool rx = false, tx = false;
+    double rxRate = 0, txRate = 0;
+    bool rxTrx = false;   // the receiver is on a TRX port
+    bool rxDual = false, txDual = false;  // the user needs the dual channel mode
+    skiq_rf_port_config_t config = skiq_rf_port_config_fixed;
+    // The last transmit event that can slip the receive RF timestamps on an
+    // AD9361 card (start, retune, rate): the receiver checks no gaps just after it.
+    std::atomic<double> slipAt{-1e9};
+
+    ~Card() {
+        std::lock_guard<std::recursive_mutex> lk(gLibM);
+        skiq_exit();
+        LOG_DEBUG("skiq", "card %u closed", num);
+    }
+};
+std::weak_ptr<Card> gCard;
+
+// "" = the first free card, "#N" = card number N, else a serial number.
+// Runs with gLibM held.
+bool findCard(const std::string& args, uint8_t& card, std::string& err) {
+    uint8_t n = 0, cards[SKIQ_MAX_NUM_CARDS] = {};
+    if (skiq_get_cards(skiq_xport_type_auto, &n, cards) != 0) n = 0;
+    n = std::min<uint8_t>(n, SKIQ_MAX_NUM_CARDS);
+    if (args.empty()) {
+        if (n == 0) {
+            err = "no Sidekiq card found (are the SDK's kernel modules loaded? for USB, is the udev rule installed?)";
+            return false;
+        }
+        card = cards[0];
+        for (int i = 0; i < n; ++i)
+            if (skiq_is_card_avail(cards[i], nullptr) == 0) {
+                card = cards[i];
+                break;
+            }
+        return true;
+    }
+    if (args[0] == '#') {
+        char* end = nullptr;
+        const long c = strtol(args.c_str() + 1, &end, 10);
+        if (args.size() < 2 || !end || *end != 0 || c < 0 || c >= SKIQ_MAX_NUM_CARDS) {
+            err = "Sidekiq card number must be #0 to #" + std::to_string(SKIQ_MAX_NUM_CARDS - 1) + " (got '" + args + "')";
+            return false;
+        }
+        card = (uint8_t)c;
+        if (std::find(cards, cards + n, card) == cards + n) {
+            err = "no Sidekiq card " + args;
+            return false;
+        }
+        return true;
+    }
+    std::string serial = args;
+    if (skiq_get_card_from_serial_string(serial.data(), &card) != 0) {
+        err = "no Sidekiq card with serial number " + args;
+        return false;
+    }
+    return true;
+}
+
+// The open card if `args` selects it (or is empty), else a new one.
+std::shared_ptr<Card> acquireCard(const std::string& args, std::string& err) {
+    registerLogging();
+    std::lock_guard<std::recursive_mutex> lk(gLibM);
+    if (auto c = gCard.lock()) {
+        if (args.empty() || args == c->info.args || args == c->info.serial || args == "#" + std::to_string(c->num))
+            return c;
+        err = c->desc + " is open already (wvt opens one Sidekiq at a time)";
+        return nullptr;
+    }
+    uint8_t num = 0;
+    if (!findCard(args, num, err)) return nullptr;
+    pid_t owner = 0;
+    if (const int32_t r = skiq_is_card_avail(num, &owner); r != 0) {
+        err = owner > 0 ? "Sidekiq card " + std::to_string(num) + " is in use by process " + std::to_string(owner)
+                        : skiqError("Sidekiq card " + std::to_string(num) + " is not available", r);
+        return nullptr;
+    }
+    const double t0 = nowSec();
+    if (const int32_t r = skiq_init(skiq_xport_type_auto, skiq_xport_init_level_full, &num, 1); r != 0) {
+        err = skiqError("cannot initialize Sidekiq card " + std::to_string(num), r) +
+              " (are the SDK's kernel modules loaded? does the SDK's sidekiq_probe see the card?)";
+        return nullptr;
+    }
+    auto c = std::make_shared<Card>();  // from here on, a failure exits the library
+    c->num = num;
+    LOG_DEBUG("skiq", "card %u initialized in %.0f ms", num, (nowSec() - t0) * 1e3);
+    if (const int32_t r = skiq_read_parameters(num, &c->param); r != 0) {
+        err = skiqError("cannot read the Sidekiq card parameters", r);
+        return nullptr;
+    }
+    c->part = c->param.card_param.part_type;
+    c->usb = c->param.card_param.xport == skiq_xport_type_usb;
+    c->desc = label(c->param.card_param);
+    c->info = {"skiq", c->param.card_param.serial_string[0] ? c->param.card_param.serial_string : "#" + std::to_string(num),
+               c->desc, partName(c->part), c->param.card_param.serial_string};
+    if (skiq_read_rf_port_config_avail(num, &c->fixedOk, &c->trxOk) != 0 || (!c->fixedOk && !c->trxOk)) {
+        c->fixedOk = true;
+        c->trxOk = false;
+    }
+    if (skiq_read_rf_port_config(num, &c->config) != 0) c->config = skiq_rf_port_config_fixed;
+    gCard = c;
+    return c;
+}
+
 class SkiqDevice : public SdrDevice {
 public:
     ~SkiqDevice() override {
         stop();
-        std::lock_guard<std::mutex> lk(gLibM);
-        if (inited_) {
-            skiq_exit();
-            gOpen = false;
-            LOG_DEBUG("skiq", "card %u closed", card_);
+        if (shared_) {
+            std::lock_guard<std::mutex> lk(shared_->m);
+            if (counted_) {
+                shared_->rx = false;
+                shared_->rxTrx = shared_->rxDual = false;
+            }
         }
+        shared_.reset();  // the last user exits the library
     }
 
     bool open(const StreamConfig& cfg, std::string& err) {
-        registerLogging();
-        {
-            std::lock_guard<std::mutex> lk(gLibM);
-            if (gOpen) {
-                err = "a Sidekiq card is open already (wvt opens one at a time)";
-                return false;
-            }
-            if (!findCard(cfg.args, err)) return false;
-            pid_t owner = 0;
-            if (const int32_t r = skiq_is_card_avail(card_, &owner); r != 0) {
-                err = owner > 0 ? "Sidekiq card " + std::to_string(card_) + " is in use by process " + std::to_string(owner)
-                                : skiqError("Sidekiq card " + std::to_string(card_) + " is not available", r);
-                return false;
-            }
-            const double t0 = nowSec();
-            if (const int32_t r = skiq_init(skiq_xport_type_auto, skiq_xport_init_level_full, &card_, 1); r != 0) {
-                err = skiqError("cannot initialize Sidekiq card " + std::to_string(card_), r) +
-                      " (are the SDK's kernel modules loaded? does the SDK's sidekiq_probe see the card?)";
-                return false;
-            }
-            inited_ = true;
-            gOpen = true;
-            LOG_DEBUG("skiq", "card %u initialized in %.0f ms", card_, (nowSec() - t0) * 1e3);
-
-            if (const int32_t r = skiq_read_parameters(card_, &param_); r != 0) {
-                err = skiqError("cannot read the Sidekiq card parameters", r);
-                return false;
-            }
-            part_ = param_.card_param.part_type;
-            usb_ = param_.card_param.xport == skiq_xport_type_usb;
-            desc_ = label(param_.card_param);
-            gOpenInfo = {"skiq",
-                         param_.card_param.serial_string[0] ? param_.card_param.serial_string : "#" + std::to_string(card_),
-                         desc_, partName(part_), param_.card_param.serial_string};
-            listPorts();
+        shared_ = acquireCard(cfg.args, err);
+        if (!shared_) return false;
+        std::lock_guard<std::mutex> lk(shared_->m);
+        if (shared_->rx) {
+            err = shared_->desc + " is open already (wvt receives from one Sidekiq handle at a time)";
+            return false;
         }
-        return configure(cfg, err);
+        card_ = shared_->num;
+        param_ = shared_->param;
+        part_ = shared_->part;
+        usb_ = shared_->usb;
+        desc_ = shared_->desc;
+        fixedOk_ = shared_->fixedOk;
+        trxOk_ = shared_->trxOk;
+        listPorts();
+        if (!configure(cfg, err)) return false;
+        shared_->rx = counted_ = true;
+        shared_->rxRate = rate_;
+        shared_->rxTrx = trx_;
+        shared_->rxDual = dual_;
+        return true;
     }
 
     bool start(DataFn data, GapFn gap, std::string& err) override {
@@ -280,47 +396,6 @@ public:
     }
 
 private:
-    // "" = the first free card, "#N" = card number N, else a serial number.
-    // Runs with gLibM held.
-    bool findCard(const std::string& args, std::string& err) {
-        uint8_t n = 0, cards[SKIQ_MAX_NUM_CARDS] = {};
-        if (skiq_get_cards(skiq_xport_type_auto, &n, cards) != 0) n = 0;
-        n = std::min<uint8_t>(n, SKIQ_MAX_NUM_CARDS);
-        if (args.empty()) {
-            if (n == 0) {
-                err = "no Sidekiq card found (are the SDK's kernel modules loaded? for USB, is the udev rule installed?)";
-                return false;
-            }
-            card_ = cards[0];
-            for (int i = 0; i < n; ++i)
-                if (skiq_is_card_avail(cards[i], nullptr) == 0) {
-                    card_ = cards[i];
-                    break;
-                }
-            return true;
-        }
-        if (args[0] == '#') {
-            char* end = nullptr;
-            const long c = strtol(args.c_str() + 1, &end, 10);
-            if (args.size() < 2 || !end || *end != 0 || c < 0 || c >= SKIQ_MAX_NUM_CARDS) {
-                err = "Sidekiq card number must be #0 to #" + std::to_string(SKIQ_MAX_NUM_CARDS - 1) + " (got '" + args + "')";
-                return false;
-            }
-            card_ = (uint8_t)c;
-            if (std::find(cards, cards + n, card_) == cards + n) {
-                err = "no Sidekiq card " + args;
-                return false;
-            }
-            return true;
-        }
-        std::string serial = args;
-        if (skiq_get_card_from_serial_string(serial.data(), &card_) != 0) {
-            err = "no Sidekiq card with serial number " + args;
-            return false;
-        }
-        return true;
-    }
-
     bool checkFreq(double hz, std::string& err) const {
         if (loMax_ > 0 && (hz < loMin_ || hz > loMax_)) {
             err = "Sidekiq " + partName(part_) + " cannot tune to " + fmtSI(hz, "Hz", 9) + " (range " +
@@ -336,15 +411,11 @@ private:
 
     // The receive ports of every handle (issue #85). The SDK has a fixed and a
     // TRX list for each handle; each list is usable only in its RF port
-    // configuration, which is one for the whole card. Runs with gLibM held.
+    // configuration, which is one for the whole card.
     void listPorts() {
         uint8_t n = 1;
         if (skiq_read_num_rx_chans(card_, &n) != 0 || n == 0) n = 1;
         numHandles_ = std::min<int>(n, skiq_rx_hdl_end);
-        if (skiq_read_rf_port_config_avail(card_, &fixedOk_, &trxOk_) != 0 || (!fixedOk_ && !trxOk_)) {
-            fixedOk_ = true;
-            trxOk_ = false;
-        }
         for (int h = 0; h < numHandles_; ++h) {
             const auto hdl = (skiq_rx_hdl_t)h;
             uint8_t nFixed = 0, nTrx = 0;
@@ -371,9 +442,13 @@ private:
     }
 
     // Selects the handle and the RF port named `name` ("" = handle A1 on the
-    // card's port), and takes the limits of that handle.
+    // card's port), and takes the limits of that handle. Runs with the card's
+    // lock held: a transmitter on the card keeps its port configuration and
+    // channel mode.
     bool selectPort(const std::string& name, std::string& err) {
         hdl_ = skiq_rx_hdl_A1;
+        trx_ = dual_ = false;
+        const bool txOn = shared_->tx;
         const Port* sel = nullptr;
         if (!name.empty()) {
             std::vector<SkiqPort> names;
@@ -391,11 +466,33 @@ private:
             sel = &ports_[i];
             hdl_ = sel->hdl;
         }
+        trx_ = sel ? sel->name.trx : shared_->config == skiq_rf_port_config_trx;
+        dual_ = hdl_ == skiq_rx_hdl_A2 || hdl_ == skiq_rx_hdl_B2;
+        // The transmitter holds the RF port configuration and the channel mode.
+        if (txOn) {
+            const std::string what = sel ? skiqPortLabel(sel->name) : std::string("the default port");
+            const auto need = trx_ ? skiq_rf_port_config_trx : skiq_rf_port_config_fixed;
+            if (trx_) {
+                err = what + " cannot receive while the Sidekiq transmits (a TRX port does one at a time): choose a "
+                             "fixed receive port, or stop the transmitter";
+                return false;
+            }
+            if (need != shared_->config) {
+                err = "the Sidekiq transmits in the " + std::string(configName(shared_->config)) +
+                      " RF port configuration: " + what + " needs the " + configName(need) + " one";
+                return false;
+            }
+            if (dual_ && !shared_->txDual) {
+                err = std::string("receive handle ") + hdlName(hdl_) +
+                      " needs the dual channel mode, but the Sidekiq transmits in the single mode: receive on A1 or B1, "
+                      "or stop the transmitter";
+                return false;
+            }
+        }
         // A2 and B2 receive in the dual channel mode, as in the SDK's rx_samples.
-        if (numHandles_ > 1) {
-            const bool dual = hdl_ == skiq_rx_hdl_A2 || hdl_ == skiq_rx_hdl_B2;
-            const int32_t r = skiq_write_chan_mode(card_, dual ? skiq_chan_mode_dual : skiq_chan_mode_single);
-            if (r != 0 && dual) {
+        if (numHandles_ > 1 && !(txOn && shared_->txDual)) {
+            const int32_t r = skiq_write_chan_mode(card_, dual_ ? skiq_chan_mode_dual : skiq_chan_mode_single);
+            if (r != 0 && dual_) {
                 err = skiqError(std::string("cannot select the dual channel mode for handle ") + hdlName(hdl_), r);
                 return false;
             }
@@ -403,16 +500,15 @@ private:
         if (sel) {
             const std::string what = skiqPortLabel(sel->name);
             // A card with both configurations switches to the port's one.
-            if (fixedOk_ && trxOk_) {
-                const int32_t r =
-                    skiq_write_rf_port_config(card_, sel->name.trx ? skiq_rf_port_config_trx : skiq_rf_port_config_fixed);
-                if (r != 0) {
+            if (fixedOk_ && trxOk_ && !txOn) {
+                const auto config = sel->name.trx ? skiq_rf_port_config_trx : skiq_rf_port_config_fixed;
+                if (const int32_t r = skiq_write_rf_port_config(card_, config); r != 0) {
                     err = skiqError("cannot select the RF port configuration for " + what, r);
                     return false;
                 }
+                shared_->config = config;
             }
-            // A TRX port also transmits: set it to receive. Sharing it with the
-            // transmitter is issue #86.
+            // A TRX port also transmits: set it to receive.
             if (sel->name.trx)
                 if (const int32_t r = skiq_write_rf_port_operation(card_, false); r != 0) {
                     err = skiqError("cannot set " + what + " to receive", r);
@@ -445,8 +541,10 @@ private:
 
     bool configure(const StreamConfig& cfg, std::string& err) {
         // A new reference clock starts a full RF initialization, so it comes
-        // before the other settings.
-        if (cfg.extRef) {
+        // before the other settings. It would stop a transmitter on the card.
+        if (cfg.extRef && shared_->tx) {
+            addNote(openNotes_, "reference clock: as the transmitter set it");
+        } else if (cfg.extRef) {
             if (const int32_t r = skiq_write_ref_clock_select(card_, skiq_ref_clock_external); r != 0) {
                 err = skiqError("cannot select the external reference clock", r) +
                       (part_ == skiq_m2 || part_ == skiq_mpcie
@@ -466,6 +564,13 @@ private:
         if (rateMax_ > 0 && (cfg.rate < rateMin_ * 0.999 || cfg.rate > rateMax_ * 1.001)) {
             err = "Sidekiq " + partName(part_) + " sample rate must be " + fmtSI(rateMin_, "S/s", 4) + " to " +
                   fmtSI(rateMax_, "S/s", 4) + " (got " + fmtSI(cfg.rate, "S/s", 4) + ")";
+            return false;
+        }
+        // The receiver and the transmitter share one sample clock (the API's
+        // skiq_write_tx_sample_rate_and_bandwidth): a new rate would move the transmitter's.
+        if (shared_->tx && std::fabs(cfg.rate - shared_->txRate) > 1) {
+            err = "the Sidekiq is transmitting at " + fmtSI(shared_->txRate, "S/s", 9) +
+                  ": receive must use the same rate (one sample clock)";
             return false;
         }
         const uint32_t rate = (uint32_t)std::lround(cfg.rate);
@@ -535,7 +640,8 @@ private:
                 const size_t n = (len - SKIQ_RX_HEADER_SIZE_IN_BYTES) / 4;
                 const uint64_t ts = blk->rf_timestamp;
                 // The timestamps are checked once they have settled after a retune.
-                const int64_t lost = haveTs && now - tuneAt_.load() > kSettleSec ? skiqLostSamples(nextTs, ts) : 0;
+                const double settled = std::max(tuneAt_.load(), shared_->slipAt.load());
+                const int64_t lost = haveTs && now - settled > kSettleSec ? skiqLostSamples(nextTs, ts) : 0;
                 if (gap_ && lost > 0) gap_(lost, overrun ? "Sidekiq overrun (host too slow)" : "Sidekiq sample loss");
                 else if (gap_ && overrun) gap_(-1, "Sidekiq overrun (host too slow)");
                 overrun = false;
@@ -573,8 +679,11 @@ private:
         }
     }
 
+    std::shared_ptr<Card> shared_;
+    bool counted_ = false;           // shared_->rx is this device
+    bool trx_ = false, dual_ = false;  // on a TRX port; in the dual channel mode
     uint8_t card_ = 0;
-    bool inited_ = false, usb_ = false, swap_ = false, blocking_ = false, agcOk_ = false;
+    bool usb_ = false, swap_ = false, blocking_ = false, agcOk_ = false;
     skiq_part_t part_ = skiq_part_invalid;
     int resolution_ = 12;
     double rateMin_ = 0, rateMax_ = 0, loMin_ = 0, loMax_ = 0;
@@ -602,14 +711,458 @@ private:
     std::string fatal_;
 };
 
+// The transmitter (issue #86): one TX handle, chosen by its port, in the
+// immediate data flow mode. skiq_transmit blocks until the FPGA takes the
+// block (the default synchronous transfer mode), so the thread runs at the
+// sample rate. Until start and after stop, the card has the most attenuation.
+class SkiqTx : public SdrTx {
+public:
+    ~SkiqTx() override {
+        stop();
+        if (blk_) skiq_tx_block_free(blk_);
+        if (shared_) {
+            std::lock_guard<std::mutex> lk(shared_->m);
+            if (trx_) skiq_write_rf_port_operation(card_, false);  // back to receive
+            if (counted_) {
+                shared_->tx = false;
+                shared_->txDual = false;
+            }
+        }
+        shared_.reset();  // the last user exits the library
+    }
+
+    bool open(const TxConfig& cfg, std::string& err) {
+        shared_ = acquireCard(cfg.args, err);
+        if (!shared_) return false;
+        std::lock_guard<std::mutex> lk(shared_->m);
+        if (shared_->tx) {
+            err = shared_->desc + " transmits already";
+            return false;
+        }
+        card_ = shared_->num;
+        part_ = shared_->part;
+        desc_ = shared_->desc;
+        const bool rxOn = shared_->rx;
+        if (rxOn && std::fabs(cfg.rate - shared_->rxRate) > 1) {
+            err = "the Sidekiq is receiving at " + fmtSI(shared_->rxRate, "S/s", 9) +
+                  ": transmit must use the same rate (one sample clock)";
+            return false;
+        }
+        if (!cfg.ref.empty() && cfg.ref != "internal" && cfg.ref != "external") {
+            err = "Sidekiq reference must be internal or external (got '" + cfg.ref + "')";
+            return false;
+        }
+        if (cfg.ref == "external" && rxOn) {
+            addNote(notes_, "reference clock: as the live view set it");
+        } else if (cfg.ref == "external") {
+            if (const int32_t r = skiq_write_ref_clock_select(card_, skiq_ref_clock_external); r != 0) {
+                err = skiqError("cannot select the external reference clock", r) +
+                      (part_ == skiq_m2 || part_ == skiq_mpcie
+                           ? "; the M.2 and mPCIe select it only in their stored settings (the SDK's ref_clock app)"
+                           : "");
+                return false;
+            }
+            LOG_INFO("skiq", "transmit: external reference clock");
+        }
+        // The card has one I/Q order for both directions.
+        swap_ = skiq_write_iq_order_mode(card_, skiq_iq_order_iq) != 0;
+        if (swap_) LOG_DEBUG("skiq", "transmit: the FPGA keeps Q/I order: wvt swaps the samples");
+
+        listPorts();
+        if (!selectPort(cfg.antenna, rxOn, err)) return false;
+        if (!configure(cfg, rxOn, err)) return false;
+
+        shared_->tx = counted_ = true;
+        shared_->txRate = rate_;
+        shared_->txDual = dual_;
+        LOG_INFO("skiq", "transmitter %s, handle %s, port %s: %d-bit I/Q, %s, attenuation %.2f-%.2f dB, %s to %s",
+                 desc_.c_str(), txHdlName(hdl_), port_.c_str(), res_, fmtSI(rate_, "S/s", 7).c_str(), attMin_ / 4.0,
+                 attMax_ / 4.0, fmtSI(loMin_, "Hz", 4).c_str(), fmtSI(loMax_, "Hz", 4).c_str());
+        return true;
+    }
+
+    bool start(FillFn fill, std::string& err) override {
+        stop();
+        fill_ = std::move(fill);
+        {
+            std::lock_guard<std::mutex> lk(errM_);
+            fatal_.clear();
+        }
+        if (const int32_t r = skiq_write_tx_attenuation(card_, hdl_, (uint16_t)att_.load()); r != 0) {
+            err = skiqError("cannot set the transmit attenuation", r);
+            return false;
+        }
+        shared_->slipAt = nowSec();
+        if (const int32_t r = skiq_start_tx_streaming(card_, hdl_); r != 0) {
+            skiq_write_tx_attenuation(card_, hdl_, (uint16_t)attMax_);
+            err = skiqError("cannot start transmitting", r);
+            return false;
+        }
+        LOG_DEBUG("skiq", "transmit started: %d samples per block, attenuation %.2f dB", block_, att_ / 4.0);
+        quit_ = false;
+        th_ = std::thread([this] { run(); });
+        return true;
+    }
+
+    void stop() override {
+        if (!th_.joinable()) return;
+        quit_ = true;
+        th_.join();
+        skiq_stop_tx_streaming(card_, hdl_);
+        // Quiet: the LO can leak while the card is not streaming.
+        skiq_write_tx_attenuation(card_, hdl_, (uint16_t)attMax_);
+        shared_->slipAt = nowSec();
+        LOG_DEBUG("skiq", "transmit stopped: %lld samples, %lld underruns", (long long)sent_.load(),
+                  (long long)underruns_.load());
+    }
+
+    // The SDK refuses a frequency it can't tune (it does not clip). If the LO
+    // moved anyway, tune back to the last good frequency; if that fails too,
+    // stop with a fatal error (as for the USRP, issue #40).
+    bool setCenterFreq(double hz, std::string& err) override {
+        if (loMax_ > 0 && (hz < loMin_ - 1 || hz > loMax_ + 1)) {
+            err = "Sidekiq " + partName(part_) + " cannot transmit at " + fmtSI(hz, "Hz", 9) + " (range " +
+                  fmtSI(loMin_, "Hz", 4) + " - " + fmtSI(loMax_, "Hz", 4) + ")";
+            return false;
+        }
+        if (!(hz > 0)) {
+            err = "center frequency must be positive";
+            return false;
+        }
+        const double prev = fc_;
+        std::string tuneErr;  // `err` can hold an old message
+        double f = tune(hz, tuneErr);
+        if (tuneErr.empty() && std::fabs(f - hz) <= 1) {
+            fc_ = f;
+            return true;
+        }
+        err = !tuneErr.empty() ? tuneErr
+                               : "Sidekiq cannot transmit at " + fmtSI(hz, "Hz", 9) + "; it tuned to " + fmtSI(f, "Hz", 9);
+        if (!th_.joinable() || std::fabs(f - prev) <= 1) {
+            fc_ = f;
+            if (th_.joinable()) err += "; still transmitting at " + fmtSI(prev, "Hz", 9);
+            return false;
+        }
+        std::string backErr;
+        f = tune(prev, backErr);
+        fc_ = f;
+        if (backErr.empty() && std::fabs(f - prev) <= 1) {
+            err += "; still transmitting at " + fmtSI(prev, "Hz", 9);
+            LOG_WARN("tx", "retune to %s failed, back at %s", fmtSI(hz, "Hz", 9).c_str(), fmtSI(prev, "Hz", 9).c_str());
+            return false;
+        }
+        fail("retune failed and the transmitter could not return to " + fmtSI(prev, "Hz", 9) + " (now at " +
+             fmtSI(f, "Hz", 9) + "): " + err);
+        quit_ = true;  // stop sending now; the owner's stop() joins the thread
+        return false;
+    }
+
+    bool setGain(double db, std::string& err) override {
+        const int a = skiqTxAttenuation(db, attMin_, attMax_);
+        // Before start the card stays at the most attenuation; start writes this one.
+        if (th_.joinable())
+            if (const int32_t r = skiq_write_tx_attenuation(card_, hdl_, (uint16_t)a); r != 0) {
+                err = skiqError("cannot set the transmit attenuation", r);
+                return false;
+            }
+        att_ = a;
+        LOG_DEBUG("skiq", "transmit gain %.2f dB (attenuation %.2f dB)", skiqTxGainDb(a, attMax_), a / 4.0);
+        return true;
+    }
+
+    double centerFreq() const override { return fc_; }
+    double sampleRate() const override { return rate_; }
+    double gain() const override { return skiqTxGainDb(att_, attMax_); }
+    GainRange gainRange() const override { return {0, (attMax_ - attMin_) / 4.0, 0.25, {}, false}; }
+    std::string description() const override { return desc_; }
+    std::string antenna() const override { return port_; }
+    std::string notes() const override {
+        std::string n = notes_;
+        if (underruns_ > 5) addNote(n, "underruns: the host could not keep up (gaps in the transmitted signal)");
+        return n;
+    }
+    std::string fatalError() const override {
+        std::lock_guard<std::mutex> lk(errM_);
+        return fatal_;
+    }
+    Stats stats() const override {
+        Stats s;
+        s.sent = sent_;
+        s.underflows = underruns_;
+        return s;
+    }
+
+private:
+    struct Port {
+        skiq_tx_hdl_t hdl;
+        skiq_rf_port_t rf;
+        SkiqPort name;
+    };
+
+    // The transmit ports of every TX handle, fixed and TRX, as for receive.
+    void listPorts() {
+        uint8_t n = 1;
+        if (skiq_read_num_tx_chans(card_, &n) != 0 || n == 0) n = 1;
+        numHandles_ = std::min<int>(n, skiq_tx_hdl_end);
+        for (int h = 0; h < numHandles_; ++h) {
+            const auto hdl = (skiq_tx_hdl_t)h;
+            uint8_t nFixed = 0, nTrx = 0;
+            skiq_rf_port_t fixed[skiq_rf_port_max] = {}, trx[skiq_rf_port_max] = {};
+            if (skiq_read_tx_rf_ports_avail_for_hdl(card_, hdl, &nFixed, fixed, &nTrx, trx) != 0) {
+                const skiq_tx_param_t& tp = shared_->param.tx_param[h];
+                nFixed = std::min<uint8_t>(tp.num_fixed_rf_ports, skiq_rf_port_max);
+                nTrx = std::min<uint8_t>(tp.num_trx_rf_ports, skiq_rf_port_max);
+                std::copy(tp.fixed_rf_ports, tp.fixed_rf_ports + nFixed, fixed);
+                std::copy(tp.trx_rf_ports, tp.trx_rf_ports + nTrx, trx);
+            }
+            auto add = [&](const skiq_rf_port_t* list, uint8_t count, bool isTrx) {
+                for (int i = 0; i < count && i < skiq_rf_port_max; ++i) {
+                    const char* s = list[i] == skiq_rf_port_unknown ? nullptr : skiq_rf_port_string(list[i]);
+                    if (s && s[0]) ports_.push_back({hdl, list[i], {s, txHdlName(hdl), isTrx, !isTrx}});
+                }
+            };
+            if (shared_->fixedOk) add(fixed, nFixed, false);
+            if (shared_->trxOk) add(trx, nTrx, true);
+        }
+        std::string list;
+        for (const auto& p : ports_) list += (list.empty() ? "" : ", ") + skiqPortLabel(p.name);
+        LOG_DEBUG("skiq", "%d transmit handle(s), ports: %s", numHandles_, list.empty() ? "none listed" : list.c_str());
+    }
+
+    std::string portList() const {
+        std::string list;
+        for (const auto& p : ports_) list += (list.empty() ? "" : ", ") + skiqPortLabel(p.name);
+        return list;
+    }
+
+    // Selects the TX handle and port named `name` ("" = handle A1 on the
+    // card's port). With a receiver on the card (rxOn), the receiver keeps its
+    // RF port configuration and channel mode, and a TRX port can't transmit.
+    bool selectPort(const std::string& name, bool rxOn, std::string& err) {
+        hdl_ = skiq_tx_hdl_A1;
+        const Port* sel = nullptr;
+        if (!name.empty()) {
+            std::vector<SkiqPort> names;
+            names.reserve(ports_.size());
+            for (const auto& p : ports_) names.push_back(p.name);
+            const int i = skiqFindPort(names, name);
+            if (i < 0) {
+                const std::string list = portList();
+                err = "Sidekiq " + partName(part_) + " has no transmit port '" + name + "'" +
+                      (list.empty() ? std::string() : " (ports: " + list + ")");
+                return false;
+            }
+            sel = &ports_[i];
+            hdl_ = sel->hdl;
+        }
+        const auto need =
+            sel ? (sel->name.trx ? skiq_rf_port_config_trx : skiq_rf_port_config_fixed) : shared_->config;
+        trx_ = need == skiq_rf_port_config_trx;
+        dual_ = hdl_ == skiq_tx_hdl_A2 || hdl_ == skiq_tx_hdl_B2;
+        const std::string what = sel ? skiqPortLabel(sel->name) : std::string("the default transmit port");
+        if (rxOn) {
+            if (shared_->rxTrx) {
+                err = "the live view receives on a TRX port, so the Sidekiq cannot transmit: receive on a fixed port";
+                return false;
+            }
+            if (trx_) {
+                err = what + " cannot transmit while the live view receives (a TRX port does one at a time): "
+                             "choose a fixed transmit port" +
+                      (portList().empty() ? std::string() : " (ports: " + portList() + ")");
+                return false;
+            }
+            if (need != shared_->config) {
+                err = "the live view receives in the " + std::string(configName(shared_->config)) +
+                      " RF port configuration: " + what + " needs the " + configName(need) + " one";
+                return false;
+            }
+            if (dual_ && !shared_->rxDual) {
+                err = std::string("transmit handle ") + txHdlName(hdl_) +
+                      " needs the dual channel mode, but the live view receives in the single mode: transmit on A1 "
+                      "or B1, or stop the live view";
+                return false;
+            }
+        } else {
+            if (sel && shared_->fixedOk && shared_->trxOk && need != shared_->config) {
+                if (const int32_t r = skiq_write_rf_port_config(card_, need); r != 0) {
+                    err = skiqError("cannot select the RF port configuration for " + what, r);
+                    return false;
+                }
+                shared_->config = need;
+            }
+            if (numHandles_ > 1 || dual_) {
+                const int32_t r = skiq_write_chan_mode(card_, dual_ ? skiq_chan_mode_dual : skiq_chan_mode_single);
+                if (r != 0 && dual_) {
+                    err = skiqError(std::string("cannot select the dual channel mode for TX handle ") + txHdlName(hdl_), r);
+                    return false;
+                }
+            }
+        }
+        if (sel)
+            if (const int32_t r = skiq_write_tx_rf_port_for_hdl(card_, hdl_, sel->rf); r != 0) {
+                err = skiqError("cannot select transmit port " + what, r);
+                return false;
+            }
+        if (trx_)
+            if (const int32_t r = skiq_write_rf_port_operation(card_, true); r != 0) {
+                err = skiqError("cannot set " + what + " to transmit", r);
+                return false;
+            }
+        skiq_rf_port_t rf = skiq_rf_port_unknown;
+        port_ = sel ? skiqPortLabel(sel->name) : "default";
+        if (!sel && skiq_read_tx_rf_port_for_hdl(card_, hdl_, &rf) == 0 && rf != skiq_rf_port_unknown)
+            if (const char* s = skiq_rf_port_string(rf)) port_ = skiqPortLabel({s, txHdlName(hdl_), trx_, !trx_});
+        return true;
+    }
+
+    bool configure(const TxConfig& cfg, bool rxOn, std::string& err) {
+        // A handle without parameters takes those of A1 (the same RFIC family).
+        const skiq_param_t& par = shared_->param;
+        const skiq_tx_param_t& tp = par.tx_param[hdl_].sample_rate_max > 0 ? par.tx_param[hdl_] : par.tx_param[skiq_tx_hdl_A1];
+        uint8_t res = tp.iq_resolution;
+        if (res == 0 || res > 16) skiq_read_tx_iq_resolution(card_, &res);
+        res_ = res > 0 && res <= 16 ? res : 12;
+        loMin_ = (double)tp.lo_freq_min;
+        loMax_ = (double)tp.lo_freq_max;
+        attMin_ = tp.atten_quarter_db_min;
+        attMax_ = tp.atten_quarter_db_max;
+        if (attMax_ <= attMin_) {
+            // Not in the parameters: the AD9361's 0-89.75 dB, and say so.
+            attMin_ = 0;
+            attMax_ = 359;
+            LOG_WARN("skiq", "the card gives no transmit attenuation range: wvt assumes 0-89.75 dB");
+        }
+        // The card is quiet until start.
+        att_ = skiqTxAttenuation(cfg.gain, attMin_, attMax_);
+        skiq_write_tx_attenuation(card_, hdl_, (uint16_t)attMax_);
+
+        if (tp.sample_rate_max > 0 && (cfg.rate < tp.sample_rate_min * 0.999 || cfg.rate > tp.sample_rate_max * 1.001)) {
+            err = "Sidekiq " + partName(part_) + " transmit rate must be " + fmtSI(tp.sample_rate_min, "S/s", 4) + " to " +
+                  fmtSI(tp.sample_rate_max, "S/s", 4) + " (got " + fmtSI(cfg.rate, "S/s", 4) + ")";
+            return false;
+        }
+        const uint32_t rate = (uint32_t)std::lround(cfg.rate);
+        const uint32_t bw = (uint32_t)std::lround(cfg.bandwidth > 0 ? cfg.bandwidth : 0.8 * cfg.rate);
+        uint32_t gotRate = 0, gotBw = 0, actualBw = 0;
+        double actualRate = 0;
+        const bool have = skiq_read_tx_sample_rate_and_bandwidth(card_, hdl_, &gotRate, &actualRate, &gotBw, &actualBw) == 0;
+        // With a receiver on the card, the clock has this rate already: write
+        // only a new bandwidth, which does not stop the clock.
+        if (!rxOn || !have || gotRate != rate || (cfg.bandwidth > 0 && gotBw != bw)) {
+            shared_->slipAt = nowSec();
+            if (const int32_t r = skiq_write_tx_sample_rate_and_bandwidth(card_, hdl_, rate, bw); r != 0) {
+                err = skiqError("cannot set transmit rate " + fmtSI(cfg.rate, "S/s", 6) + ", bandwidth " + fmtSI(bw, "Hz", 4), r);
+                return false;
+            }
+        }
+        rate_ = cfg.rate;
+        if (skiq_read_tx_sample_rate_and_bandwidth(card_, hdl_, &gotRate, &actualRate, &gotBw, &actualBw) == 0 &&
+            actualRate > 0)
+            rate_ = actualRate;
+        if (std::fabs(rate_ - cfg.rate) > 1) addNote(notes_, "rate set to " + fmtSI(rate_, "S/s", 7));
+
+        if (!setCenterFreq(cfg.fc, err)) return false;
+        std::string e2;
+        setGain(cfg.gain, e2);
+
+        block_ = skiqTxBlockSamples(rate_);
+        if (const int32_t r = skiq_write_tx_data_flow_mode(card_, hdl_, skiq_tx_immediate_data_flow_mode); r != 0) {
+            err = skiqError("cannot select the immediate transmit mode", r);
+            return false;
+        }
+        if (const int32_t r = skiq_write_tx_block_size(card_, hdl_, (uint16_t)block_); r != 0) {
+            err = skiqError("cannot set the transmit block size to " + std::to_string(block_), r);
+            return false;
+        }
+        blk_ = skiq_tx_block_allocate((uint32_t)block_);
+        if (!blk_) {
+            err = "out of memory for the transmit block";
+            return false;
+        }
+        return true;
+    }
+
+    // Tunes and returns the LO that the card reports. Sets err if the SDK fails.
+    double tune(double hz, std::string& err) {
+        if (th_.joinable()) shared_->slipAt = nowSec();
+        const int32_t r = skiq_write_tx_LO_freq(card_, hdl_, (uint64_t)std::llround(hz));
+        if (r != 0) err = skiqError("cannot tune the transmitter to " + fmtSI(hz, "Hz", 9), r);
+        uint64_t f = 0;
+        double actual = 0;
+        if (skiq_read_tx_LO_freq(card_, hdl_, &f, &actual) != 0 || !(actual > 0)) actual = r == 0 ? hz : fc_.load();
+        return actual;
+    }
+
+    void run() {
+        std::vector<std::complex<float>> buf((size_t)block_);
+        // The samples follow the 4-word header (the SDK's skiq_tx_block_t::data).
+        auto* data = reinterpret_cast<int16_t*>(reinterpret_cast<uint8_t*>(blk_) + SKIQ_TX_HEADER_SIZE_IN_BYTES);
+        int errors = 0;
+        double lastPoll = 0;
+        while (!quit_) {
+            fill_(buf.data(), block_);
+            skiqTxConvert(buf.data(), data, (size_t)block_, res_, swap_);
+            const int32_t r = skiq_transmit(card_, hdl_, blk_, nullptr);
+            if (r != 0) {
+                if (quit_) break;
+                if (++errors >= 10) {
+                    fail("Sidekiq stopped accepting samples (transmit error " + std::to_string(r) + "; card removed?)");
+                    LOG_ERROR("skiq", "%s", fatalError().c_str());
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                continue;
+            }
+            errors = 0;
+            sent_ += block_;
+            if (const double now = nowSec(); now - lastPoll > 0.5) {
+                lastPoll = now;
+                pollUnderruns();
+            }
+        }
+        pollUnderruns();
+    }
+
+    void pollUnderruns() {
+        uint32_t n = 0;
+        if (skiq_read_tx_num_underruns(card_, hdl_, &n) == 0) underruns_ = n;
+    }
+
+    void fail(const std::string& why) {
+        std::lock_guard<std::mutex> lk(errM_);
+        fatal_ = why;
+    }
+
+    std::shared_ptr<Card> shared_;
+    bool counted_ = false;  // shared_->tx is this transmitter
+    uint8_t card_ = 0;
+    skiq_part_t part_ = skiq_part_invalid;
+    skiq_tx_hdl_t hdl_ = skiq_tx_hdl_A1;
+    std::vector<Port> ports_;
+    int numHandles_ = 1;
+    bool trx_ = false, dual_ = false, swap_ = false;
+    int res_ = 12, attMin_ = 0, attMax_ = 359, block_ = 0;
+    std::atomic<int> att_{359};
+    double loMin_ = 0, loMax_ = 0;
+    std::atomic<double> fc_{0}, rate_{0};
+    std::string desc_, port_, notes_;
+    skiq_tx_block_t* blk_ = nullptr;
+    FillFn fill_;
+    std::thread th_;
+    std::atomic<bool> quit_{false};
+    std::atomic<int64_t> sent_{0}, underruns_{0};
+    mutable std::mutex errM_;
+    std::string fatal_;
+};
+
 }  // namespace
 
 void enumerateSkiq(std::vector<DeviceInfo>& out) {
     registerLogging();
-    std::lock_guard<std::mutex> lk(gLibM);
+    std::lock_guard<std::recursive_mutex> lk(gLibM);
     // An open card can't be probed (skiq_init is once per process); list it as it was opened.
-    if (gOpen) {
-        out.push_back(gOpenInfo);
+    if (auto c = gCard.lock()) {
+        out.push_back(c->info);
         return;
     }
     uint8_t n = 0, cards[SKIQ_MAX_NUM_CARDS] = {};
@@ -644,4 +1197,10 @@ std::unique_ptr<SdrDevice> openSkiqDevice(const StreamConfig& cfg, std::string& 
     auto d = std::make_unique<SkiqDevice>();
     if (!d->open(cfg, err)) return nullptr;
     return d;
+}
+
+std::unique_ptr<SdrTx> openSkiqTx(const TxConfig& cfg, std::string& err) {
+    auto t = std::make_unique<SkiqTx>();
+    if (!t->open(cfg, err)) return nullptr;
+    return t;
 }

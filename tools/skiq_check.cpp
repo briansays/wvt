@@ -8,7 +8,11 @@
 // timestamp slip), the overload note, the USB (polled) transport, an overrun
 // with the exact count of lost samples, a host that stalls at 100 MS/s (its
 // loss counted), a card removal, and the RF ports of every handle, fixed and
-// TRX (issue #85). Exit status is nonzero on failure.
+// TRX (issue #85). Transmit (issue #86): the gain to attenuation mapping, the
+// sample conversion and the block size in every build; with the simulator the
+// transmitted level and tone, retune, attenuation, ports, the rules for one
+// card that receives and transmits (no false gap from a transmit retune),
+// underruns, removal, and a quiet card after stop. Exit status is nonzero on failure.
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -22,6 +26,10 @@
 #include <vector>
 
 #include "device/sdr_device.h"
+#include "device/sdr_tx.h"
+#ifdef WVT_HAVE_SKIQ
+#include "sidekiq_api.h"  // the simulator's, for skiq_sim_tx_state
+#endif
 
 namespace {
 int failures = 0;
@@ -85,6 +93,30 @@ void testPortNames() {
     check(skiqFindPort(ports, "J1") == 0 && skiqFindPort(ports, "j3") == 3, "a port name alone: the first with that name");
     check(skiqFindPort(ports, "J9") == -1 && skiqFindPort(ports, "J3 (RX B1)") == -1 && skiqFindPort(ports, "") == -1,
           "unknown: -1");
+}
+
+void testTxHelpers() {
+    printf("transmit helpers (issue #86)\n");
+    // M.2: attenuation 0-359 quarter dB. Gain 0 dB = the most attenuation.
+    check(skiqTxAttenuation(0, 0, 359) == 359 && skiqTxAttenuation(89.75, 0, 359) == 0, "gain 0 -> 359, 89.75 dB -> 0");
+    check(skiqTxAttenuation(10, 0, 359) == 319 && skiqTxGainDb(319, 359) == 10, "gain 10 dB -> attenuation 319 = 10 dB");
+    check(skiqTxAttenuation(-5, 0, 359) == 359 && skiqTxAttenuation(200, 0, 359) == 0, "clamped to 0-359");
+    check(skiqTxAttenuation(NAN, 0, 359) == 359 && skiqTxAttenuation(5, 20, 10) == 20, "bad input: the quiet end");
+    const std::complex<float> in[] = {{1, 0}, {-1, 0.5f}, {2, -3}, {NAN, 0.25f}};
+    int16_t out[8] = {};
+    skiqTxConvert(in, out, 4, 12, false);
+    check(out[0] == 2047 && out[1] == 0 && out[2] == -2047 && out[3] == 1024 && out[4] == 2047 && out[5] == -2047 &&
+              out[6] == 0 && out[7] == 512,
+          "12 bits: full scale 2047, clamped, NaN -> 0");
+    skiqTxConvert(in, out, 2, 16, true);
+    check(out[0] == 0 && out[1] == 32767 && out[2] == 16384 && out[3] == -32767, "16 bits, Q before I");
+    check(skiqTxBlockSamples(1e6) == 4092 && skiqTxBlockSamples(0) == 252 && skiqTxBlockSamples(245.76e6) == 16380,
+          "block: 4092 at 1 MS/s, 252 at least, 16380 at most");
+    bool inc = true;
+    for (double r : {233e3, 2e6, 10e6, 61.44e6, 1e9}) inc = inc && (skiqTxBlockSamples(r) + 4) % 256 == 0;
+    check(inc, "block + header is a multiple of 256 words");
+    check(skiqPortLabel({"J1", "A1", false, true}) == "J1 (TX A1)" && skiqPortLabel({"J1", "A1", true, true}) == "J1 (TRX A1)",
+          "port labels: J1 (TX A1), J1 (TRX A1)");
 }
 
 #ifdef WVT_HAVE_SKIQ
@@ -445,6 +477,239 @@ void testTransportAndFaults() {
     d.reset();
     setEnv("WVT_SKIQ_SIM_UNPLUG", nullptr);
 }
+
+// ---- transmit (issue #86) ----
+
+TxConfig txCfg() {
+    TxConfig c;
+    c.driver = "skiq";
+    c.fc = 100e6;
+    c.rate = 2e6;
+    c.gain = 30;
+    return c;
+}
+
+skiq_sim_tx_state_t simTx() {
+    skiq_sim_tx_state_t s{};
+    skiq_sim_tx_state(&s);
+    return s;
+}
+
+// A tone at `offset` Hz with amplitude `amp`; `stall` once makes the host late.
+struct ToneFill {
+    double rate, offset;
+    std::atomic<float> amp{0.5f};
+    std::atomic<double> stall{0};
+    double ph = 0;
+    SdrTx::FillFn fn() {
+        return [this](std::complex<float>* out, int64_t n) {
+            if (const double s = stall.exchange(0); s > 0) sleepS(s);
+            const double w = 2 * M_PI * offset / rate;
+            for (int64_t i = 0; i < n; ++i) {
+                out[i] = std::polar(amp.load(), (float)ph);
+                ph = std::fmod(ph + w, 2 * M_PI);
+            }
+        };
+    }
+};
+
+void testTx() {
+    printf("transmit (M.2, 12 bits)\n");
+    std::string err;
+    auto t = openTx(txCfg(), err);
+    if (!t) {
+        check(false, "open the transmitter: " + err);
+        return;
+    }
+    const GainRange g = t->gainRange();
+    check(g.min == 0 && g.max == 89.75 && g.step == 0.25, "gain 0-89.75 dB in 0.25 dB steps (the attenuation range)");
+    check(t->description() == "Sidekiq M.2 serial WVT01 (PCIe)" && t->antenna() == "J1 (TX A1)",
+          "description and default port: " + t->description() + ", " + t->antenna());
+    check(t->sampleRate() == 2e6 && t->centerFreq() == 100e6 && t->gain() == 30, "2 MS/s, 100 MHz, gain 30 dB");
+    check(!simTx().streaming && simTx().atten == 359, "quiet before start (the most attenuation)");
+
+    ToneFill tone{2e6, 100e3};
+    const auto t0 = std::chrono::steady_clock::now();
+    check(t->start(tone.fn(), err), "start" + (err.empty() ? "" : ": " + err));
+    sleepS(0.4);
+    auto s = simTx();
+    const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    char b[160];
+    check(s.streaming && s.atten == 239 && s.lo == 100000000, "streaming at 100 MHz, attenuation 239 (59.75 dB) for 30 dB gain");
+    snprintf(b, sizeof b, "tone at %+.1f kHz (+100 expected: I/Q order kept)", s.offsetHz / 1e3);
+    check(std::fabs(s.offsetHz - 100e3) < 1e3, b);
+    snprintf(b, sizeof b, "level %.2f dBFS at the DAC for amplitude 0.5 (-6.02 expected), %lld values out of range",
+             s.levelDbfs, (long long)s.outOfRange);
+    check(std::fabs(s.levelDbfs + 6.02) < 0.1 && s.outOfRange == 0, b);
+    // The FPGA holds 100 ms ahead of real time.
+    const double rate = s.samples / (secs + 0.1);
+    snprintf(b, sizeof b, "real-time: %.2f MS/s (2 expected), %llu blocks of %llu", rate / 1e6, (unsigned long long)s.blocks,
+             (unsigned long long)(s.blocks ? s.samples / s.blocks : 0));
+    check(rate > 1.6e6 && rate < 2.4e6 && s.samples % skiqTxBlockSamples(2e6) == 0, b);
+    check(t->stats().sent > 0 && t->stats().underflows == 0, "sent counted, no underruns");
+
+    check(t->setGain(10, err) && simTx().atten == 319 && t->gain() == 10, "gain 10 dB: attenuation 319");
+    check(t->setCenterFreq(200e6, err) && simTx().lo == 200000000 && t->centerFreq() == 200e6, "retune to 200 MHz");
+    std::string e2;
+    check(!t->setCenterFreq(10e6, e2) && simTx().lo == 200000000 && e2.find("cannot transmit at") != std::string::npos,
+          "10 MHz refused, still at 200 MHz: " + e2);
+    tone.amp = 1.0f;
+    sleepS(0.25);
+    s = simTx();
+    snprintf(b, sizeof b, "amplitude 1: full scale (%.2f dBFS)", s.levelDbfs);
+    check(std::fabs(s.levelDbfs) < 0.1, b);
+    tone.amp = 1.5f;  // I and Q clamp on their own
+    sleepS(0.25);
+    check(simTx().outOfRange == 0, "amplitude 1.5: clamped, no values out of range");
+
+    tone.stall = 0.3;  // longer than the FPGA's 100 ms
+    sleepS(1.0);
+    check(t->stats().underflows >= 1, "a 0.3 s stall: underrun counted (" + std::to_string(t->stats().underflows) + ")");
+    t->stop();
+    s = simTx();
+    check(!s.streaming && s.atten == 359, "stop: not streaming, the most attenuation");
+    check(t->start(tone.fn(), err) && simTx().streaming && simTx().atten == 319, "start again: attenuation back to 319");
+    t->stop();
+    t.reset();
+
+    printf("transmit errors and ports\n");
+    TxConfig c = txCfg();
+    c.rate = 100e6;
+    check(!openTx(c, err) && err.find("transmit rate must be 233 kS/s to 61.44 MS/s") != std::string::npos,
+          "100 MS/s on an M.2: " + err);
+    c = txCfg();
+    c.antenna = "J9";
+    check(!openTx(c, err) && err.find("(ports: J1 (TX A1), J1 (TRX A1))") != std::string::npos, "port J9: " + err);
+    c = txCfg();
+    c.ref = "gpsdo";
+    check(!openTx(c, err) && err.find("internal or external") != std::string::npos, "reference gpsdo: " + err);
+    c.ref = "external";
+    check(!openTx(c, err) && err.find("ref_clock") != std::string::npos, "M.2 external reference: " + err);
+    c = txCfg();
+    c.antenna = "j1 (trx a1)";
+    t = openTx(c, err);
+    check(t && t->antenna() == "J1 (TRX A1)", "TRX port alone" + (t ? "" : ": " + err));
+    if (t) {
+        ToneFill f{2e6, 0};
+        check(t->start(f.fn(), err) && simTx().streaming && simTx().trxTransmit, "transmits on the TRX port");
+        t->stop();
+    }
+    t.reset();
+    // The TRX port is back to receive: the receiver can use it.
+    {
+        StreamConfig rc = simCfg();
+        rc.antenna = "J1 (TRX A1)";
+        auto d = openDevice(rc, err);
+        Capture cap;
+        check(d && cap.start(*d, err), "then receive on the TRX port" + (d ? "" : ": " + err));
+        if (d) d->stop();
+    }
+
+    setEnv("WVT_SKIQ_SIM_PART", "x4");
+    c = txCfg();
+    t = openTx(c, err);
+    check(t && t->antenna() == "J5 (TX A1)" && t->gainRange().max == 41.75, "X4: default port J5 (TX A1), gain 0-41.75 dB");
+    if (t) {
+        ToneFill f{2e6, -250e3};
+        t->start(f.fn(), err);
+        sleepS(0.2);
+        s = simTx();
+        snprintf(b, sizeof b, "X4: 16 bits, %.2f dBFS, tone %+.1f kHz (-6.02, -250 expected)", s.levelDbfs, s.offsetHz / 1e3);
+        check(std::fabs(s.levelDbfs + 6.02) < 0.1 && std::fabs(s.offsetHz + 250e3) < 1e3 && s.outOfRange == 0, b);
+        t->stop();
+    }
+    t.reset();
+    for (const char* port : {"J6 (TX A2)", "J7 (TX B1)", "j8"}) {
+        c.antenna = port;
+        t = openTx(c, err);
+        ToneFill f{2e6, 0};
+        const bool ok = t && t->start(f.fn(), err);
+        const skiq_tx_hdl_t want = std::string(port) == "J6 (TX A2)" ? skiq_tx_hdl_A2
+                                   : std::string(port) == "J7 (TX B1)" ? skiq_tx_hdl_B1
+                                                                       : skiq_tx_hdl_B2;
+        check(ok && simTx().hdl == want, std::string("X4 port ") + port + (ok ? "" : ": " + err));
+        if (t) t->stop();
+        t.reset();
+    }
+    setEnv("WVT_SKIQ_SIM_PART", nullptr);
+
+    setEnv("WVT_SKIQ_SIM_UNPLUG", "0.2");
+    t = openTx(txCfg(), err);
+    if (t) {
+        ToneFill f{2e6, 0};
+        t->start(f.fn(), err);
+        for (int i = 0; i < 100 && t->fatalError().empty(); ++i) sleepS(0.05);
+        check(t->fatalError().find("card removed") != std::string::npos, "removal: " + t->fatalError());
+        t->stop();
+    }
+    t.reset();
+    setEnv("WVT_SKIQ_SIM_UNPLUG", nullptr);
+}
+
+// One card, receive and transmit at once.
+void testDuplex() {
+    printf("receive and transmit on one card (issue #86)\n");
+    std::string err;
+    auto d = openDevice(simCfg(), err);
+    if (!d) {
+        check(false, "open the receiver: " + err);
+        return;
+    }
+    Capture cap;
+    check(cap.start(*d, err), "receive at 2 MS/s");
+    TxConfig c = txCfg();
+    c.rate = 4e6;
+    check(!openTx(c, err) && err.find("receiving at 2 MS/s") != std::string::npos, "transmit at 4 MS/s refused: " + err);
+    c = txCfg();
+    c.antenna = "J1 (TRX A1)";
+    check(!openTx(c, err) && err.find("cannot transmit while the live view receives") != std::string::npos,
+          "TRX port refused: " + err);
+    c = txCfg();
+    c.args = "NOPE1";
+    check(!openTx(c, err) && err.find("open already") != std::string::npos, "another card refused: " + err);
+    c.args = "WVT01";
+    auto t = openTx(c, err);
+    check(t != nullptr, "transmit on the same card (by serial)" + (t ? "" : ": " + err));
+    if (!t) return;
+    ToneFill f{2e6, 50e3};
+    check(t->start(f.fn(), err), "start transmitting while receiving");
+    // Each transmit retune slips the AD9361's receive timestamps.
+    for (double fc : {101e6, 102e6, 103e6}) {
+        t->setCenterFreq(fc, err);
+        sleepS(0.15);
+    }
+    sleepS(0.6);
+    check(simTx().lo == 103000000 && simTx().streaming, "the transmitter retuned 3 times");
+    check(cap.gaps == 0, "no false gaps in the receiver (" + std::to_string(cap.gaps.load()) + ")");
+    check(d->fatalError().empty() && !cap.take().empty(), "the receiver still streams");
+    const auto devs = enumerateDevices("skiq");
+    check(devs.size() == 1 && devs[0].label == "Sidekiq M.2 serial WVT01 (PCIe)", "the device list shows the open card");
+    // The receiver goes; the transmitter keeps the card.
+    d->stop();
+    d.reset();
+    check(simTx().streaming, "the transmitter keeps the card when the receiver closes");
+    StreamConfig rc = simCfg();
+    rc.rate = 4e6;
+    check(!openDevice(rc, err) && err.find("transmitting at 2 MS/s") != std::string::npos, "receive at 4 MS/s refused: " + err);
+    rc = simCfg();
+    rc.antenna = "J1 (TRX A1)";
+    check(!openDevice(rc, err) && err.find("cannot receive while the Sidekiq transmits") != std::string::npos,
+          "receive on the TRX port refused: " + err);
+    d = openDevice(simCfg(), err);
+    Capture cap2;
+    check(d && cap2.start(*d, err), "receive again while transmitting" + (d ? "" : ": " + err));
+    if (d) {
+        sleepS(0.3);
+        check(!cap2.take().empty() && cap2.gaps == 0, "it streams, no gaps");
+        d->stop();
+    }
+    d.reset();
+    t->stop();
+    t.reset();
+    // Both gone: the library has exited, so the card opens fresh.
+    d = openDevice(simCfg(), err);
+    check(d != nullptr, "the card opens again after both close" + (d ? "" : ": " + err));
+}
 #endif
 }  // namespace
 
@@ -454,12 +719,15 @@ int main() {
     testConvert();
     testRate();
     testPortNames();
+    testTxHelpers();
 #ifdef WVT_HAVE_SKIQ
     testOpen();
     testStream();
     testX4();
     testPorts();
     testTransportAndFaults();
+    testTx();
+    testDuplex();
 #else
     printf("(the backend checks need -DWVT_SKIQ_SIM=ON)\n");
 #endif

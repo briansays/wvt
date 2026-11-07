@@ -2,6 +2,7 @@
 // SDR receiver abstraction. One open device delivers a continuous stream of
 // samples in its native packed format (RTL-SDR: cu8, USRP: ci16, BB60: ci16,
 // Sidekiq: ci16, simulator: ci16) to a callback on the device's own thread.
+#include <complex>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -135,14 +136,26 @@ int64_t skiqLostSamples(uint64_t expected, uint64_t got);
 // (Q,I -> I,Q), and the shift moves an N-bit sample (sign-extended in the low
 // bits) to the top, so full scale is 0 dBFS for every resolution.
 void skiqConvert(const int16_t* in, int16_t* out, size_t values, int resolution, bool swap);
-// A Sidekiq receive port (issue #85): the SDK's port name ("J3"), the receive
-// handle that it belongs to ("A2"), and whether it is a TRX port.
+// Transmit (issue #86). The card sets its power as an attenuation in quarter
+// dB; wvt shows it as a gain in dB above the most attenuation, so 0 dB is the
+// lowest power and the transmit limits cap the power as for a USRP.
+int skiqTxAttenuation(double gainDb, int attenMin, int attenMax);
+double skiqTxGainDb(int atten, int attenMax);
+// Normalized float I/Q (|x| <= 1) to the card's N-bit samples, sign-extended
+// in the low bits and clamped; `swap` writes Q before I.
+void skiqTxConvert(const std::complex<float>* in, int16_t* out, size_t n, int resolution, bool swap);
+// Samples per transmit block for a rate: about 4 ms, with the block and its
+// 4-word header a multiple of 256 words (252 to 16380 samples).
+int skiqTxBlockSamples(double rate);
+// A Sidekiq port (issue #85): the SDK's port name ("J3"), the handle that it
+// belongs to ("A2"), and whether it is a TRX port or a transmit port.
 struct SkiqPort {
     std::string port, handle;
     bool trx = false;
+    bool tx = false;  // a fixed transmit port (issue #86)
 };
-// The name in the port list, the --antenna value and sessions: "J3 (RX A2)",
-// "J1 (TRX A1)".
+// The name in the port list, the --antenna / --tx-antenna value and sessions:
+// "J3 (RX A2)", "J1 (TRX A1)", "J1 (TX A1)".
 std::string skiqPortLabel(const SkiqPort& p);
 // The index of the port with the name `name` (in any case), or -1. A port name
 // alone ("J1", as before issue #85) gives the first port with that name.
