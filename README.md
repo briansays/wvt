@@ -15,7 +15,7 @@ that share one time axis. When you pan or zoom one plot, all the other plots fol
   stream to SigMF or raw IQ files. It can send the stream over ZMQ to another wvt or to other
   programs such as GNU Radio, and receive samples over ZMQ from them.
 - **Signal generator:** CW, pulsed, swept, playback and chain waveforms, to a file, to the live
-  view, or transmitted with a USRP.
+  view, or transmitted with a USRP or a Sidekiq.
 - **Audio:** AM, NFM, WFM, USB, LSB and CW demodulation to the speakers or to a WAV file.
 - **Region export:** a time range, and as an option a frequency band, to a new file.
 - **Plot snapshots:** PNG files of the plots, as they show on the screen.

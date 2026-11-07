@@ -1,5 +1,5 @@
 // Signal generator window: CW / pulsed / playback waveform parameters, a
-// preview, and the three outputs (file, live loopback, USRP transmit).
+// preview, and the three outputs (file, live loopback, transmit with a USRP or a Sidekiq).
 #include <algorithm>
 #include <cctype>
 #include <cfloat>
@@ -56,11 +56,9 @@ bool parseStagger(const char* text, std::vector<double>& out) {
 
 // Red-tinted button for transmit actions.
 
-bool haveTx() {
-    for (const auto& d : sdrDrivers())
-        if (d == "uhd") return true;
-    return false;
-}
+bool haveTx() { return !txDrivers().empty(); }
+
+const char* txDriverName(const std::string& d) { return d == "skiq" ? "Sidekiq" : d == "uhd" ? "USRP" : d.c_str(); }
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -174,7 +172,7 @@ void App::drawSigGenWindow() {
     const bool fileActive = sgFileSt_.active;
     if (beginForm("##sgout", 8.5f)) {
         row("Output");
-        const char* outs[] = {"File (SigMF / raw)", "Loopback (live view)", "USRP transmit"};
+        const char* outs[] = {"File (SigMF / raw)", "Loopback (live view)", "Transmit"};
         ImGui::BeginDisabled(txOn || fileActive);
         if (ImGui::BeginCombo("##sgoutput", outs[sgOutput_])) {
             for (int i = 0; i < 3; ++i)
@@ -183,7 +181,7 @@ void App::drawSigGenWindow() {
         }
         ImGui::EndDisabled();
         tooltipAlways("File: write the waveform to disk.\nLoopback: show it in the live spectrum and waterfall.\n"
-                      "USRP transmit: send it over the air with a USRP.");
+                      "Transmit: send it over the air with a USRP or a Sidekiq.");
         ImGui::EndTable();
     }
     ImGui::Separator();
@@ -216,7 +214,7 @@ void App::drawSigGenWindow() {
         ImGui::PopTextWrapPos();
 
         if (ImGui::CollapsingHeader("Preview", ImGuiTreeNodeFlags_DefaultOpen)) drawSigGenPreview();
-        const char* outHdr[] = {"File output", "Loopback", "USRP transmit"};
+        const char* outHdr[] = {"File output", "Loopback", "Transmit"};
         ImGui::PushID(sgOutput_);
         if (ImGui::CollapsingHeader(outHdr[sgOutput_], ImGuiTreeNodeFlags_DefaultOpen)) {
             if (sgOutput_ == 0) drawSigGenFile();
@@ -900,36 +898,62 @@ void App::drawSigGenTx() {
     const float fs = ImGui::GetFontSize();
     if (!haveTx()) {
         ImGui::PushTextWrapPos(0);
-        ImGui::TextColored(kColWarn, "This wvt was built without UHD, so it can't transmit. Install UHD "
-                                     "(see README: Optional: device support) and rebuild.");
+        ImGui::TextColored(kColWarn, "This wvt was built without UHD and without the Sidekiq SDK, so it can't "
+                                     "transmit. Install one of them (see the manual: Live devices) and rebuild.");
         ImGui::PopTextWrapPos();
         return;
     }
     const bool txOn = tx_ && tx_->running();
 
+    const bool skiq = txCfg_.driver == "skiq";
     if (beginForm("##sgtx", 8.5f)) {
         ImGui::BeginDisabled(txOn);
+        row("Device");
+        const auto drivers = txDrivers();
+        if (ImGui::BeginCombo("##txdrv", txDriverName(txCfg_.driver))) {
+            for (const auto& d : drivers)
+                if (ImGui::Selectable(txDriverName(d), txCfg_.driver == d) && txCfg_.driver != d) {
+                    txCfg_.driver = d;
+                    txArgs_[0] = txAntenna_[0] = 0;  // the names differ between the drivers
+                    if (d == "skiq" && txCfg_.ref == "gpsdo") txCfg_.ref.clear();
+                }
+            ImGui::EndCombo();
+        }
+        std::string have;
+        for (const auto& d : drivers) have += (have.empty() ? "" : ", ") + std::string(txDriverName(d));
+        tooltipAlways(("The transmitter: a USRP (UHD) or an Epiq Sidekiq. This wvt has: " + have + ".").c_str());
         row("Device args");
-        ImGui::InputText("##txargs", txArgs_, sizeof txArgs_);
-        tooltipAlways("UHD device arguments, e.g. serial=31A2B3C (USB) or addr=192.168.10.2 (network).\n"
-                      "Empty: the first USRP UHD finds.\n"
-                      "If the live view is receiving from the same USRP, both share it (full duplex).");
-        row("Antenna");
-        ImGui::InputTextWithHint("##txant", "default", txAntenna_, sizeof txAntenna_);
-        tooltipAlways("The transmit port. Empty: the channel's first transmit port\n"
-                      "(TX/RX on the B2xx and N3xx, TX/RX0 on the X410).");
-        row("Channel");
-        if (ImGui::InputInt("##txchan", &txCfg_.channel)) txCfg_.channel = std::clamp(txCfg_.channel, 0, 15);
-        tooltipAlways("Transmit channel: the X310, N310 and X410 have several.");
+        ImGui::InputTextWithHint("##txargs", skiq ? "the open card, else the first" : "the first USRP", txArgs_,
+                                 sizeof txArgs_);
+        tooltipAlways(skiq ? "The Sidekiq's serial number, or #N for card number N.\n"
+                             "Empty: the card the live view has open, else the first free card.\n"
+                             "If the live view is receiving from the same card, both share it (full duplex)."
+                           : "UHD device arguments, e.g. serial=31A2B3C (USB) or addr=192.168.10.2 (network).\n"
+                             "Empty: the first USRP UHD finds.\n"
+                             "If the live view is receiving from the same USRP, both share it (full duplex).");
+        row(skiq ? "TX port" : "Antenna");
+        ImGui::InputTextWithHint("##txant", skiq ? "default (A1)" : "default", txAntenna_, sizeof txAntenna_);
+        tooltipAlways(skiq ? "The transmit port and its handle, e.g. J1 (TX A1), J6 (TX A2) or J1 (TRX A1), or a port\n"
+                             "name alone. Empty: handle A1 on the card's port. A wrong name gives the card's list.\n"
+                             "A TRX port can't transmit while the live view receives from the same card."
+                           : "The transmit port. Empty: the channel's first transmit port\n"
+                             "(TX/RX on the B2xx and N3xx, TX/RX0 on the X410).");
+        if (!skiq) {
+            row("Channel");
+            if (ImGui::InputInt("##txchan", &txCfg_.channel)) txCfg_.channel = std::clamp(txCfg_.channel, 0, 15);
+            tooltipAlways("Transmit channel: the X310, N310 and X410 have several.");
+        }
         row("Reference");
         if (ImGui::BeginCombo("##txref", txCfg_.ref.empty() ? "Default" : txCfg_.ref.c_str())) {
             if (ImGui::Selectable("Default", txCfg_.ref.empty())) txCfg_.ref.clear();
             for (const char* r : {"internal", "external", "gpsdo"})
-                if (ImGui::Selectable(r, txCfg_.ref == r)) txCfg_.ref = r;
+                if (!(skiq && std::string(r) == "gpsdo") && ImGui::Selectable(r, txCfg_.ref == r)) txCfg_.ref = r;
             ImGui::EndCombo();
         }
-        tooltipAlways("Clock and time reference: internal, external (10 MHz and PPS) or gpsdo.\n"
-                      "It applies to the whole USRP, so the live view on the same USRP uses it too.");
+        tooltipAlways(skiq ? "Clock reference: internal, or external (10 MHz). It applies to the whole card; when the\n"
+                             "live view has the card open, the transmitter keeps the live view's reference."
+                           : "Clock and time reference: internal, external (10 MHz and PPS) or gpsdo.\n"
+                             "It applies to the whole USRP, so the live view on the same USRP uses it too.");
         row("Bandwidth");
         InputSI("##txbw", &txCfg_.bandwidth, "Hz", -FLT_MIN);
         tooltipAlways("Analog filter bandwidth. 0 = automatic (follows the sample rate).");
@@ -950,9 +974,14 @@ void App::drawSigGenTx() {
                 LOG_ERROR("app", "transmit gain failed: %s", err.c_str());
             }
         }
-        tooltipAlways(txOn ? "Transmit gain of this USRP. Start low."
-                           : "Transmit gain (B200/B205: 0-89.75 dB; the slider shows the device's range while it\n"
-                             "transmits). Start low: a B2xx gives about 0 dBm near the top of the range.");
+        if (skiq)
+            tooltipAlways("The Sidekiq sets its power with an attenuation. The gain is dB above the most attenuation:\n"
+                          "0 dB is the lowest power, the top of the range is no attenuation (the full power of the\n"
+                          "card). M.2: 0-89.75 dB; the slider shows the card's range while it transmits. Start low.");
+        else
+            tooltipAlways(txOn ? "Transmit gain of this USRP. Start low."
+                               : "Transmit gain (B200/B205: 0-89.75 dB; the slider shows the device's range while it\n"
+                                 "transmits). Start low: a B2xx gives about 0 dBm near the top of the range.");
         if (lim.any()) {
             row("Limits");
             ImGui::TextWrapped("%s", describeTxLimits(lim).c_str());
@@ -964,9 +993,10 @@ void App::drawSigGenTx() {
         ImGui::EndTable();
     }
 
-    // The B2xx derives RX and TX rates from one clock: they must match while both run.
-    if (!txOn && live_ && live_->running() && devCfg_.driver == "uhd" && devCaps_.usb &&
-        std::fabs(liveStats_.rate - sg_.rate) > 1) {
+    // The B2xx and the Sidekiq derive RX and TX rates from one clock: they must match while both run.
+    const bool oneClock = (txCfg_.driver == "uhd" && devCfg_.driver == "uhd" && devCaps_.usb) ||
+                          (skiq && devCfg_.driver == "skiq");
+    if (!txOn && live_ && live_->running() && oneClock && std::fabs(liveStats_.rate - sg_.rate) > 1) {
         ImGui::TextColored(kColWarn, "Receiving at %s: transmit must use the same rate.", fmtSI(liveStats_.rate, "S/s", 6).c_str());
         ImGui::SameLine();
         if (ImGui::SmallButton("Use it")) sg_.rate = liveStats_.rate;
@@ -989,8 +1019,12 @@ void App::drawSigGenTx() {
         const auto& s = txStats_;
         ImGui::TextColored(kColTx, "TX ON  %s  (signal at %s)", fmtSI(s.fc, "Hz", 9).c_str(),
                            fmtSI(s.fc + sg_.offset, "Hz", 9).c_str());
-        ImGui::Text("%s, %s, gain %.2f dB, antenna %s", s.description.c_str(), fmtSI(s.rate, "S/s", 6).c_str(), s.gain,
-                    s.antenna.c_str());
+        if (skiq)
+            ImGui::Text("%s, %s, gain %.2f dB (attenuation %.2f dB), port %s", s.description.c_str(),
+                        fmtSI(s.rate, "S/s", 6).c_str(), s.gain, s.range.max - s.gain, s.antenna.c_str());
+        else
+            ImGui::Text("%s, %s, gain %.2f dB, antenna %s", s.description.c_str(), fmtSI(s.rate, "S/s", 6).c_str(),
+                        s.gain, s.antenna.c_str());
         ImGui::Text("sent %s   underflows %lld   lost packets %lld", fmtSI((double)s.tx.sent, "S", 4).c_str(),
                     (long long)s.tx.underflows, (long long)s.tx.seqErrors);
         if (!s.notes.empty()) ImGui::TextColored(kColWarn, "%s", s.notes.c_str());
@@ -1001,10 +1035,15 @@ void App::drawSigGenTx() {
 
     if (ImGui::BeginPopupModal("Start transmitting?", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
         ImGui::TextColored(kColTx, "Transmit at %s", fmtSI(sg_.fc + sg_.offset, "Hz", 9).c_str());
-        ImGui::Text("Center %s, %s, TX gain %.2f dB, antenna %s, channel %d", fmtSI(sg_.fc, "Hz", 9).c_str(),
-                    fmtSI(sg_.rate, "S/s", 6).c_str(), txCfg_.gain, txAntenna_[0] ? txAntenna_ : "default",
-                    txCfg_.channel);
-        ImGui::Text("Device: %s", txArgs_[0] ? txArgs_ : "the first USRP found");
+        if (skiq)
+            ImGui::Text("Center %s, %s, TX gain %.2f dB above the most attenuation, port %s", fmtSI(sg_.fc, "Hz", 9).c_str(),
+                        fmtSI(sg_.rate, "S/s", 6).c_str(), txCfg_.gain, txAntenna_[0] ? txAntenna_ : "default");
+        else
+            ImGui::Text("Center %s, %s, TX gain %.2f dB, antenna %s, channel %d", fmtSI(sg_.fc, "Hz", 9).c_str(),
+                        fmtSI(sg_.rate, "S/s", 6).c_str(), txCfg_.gain, txAntenna_[0] ? txAntenna_ : "default",
+                        txCfg_.channel);
+        ImGui::Text("Device: %s %s", txDriverName(txCfg_.driver),
+                    txArgs_[0] ? txArgs_ : skiq ? "(the open card, else the first)" : "(the first found)");
         std::string limErr;
         const bool inLimits = txGainAllowed(txCfg_.limits, txCfg_.gain, limErr) &&
                               txFreqAllowed(txCfg_.limits, sg_.fc, sg_.rate, limErr);

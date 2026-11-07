@@ -63,6 +63,9 @@ App::App(X11Window& win, const WvtConfig& cfg) : win_(win), cfg_(cfg) {
     snprintf(sgPrefix_, sizeof sgPrefix_, "%s", configJoin(cfg.siggenFolder, cfg.siggenName).c_str());
     sgFileCfg_.fmt = cfg.siggenSample;
     sgFileCfg_.rec.sigmf = cfg.siggenSigmf;
+    // A build with the Sidekiq SDK but no UHD transmits with the Sidekiq (issue #86).
+    if (const auto d = txDrivers(); !d.empty() && std::find(d.begin(), d.end(), txCfg_.driver) == d.end())
+        txCfg_.driver = d.front();
     snprintf(txArgs_, sizeof txArgs_, "%s", txCfg_.args.c_str());
     snprintf(txAntenna_, sizeof txAntenna_, "%s", txCfg_.antenna.c_str());
     snprintf(auPrefix_, sizeof auPrefix_, "%s", configJoin(cfg.audioFolder, "audio").c_str());

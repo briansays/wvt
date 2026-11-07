@@ -13,7 +13,7 @@ wvt has these other functions:
   it records the stream to a file. It can send the stream over the network to another wvt or to
   another program.
 - **Signal generator:** wvt makes CW, pulsed, swept and recorded waveforms. It writes them to a
-  file, shows them in the live view, or transmits them with a USRP.
+  file, shows them in the live view, or transmits them with a USRP or a Sidekiq.
 - **Audio:** wvt demodulates one channel and plays it through the speakers or writes it to a WAV
   file.
 - **Region export:** wvt writes a time range, and as an option a frequency band, to a new file.
@@ -338,7 +338,8 @@ from the Sidekiq SDK, version 4.14.0 or later. Refer to [Epiq Sidekiq](#epiq-sid
   `libtirpc-dev`), CMake links them instead of the SDK copies in `lib/support/`. The SDK has
   libusb 1.0.20, and librtlsdr and UHD need 1.0.21 or later.
 - The SDK is for Linux only. On macOS, the backend is not built.
-- Without this backend, the device list does not show Sidekiq cards.
+- Without this backend, the device list does not show Sidekiq cards, and the signal generator
+  cannot transmit with a Sidekiq.
 
 Output: `wvt: Sidekiq support enabled (SDK 4.26.0, <folder>)`.
 
@@ -1743,7 +1744,8 @@ RF port
   card opens, the list shows the ports of all the receive handles of the card (an X4 has A1, A2,
   B1 and B2). Before that, the list shows *Start the card to list its ports*. *TRX* ports, for
   example *J1 (TRX A1)*, can also transmit. wvt switches the card to its TRX port configuration and
-  sets the port to receive. *Default* receives on handle A1 on the default port of the card.
+  sets the port to receive. A TRX port cannot receive while the signal generator transmits with
+  the same card. *Default* receives on handle A1 on the default port of the card.
   `--antenna` and session files take the same names, or a port name alone (`J1`) for the first port
   with that name.
 
@@ -1756,6 +1758,10 @@ Ext ref
 
 A retune and a gain change apply while the card streams. 12-bit cards (M.2, mPCIe) have the same
 dBFS scale as 16-bit cards: a full-scale signal shows 0 dBFS.
+
+The signal generator can transmit with the card that the live view receives from (refer to
+[Transmit](#transmit)). The two directions then share the card: they must use the same sample
+rate, and the live view keeps its RF port configuration, channel mode and reference.
 
 #### The live view
 
@@ -2233,7 +2239,7 @@ average spectrum.
 #### Generator outputs
 
 Select one output with *Output* at the top of the window: **File (SigMF / raw)**, **Loopback
-(live view)** or **USRP transmit**.
+(live view)** or **Transmit**.
 
 ##### File output
 
@@ -2261,21 +2267,51 @@ window, or start wvt with `--device siggen`.
 The live view shows the waveform as a receiver tuned to the center frequency shows it. Changes
 apply while you make them. The main window can record the loopback stream.
 
-##### USRP transmit
+##### Transmit
 
-The generator transmits the waveform from a USRP, tuned to the center frequency. You can change
-the frequency, the gain and all waveform settings while the USRP transmits.
+The generator transmits the waveform from a USRP or an Epiq Sidekiq, tuned to the center
+frequency. You can change the frequency, the gain and all waveform settings while the device
+transmits.
 
 | Setting | Function |
 |---|---|
-| Device args | The UHD device arguments, for example `serial=31A2B3C` or `addr=192.168.40.2`. Empty: the first USRP that UHD finds |
-| Antenna | The transmit port. Empty: the first transmit port of the channel (`TX/RX` on the B2xx and N3xx, `TX/RX0` on the X410) |
-| Channel | The transmit channel |
-| Reference | The clock and time reference (*internal*, *external* or *gpsdo*). It applies to the full device |
+| Device | *USRP* or *Sidekiq*. The list shows the drivers that this wvt has |
+| Device args | USRP: the UHD device arguments, for example `serial=31A2B3C` or `addr=192.168.40.2`. Empty: the first USRP that UHD finds. Sidekiq: the serial number, or `#N` for card number N. Empty: the card that the live view has open, else the first free card |
+| Antenna (USRP) | The transmit port. Empty: the first transmit port of the channel (`TX/RX` on the B2xx and N3xx, `TX/RX0` on the X410) |
+| TX port (Sidekiq) | The transmit port and its handle, for example `J1 (TX A1)`, `J6 (TX A2)` or `J1 (TRX A1)`, or a port name alone. Empty: handle A1 on the default port of the card. If the name is wrong, the error shows the ports of the card |
+| Channel (USRP) | The transmit channel |
+| Reference | The clock reference. USRP: *internal*, *external* or *gpsdo*. Sidekiq: *internal* or *external*. It applies to the full device |
 | Bandwidth | The analog filter bandwidth. 0 sets it automatically |
-| TX gain | The transmit gain. While the USRP transmits, the slider shows the range of the device |
+| TX gain | The transmit gain. While the device transmits, the slider shows the range of the device |
 
-If the live view receives from the same USRP, the receiver and the transmitter share it.
+If the live view receives from the same device, the receiver and the transmitter share it.
+
+###### Sidekiq transmit power
+
+A Sidekiq sets its transmit power with an attenuation in 0.25 dB steps. wvt shows it as a gain:
+the TX gain is the dB above the most attenuation of the card. Thus:
+
+- 0 dB is the most attenuation, which is the lowest power.
+- The top of the range is no attenuation, which is the full power of the card. On the M.2 and
+  mPCIe, the range is 0 to 89.75 dB.
+- While the card transmits, the window shows the gain and the attenuation.
+- `--tx-max-gain` and the other [transmit limits](#transmit-limits) limit the power as for a USRP.
+
+Before the transmission starts and after it stops, the card has the most attenuation.
+
+###### Sidekiq and the live view on one card
+
+The live view and the generator can use one Sidekiq at the same time. These rules apply:
+
+- The two directions must use the same sample rate, because the card uses one clock for the two.
+  If the rates are different, the side that starts second gives an error with the rate in use. The
+  window shows *Use it* to copy the receive rate.
+- A TRX port cannot receive and transmit at the same time. Use a fixed receive port and a fixed
+  transmit port.
+- The side that starts second keeps the RF port configuration (fixed or TRX), the channel mode and
+  the reference of the first side. A handle that needs another one gives an error.
+- On the M.2 and mPCIe (AD9361), a transmit retune or start moves the receive timestamps. wvt
+  does not count this as lost samples.
 
 :::{warning}
 Transmit only into a dummy load or an attenuated cable, or where you have a license.
@@ -2296,11 +2332,12 @@ Safety and limits:
 - While wvt transmits, the window title, the menu bar (**TX ON**) and a large **STOP
   TRANSMITTING** button show it.
 - If you close the generator window or stop wvt, the transmission stops.
-- You can change the center frequency during a transmission. If the USRP cannot tune to it, the
-  transmitter stays on the last good frequency, and the field shows that frequency. If the USRP
+- You can change the center frequency during a transmission. If the device cannot tune to it, the
+  transmitter stays on the last good frequency, and the field shows that frequency. If the device
   cannot go back to that frequency, the transmission stops.
 - If a transmission stops because of an error (for example, the USRP is disconnected), wvt sends
-  an end-of-burst to the USRP before it stops. This tells the USRP to stop transmitting.
+  an end-of-burst to the USRP before it stops. This tells the USRP to stop transmitting. A Sidekiq
+  stops its transmit stream and goes to the most attenuation.
 - To monitor your own signal on a receiver, put a minimum of 30 dB of attenuation between the
   ports.
 - On one USRP, wvt can receive and transmit at the same time (full duplex). On a B2xx, the two
@@ -2376,15 +2413,17 @@ export WVT_TX_ALLOW=902M:928M,2.4G:2.4835G
 | `--gen-sample cf32\|ci16\|ci8\|cu8` | The file sample format (default `cf32`) |
 | `--gen-duration T` or `--gen-pulses N` | The file length (default 1 s). N counts pulses, plays, sweeps or chain passes |
 | `--gen-annotate` | SigMF: one annotation for each pulse, play, sweep or chain item |
-| `--tx` | Transmit with a USRP until Ctrl+C, or for `--gen-duration` |
-| `--tx-gain DB` | The transmit gain (default 0 dB) |
-| `--tx-args ARGS` | The UHD device arguments. The default is the first USRP found |
-| `--tx-antenna NAME` | The transmit port. The default is the first transmit port of the channel |
-| `--tx-dry-run` | Show what `--tx` transmits, check the limits, then stop. wvt does not open the USRP |
+| `--tx` | Transmit with a USRP or a Sidekiq until Ctrl+C, or for `--gen-duration` |
+| `--tx-device DEV` | The transmitter: `uhd[:ARGS]` (default) or `skiq[:SERIAL\|#N]`, for example `--tx-device skiq` |
+| `--tx-gain DB` | The transmit gain (default 0 dB). Sidekiq: the dB above the most attenuation (refer to [Sidekiq transmit power](#sidekiq-transmit-power)) |
+| `--tx-args ARGS` | The device arguments of the transmitter. USRP: UHD arguments. Sidekiq: a serial number or `#N`. The default is the first device found |
+| `--tx-antenna NAME` | The transmit port. USRP: the default is the first transmit port of the channel. Sidekiq: for example `"J1 (TX A1)"`; the default is handle A1 on its default port |
+| `--tx-dry-run` | Show what `--tx` transmits, check the limits, then stop. wvt does not open the device |
 | `--tx-confirm` | Transmit, and do not ask first. Use this in a script |
 | `--tx-max-gain DB` | The maximum TX gain (see [Transmit limits](#transmit-limits)) |
 | `--tx-allow LO:HI[,LO:HI...]` | The bands where wvt can transmit (see [Transmit limits](#transmit-limits)) |
 | `--usrp-channel N`, `--ref SRC` | The USRP channel and reference, as for the receiver |
+| `--ext-ref` | With `--tx-device skiq`: use the external reference clock of the Sidekiq |
 
 Before `--tx` transmits, wvt shows the signal, the frequency, the rate, the gain, the device, the
 duration and the limits. Then it asks you to type `yes`. If the input is not a terminal (for
