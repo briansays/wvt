@@ -213,7 +213,7 @@ jobs:
           docker compose config -q
           docker compose --profile sdr --profile cuda --profile test config -q
       - name: Build and run the self-checks (--target test)
-        run: docker build -f docker/Dockerfile --target test --build-arg WVT_BUILD_HASH="${GITHUB_SHA::7}" ..
+        run: docker build -f Dockerfile --target test --build-arg WVT_BUILD_HASH="${GITHUB_SHA::7}" ..
       - name: Build the image
         run: WVT_BUILD_HASH="${GITHUB_SHA::7}" docker compose build
       - name: Record without a window
