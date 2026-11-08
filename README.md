@@ -43,6 +43,15 @@ scripts/build.sh --help
 scripts/build.sh --no-cuda --test            # build, then run the self-checks
 ```
 
+Or run wvt in a container, without the build tools or the SDR libraries on the computer (Docker
+and an X server). Refer to [docker/README.md](docker/README.md):
+
+```sh
+cd docker && cp .env.example .env            # then set your user ID and display in .env
+docker compose run --rm wvt                  # the window, the files and the simulator
+docker compose run --rm wvt-sdr              # Linux: also the USB SDRs, the host network and the sound
+```
+
 ## Documentation
 
 The documentation is the [wvt User Manual](docs/MANUAL.md). To make the HTML pages with Sphinx:

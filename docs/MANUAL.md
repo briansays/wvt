@@ -150,6 +150,17 @@ wvt uses GLX and OpenGL when the X server supports them. If not, wvt uses its bu
 renderer. Thus wvt also works over `ssh -X`, in Xvfb, and in VNC sessions without GL. To use the
 software renderer always, start wvt with `--software`.
 
+#### Run wvt in a container
+
+The `docker/` folder of the repository has a Dockerfile and a Docker Compose file. They build wvt on
+Ubuntu 24.04 with the RTL-SDR, UHD, ZMQ and audio backends, and run it with the window on the X
+server of the computer. Refer to `docker/README.md`:
+
+```sh
+cd docker && cp .env.example .env    # then set your user ID and display in .env
+docker compose run --rm wvt          # the window, the files and the simulator
+```
+
 ### Build reference
 
 This chapter gives all the CMake settings of wvt, what each setting enables or disables, and the
@@ -292,7 +303,10 @@ transmits with all USRPs that UHD supports: the USB B200 family and the network 
 
 - CMake finds UHD with `pkg-config` (the `uhd` module). If `pkg-config` does not find it, CMake
   uses the `UHDConfig.cmake` file of UHD.
-- wvt uses the C API of UHD (`uhd.h`). Thus the build does not need the Boost headers.
+- wvt uses the C API of UHD (`uhd.h`). But `uhd.h` includes `boost/config.hpp`, and the `uhd`
+  pkg-config module links `boost_system`. On Ubuntu 24.04, `libuhd-dev` gets them only through
+  its recommended package `gnuradio-dev`. With `--no-install-recommends`, install `libboost-dev`
+  and `libboost-system-dev`.
 - Without this backend, wvt cannot receive from a USRP, and the signal generator cannot transmit.
 
 Output: `wvt: UHD support enabled (UHD <version>)`.

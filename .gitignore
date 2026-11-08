@@ -41,3 +41,8 @@ compile_commands.json
 # locally, not tracked
 /docs/docs-archive/
 /docs/design/
+
+# Docker Compose (docker/): your settings and the data folder of the container
+/docker/.env
+/docker/wvt-data/*
+!/docker/wvt-data/.gitkeep

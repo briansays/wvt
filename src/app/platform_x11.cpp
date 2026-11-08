@@ -114,6 +114,11 @@ struct X11Window::Impl {
     int depth = 24;
     GLXContext glc = nullptr;
     bool gl = false;
+    // The last frame, for readFrame(): it draws the frame again into the back
+    // buffer. The front buffer cannot be read back on all GLX servers (Mesa on
+    // Xvfb or in a container gives black). Valid until the next ImGui::NewFrame.
+    ImDrawData* lastDraw = nullptr;
+    ImVec4 lastClear;
     GC gc = 0;
     XImage* ximg = nullptr;
     std::vector<uint32_t> xbuf;
@@ -580,16 +585,23 @@ void X11Window::newFrame() {
     float dt = std::chrono::duration<float>(now - d->last).count();
     io.DeltaTime = dt > 0 ? dt : 1.f / 60.f;
     d->last = now;
+    d->lastDraw = nullptr;
     if (d->gl) ImGui_ImplOpenGL2_NewFrame();
+}
+
+static void drawGL(int w, int h, ImDrawData* dd, const ImVec4& c) {
+    glViewport(0, 0, w, h);
+    glClearColor(c.x, c.y, c.z, c.w);
+    glClear(GL_COLOR_BUFFER_BIT);
+    ImGui_ImplOpenGL2_RenderDrawData(dd);
 }
 
 void X11Window::render(ImDrawData* dd, const ImVec4& c) {
     if (d->gl) {
-        glViewport(0, 0, d->w, d->h);
-        glClearColor(c.x, c.y, c.z, c.w);
-        glClear(GL_COLOR_BUFFER_BIT);
-        ImGui_ImplOpenGL2_RenderDrawData(dd);
+        drawGL(d->w, d->h, dd, c);
         glXSwapBuffers(d->dpy, d->win);
+        d->lastDraw = dd;
+        d->lastClear = c;
         return;
     }
     uint32_t cc = (uint32_t)(c.x * 255) | ((uint32_t)(c.y * 255) << 8) | ((uint32_t)(c.z * 255) << 16) | 0xff000000u;
@@ -662,7 +674,13 @@ void X11Window::readFrame(int& w, int& h, std::vector<uint8_t>& rgb) {
     if (d->gl) {
         std::vector<uint8_t> px((size_t)d->w * d->h * 4);
         glPixelStorei(GL_PACK_ALIGNMENT, 1);
-        glReadBuffer(GL_FRONT);
+        if (d->lastDraw) {
+            // Draw the frame again, but do not swap: the back buffer is defined.
+            drawGL(d->w, d->h, d->lastDraw, d->lastClear);
+            glReadBuffer(GL_BACK);
+        } else {
+            glReadBuffer(GL_FRONT);
+        }
         glReadPixels(0, 0, d->w, d->h, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
         for (int y = 0; y < d->h; ++y)
             for (int x = 0; x < d->w; ++x)

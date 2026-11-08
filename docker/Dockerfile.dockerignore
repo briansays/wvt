@@ -1,0 +1,29 @@
+# The build context of docker/Dockerfile (the repository root): the sources only.
+# BuildKit reads this file because it is next to the Dockerfile, with its name.
+.git
+/build*/
+/cmake-build-*/
+.DS_Store
+.vscode/
+.idea/
+.cache/
+*.log
+*.sigmf-data
+*.sigmf-meta
+*.wav
+# Your own configuration files: only the examples go into the image.
+config/*
+!config/README.md
+!config/*.example
+!config/zmq_gnuradio_sub_cf32.ini
+!config/zmq_raw_pull_ci16.ini
+!config/zmq_example_header.ini
+!config/zmq_wvt_ci16.ini
+# The Compose settings and the data folder of docker/.
+docker/.env
+docker/wvt-data/
+docs/docs-archive/
+docs/design/
+# Vendor SDKs: not open source. Give one with --build-context (docker/README.md).
+third_party/sidekiq_sdk/
+third_party/signal_hound_sdk/

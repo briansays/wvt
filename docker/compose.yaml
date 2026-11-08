@@ -1,0 +1,111 @@
+# wvt with Docker Compose. Run the commands in this folder (docker/).
+# Refer to README.md in this folder.
+#
+#   cp .env.example .env                  # one time: your user ID, groups and display
+#   docker compose build                  # build the image wvt:latest
+#   docker compose run --rm wvt           # the window, the files and the simulator
+#   docker compose run --rm wvt-sdr       # Linux: also the SDRs, the host network and the sound
+#   docker compose run --rm wvt --device sim -r 1M        # wvt options after the service
+#
+# Services:
+#   wvt       The window and the files. Runs on any computer with an X server.
+#   wvt-sdr   Linux: also the USB SDRs, the host network (network USRPs, ZMQ
+#             streams), the GPU of the X server (/dev/dri) and the sound.
+#   wvt-cuda  wvt-sdr with an NVIDIA GPU (the NVIDIA Container Toolkit).
+#   test      The build stage: runs the self-checks (ctest).
+#
+# The hardware services and test have profiles, so they start only when you
+# name them (docker compose run) or select the profile (--profile sdr).
+#
+# The variables come from .env in this folder (copy .env.example) or from the
+# environment. Each one has a default:
+#   WVT_UID, WVT_GID     the user and group in the container (1000): the files in WVT_DATA are yours
+#   WVT_DATA             the folder for the recordings and the logs (./wvt-data)
+#   WVT_CONFIG_DIR       the config folder: wvt.conf, zmq_*.ini (../config, as for build/wvt)
+#   WVT_DISPLAY          the X display (DISPLAY, else :0; macOS: host.docker.internal:0)
+#   WVT_USB_GID          the group of the USB devices on the host (46: plugdev on Debian and Ubuntu)
+#   WVT_RENDER_GID       the group of /dev/dri/renderD128 on the host (44: video)
+#   WVT_IMAGE            the image (wvt:latest; wvt:cuda for wvt-cuda)
+#   WVT_BUILD_HASH       the commit that Help > About shows (docker)
+
+name: wvt
+
+x-build: &build
+  context: ..
+  dockerfile: docker/Dockerfile
+  args:
+    WVT_BUILD_HASH: ${WVT_BUILD_HASH:-docker}
+
+x-wvt: &wvt
+  image: ${WVT_IMAGE:-wvt:latest}
+  build: *build
+  user: "${WVT_UID:-1000}:${WVT_GID:-1000}"
+  init: true
+  environment:
+    DISPLAY: ${WVT_DISPLAY:-${DISPLAY:-:0}}
+  volumes:
+    - /tmp/.X11-unix:/tmp/.X11-unix
+    - ${WVT_DATA:-./wvt-data}:/data
+    - ${WVT_CONFIG_DIR:-../config}:/opt/wvt/config
+
+x-sdr: &sdr
+  <<: *wvt
+  # Network USRPs and ZMQ streams (multicast too) use the network of the host.
+  network_mode: host
+  # The USB bus as a folder, with access to all USB devices (major 189): an SDR
+  # that is connected after the start also works. 226: the GPU (/dev/dri).
+  device_cgroup_rules:
+    - "c 189:* rmw"
+    - "c 226:* rmw"
+  group_add:
+    - "${WVT_USB_GID:-46}"
+    - "${WVT_RENDER_GID:-44}"
+  environment: &sdr-env
+    DISPLAY: ${WVT_DISPLAY:-${DISPLAY:-:0}}
+    PULSE_SERVER: unix:/run/pulse/native
+  volumes:
+    - /tmp/.X11-unix:/tmp/.X11-unix
+    - ${WVT_DATA:-./wvt-data}:/data
+    - ${WVT_CONFIG_DIR:-../config}:/opt/wvt/config
+    - /dev/bus/usb:/dev/bus/usb
+    - /dev/dri:/dev/dri
+    - ${XDG_RUNTIME_DIR:-/run/user/${WVT_UID:-1000}}/pulse:/run/pulse
+
+services:
+  wvt:
+    <<: *wvt
+
+  wvt-sdr:
+    <<: *sdr
+    profiles: [sdr]
+
+  wvt-cuda:
+    <<: *sdr
+    profiles: [cuda]
+    image: ${WVT_IMAGE:-wvt:cuda}
+    build:
+      <<: *build
+      args:
+        WVT_BUILD_HASH: ${WVT_BUILD_HASH:-docker}
+        BUILD_IMAGE: nvidia/cuda:12.8.1-devel-ubuntu24.04
+        RUN_IMAGE: nvidia/cuda:12.8.1-base-ubuntu24.04
+        WVT_CUDA: "ON"
+    environment:
+      <<: *sdr-env
+      # "all": the GPU also renders the window (GLX), not only the FFT (compute).
+      NVIDIA_DRIVER_CAPABILITIES: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  test:
+    profiles: [test]
+    image: wvt:build
+    build:
+      <<: *build
+      target: build
+    entrypoint: [ctest, --test-dir, /opt/wvt/build, --output-on-failure]
