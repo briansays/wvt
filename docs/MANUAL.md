@@ -150,6 +150,43 @@ wvt uses GLX and OpenGL when the X server supports them. If not, wvt uses its bu
 renderer. Thus wvt also works over `ssh -X`, in Xvfb, and in VNC sessions without GL. To use the
 software renderer always, start wvt with `--software`.
 
+#### Run wvt in a container
+
+The `docker/` folder of the repository has a Dockerfile and a Docker Compose file. They build wvt on
+Ubuntu 24.04 with the RTL-SDR, UHD, ZMQ and audio backends, and run it with the window on the X
+server of the computer. Refer to `docker/README.md`:
+
+```sh
+cd docker && cp .env.example .env    # then set your user ID and display in .env
+docker compose run --rm wvt          # the window, the files and the simulator
+```
+
+The default image does not have the BB60 or Sidekiq backends, because their SDKs are not open
+source. `docker/compose.vendor.yaml` adds the SDKs from `third_party/` to the build. Refer to
+"Vendor SDKs" in `docker/README.md`.
+
+:::{note}
+Compose uses `compose.vendor.yaml` only if you select it. Set this line in `docker/.env`, or give
+`-f compose.yaml -f compose.vendor.yaml` with each command:
+
+```sh
+COMPOSE_FILE=compose.yaml:compose.vendor.yaml
+```
+
+Without it, `docker compose build` makes the image `wvt:latest` with no BB60 or Sidekiq backend,
+even if the SDKs are in `third_party/`. The build does not show an error. With the override file,
+the image is `wvt:vendor`, and the build log shows `Signal Hound BB60 support enabled` and
+`Sidekiq support enabled`.
+:::
+
+:::{note}
+On an ARM64 computer (Apple silicon, or ARM64 Linux), the vendor build stops with
+`undefined reference to 'FT_Open'` and other `FT_*` functions. The ARM64 `libbb_api` needs the
+FTDI D2XX library (`libftd2xx.so`), and the Signal Hound SDK does not have it for ARM64. The
+x86-64 libraries of the SDK have it. For now, build the vendor image on an x86-64 computer, or set
+`WVT_SIGNALHOUND_SDK=./no-sdk` in `docker/.env` to build only the Sidekiq backend.
+:::
+
 ### Build reference
 
 This chapter gives all the CMake settings of wvt, what each setting enables or disables, and the
@@ -292,7 +329,10 @@ transmits with all USRPs that UHD supports: the USB B200 family and the network 
 
 - CMake finds UHD with `pkg-config` (the `uhd` module). If `pkg-config` does not find it, CMake
   uses the `UHDConfig.cmake` file of UHD.
-- wvt uses the C API of UHD (`uhd.h`). Thus the build does not need the Boost headers.
+- wvt uses the C API of UHD (`uhd.h`). But `uhd.h` includes `boost/config.hpp`, and the `uhd`
+  pkg-config module links `boost_system`. On Ubuntu 24.04, `libuhd-dev` gets them only through
+  its recommended package `gnuradio-dev`. With `--no-install-recommends`, install `libboost-dev`
+  and `libboost-system-dev`.
 - Without this backend, wvt cannot receive from a USRP, and the signal generator cannot transmit.
 
 Output: `wvt: UHD support enabled (UHD <version>)`.

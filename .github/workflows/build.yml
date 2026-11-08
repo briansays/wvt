@@ -196,6 +196,45 @@ jobs:
           ./build/wvt --list-devices
           if ./build/wvt --no-log-file --gpu on; then echo "--gpu on should fail without a GPU"; exit 1; fi
 
+  docker:
+    # The Docker image and the Compose file (docker/): the build and the
+    # self-checks in the image, then the image itself: a recording without a
+    # window, and a screenshot on an X server of the runner.
+    name: Docker image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: docker
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check the Compose file
+        run: |
+          docker compose config -q
+          docker compose --profile sdr --profile cuda --profile test config -q
+      - name: Build and run the self-checks (--target test)
+        run: docker build -f Dockerfile --target test --build-arg WVT_BUILD_HASH="${GITHUB_SHA::7}" ..
+      - name: Build the image
+        run: WVT_BUILD_HASH="${GITHUB_SHA::7}" docker compose build
+      - name: Record without a window
+        run: |
+          export WVT_UID=$(id -u) WVT_GID=$(id -g)
+          docker compose run --rm wvt --list-devices
+          docker compose run --rm wvt --device sim -c 100M -r 1M --no-gui --record /data/rec --record-duration 1
+          size=$(stat -c %s wvt-data/rec_*.sigmf-data)
+          test "$size" -eq 4000000 || { echo "the recording has $size bytes, not 4000000"; exit 1; }
+      - name: Screenshot on the X server of the runner (GLX, Mesa)
+        run: |
+          export WVT_UID=$(id -u) WVT_GID=$(id -g)
+          sudo apt-get $APT_OPTS update
+          sudo apt-get $APT_OPTS install -y xvfb
+          Xvfb :99 -screen 0 1600x950x24 -ac &
+          sleep 2
+          WVT_DISPLAY=:99 docker compose run --rm wvt --device sim -r 1M --screenshot /data/shot.ppm
+          grep -q "GLX renderer" wvt-data/logs/*.log || { echo "wvt did not use GLX"; exit 1; }
+          # A black image: the front buffer is not defined with Mesa on Xvfb (X11Window::readFrame).
+          python3 -c "import sys; d=open('wvt-data/shot.ppm','rb').read(); n=sum(1 for b in d[-1000000:] if b > 40); print(n, 'bright bytes'); sys.exit(n < 10000)"
+
   docs:
     name: Documentation (Sphinx)
     runs-on: ubuntu-24.04
