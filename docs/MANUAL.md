@@ -342,7 +342,10 @@ Output: `wvt: UHD support enabled (UHD <version>)`.
 Enables or disables the Signal Hound BB60 backend (`src/device/sdr_bb60.cpp`). It needs `bb_api`
 from the Signal Hound SDK. Refer to [Signal Hound BB60](#signal-hound-bb60).
 
-- CMake looks for `bb_api.h` and the library in `SIGNALHOUND_SDK_DIR`. It uses the library for the
+- CMake uses the first SDK folder in this list: `SIGNALHOUND_SDK_DIR`, the environment variable
+  `SIGNALHOUND_SDK_DIR`, `third_party/signal_hound_sdk`, `~/signal_hound_sdk`. It uses the last two
+  only if they hold `device_apis/bb_series/include/bb_api.h`.
+- CMake looks for `bb_api.h` and the library in that folder. It uses the library for the
   CPU of the build: Linux x86-64 (the newest version 5 library), Linux ARM64, or macOS ARM.
 - CMake copies the library into `build/bb_api/` under its run-time name. wvt finds it there
   through its rpath. On Linux x86-64, CMake also copies `libftd2xx.so`.
@@ -354,7 +357,9 @@ Output: `wvt: Signal Hound BB60 support enabled (bb_api 5.0.x, <library>)`.
 
 ##### SIGNALHOUND_SDK_DIR
 
-The folder of the extracted Signal Hound SDK, for example `$HOME/signal_hound_sdk`. A prefix
+The folder of the extracted Signal Hound SDK. You do not need it if the SDK is in
+`third_party/signal_hound_sdk` or `~/signal_hound_sdk`, or if the environment variable
+`SIGNALHOUND_SDK_DIR` is set. A prefix
 with `include/bb_api.h` and `lib/libbb_api.*` also works. If the library is installed in a system
 folder, such as `/usr/local/lib`, CMake finds it without this option.
 

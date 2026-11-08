@@ -244,8 +244,10 @@ endif()
 # Optional Signal Hound BB60 backend (issue #2) through bb_api from the Signal
 # Hound SDK. The SDK has no pkg-config file and ships the library versioned in
 # per-platform folders (Linux x86-64 and aarch64 .so, macOS arm64 .dylib), so
-# search SIGNALHOUND_SDK_DIR for the header and a library for this CPU. The
-# library is copied into the build folder under its runtime name, and wvt
+# search the SDK folder for the header and a library for this CPU. The SDK
+# folder is the first of SIGNALHOUND_SDK_DIR, $SIGNALHOUND_SDK_DIR,
+# third_party/signal_hound_sdk and ~/signal_hound_sdk (the last two only when
+# they hold device_apis/bb_series/include/bb_api.h). The library is copied into the build folder under its runtime name, and wvt
 # finds it there through its rpath. WVT_BB_SIM builds the backend against a
 # simulated device instead (tools/bb_sim), for CI and tests.
 # ---------------------------------------------------------------------------
@@ -265,24 +267,33 @@ if(WVT_BB_SIM)
 elseif(WVT_WITH_BB STREQUAL "OFF")
   set(WVT_BB_WHY "WVT_WITH_BB=OFF")
 else()
+  set(_bb_sdk "${SIGNALHOUND_SDK_DIR}")
+  if(NOT _bb_sdk)
+    set(_bb_sdk "$ENV{SIGNALHOUND_SDK_DIR}")
+  endif()
+  foreach(_d "${CMAKE_SOURCE_DIR}/third_party/signal_hound_sdk" "$ENV{HOME}/signal_hound_sdk")
+    if(NOT _bb_sdk AND EXISTS "${_d}/device_apis/bb_series/include/bb_api.h")
+      set(_bb_sdk "${_d}")
+    endif()
+  endforeach()
   find_path(BB_API_INCLUDE_DIR bb_api.h
-    HINTS ${SIGNALHOUND_SDK_DIR}
+    HINTS ${_bb_sdk}
     PATH_SUFFIXES include device_apis/bb_series/include bb_series/include)
-  find_library(BB_API_LIBRARY NAMES bb_api HINTS ${SIGNALHOUND_SDK_DIR} PATH_SUFFIXES lib lib64)
+  find_library(BB_API_LIBRARY NAMES bb_api HINTS ${_bb_sdk} PATH_SUFFIXES lib lib64)
   if(CMAKE_OSX_ARCHITECTURES)
     set(_bb_cpu "${CMAKE_OSX_ARCHITECTURES}")
   else()
     set(_bb_cpu "${CMAKE_SYSTEM_PROCESSOR}")
   endif()
-  if(NOT BB_API_LIBRARY AND SIGNALHOUND_SDK_DIR)
+  if(NOT BB_API_LIBRARY AND _bb_sdk)
     if(APPLE)
       if(_bb_cpu MATCHES "arm64")
-        file(GLOB_RECURSE _bb_libs "${SIGNALHOUND_SDK_DIR}/libbb_api*.dylib")
+        file(GLOB_RECURSE _bb_libs "${_bb_sdk}/libbb_api*.dylib")
       else()
         set(WVT_BB_WHY "the macOS bb_api is arm64 only; configure with -DCMAKE_OSX_ARCHITECTURES=arm64 (this build is ${_bb_cpu})")
       endif()
     else()
-      file(GLOB_RECURSE _bb_libs "${SIGNALHOUND_SDK_DIR}/libbb_api.so.*")
+      file(GLOB_RECURSE _bb_libs "${_bb_sdk}/libbb_api.so.*")
       set(_bb_keep "")
       foreach(_lib IN LISTS _bb_libs)
         string(TOLOWER "${_lib}" _l)
