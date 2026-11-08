@@ -1,0 +1,38 @@
+# The BB60 and Sidekiq backends: an override file for compose.yaml that gives the
+# vendor SDKs to the build. Refer to "Vendor SDKs" in README.md.
+#
+#   docker compose -f compose.yaml -f compose.vendor.yaml build
+#
+# or, in .env, COMPOSE_FILE=compose.yaml:compose.vendor.yaml and then the usual
+# commands (docker compose build, docker compose run --rm wvt-sdr).
+#
+# The images have the SDKs in them. The SDKs are not open source: do not publish
+# these images.
+#
+# Variables (from .env or the environment):
+#   WVT_SIDEKIQ_SDK      the Sidekiq SDK folder, the one with sidekiq_core/
+#                        (../third_party/sidekiq_sdk/sidekiq_sdk_v4.26.0)
+#   WVT_SIGNALHOUND_SDK  the Signal Hound SDK folder (../third_party/signal_hound_sdk)
+# To build only one of the two backends, set the other variable to ./no-sdk.
+
+x-vendor-build: &vendor-build
+  additional_contexts:
+    sidekiq_sdk: ${WVT_SIDEKIQ_SDK:-../third_party/sidekiq_sdk/sidekiq_sdk_v4.26.0}
+    signalhound_sdk: ${WVT_SIGNALHOUND_SDK:-../third_party/signal_hound_sdk}
+
+services:
+  wvt:
+    image: ${WVT_IMAGE:-wvt:vendor}
+    build: *vendor-build
+
+  wvt-sdr:
+    image: ${WVT_IMAGE:-wvt:vendor}
+    build: *vendor-build
+
+  wvt-cuda:
+    image: ${WVT_IMAGE:-wvt:cuda-vendor}
+    build: *vendor-build
+
+  test:
+    image: wvt:build-vendor
+    build: *vendor-build

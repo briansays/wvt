@@ -7,10 +7,12 @@ server of the computer.
 | File | Function |
 |---|---|
 | `compose.yaml` | The services: `wvt`, `wvt-sdr`, `wvt-cuda` and `test` |
+| `compose.vendor.yaml` | An override file that adds the BB60 and Sidekiq SDKs to the build. Refer to [Vendor SDKs](#vendor-sdks) |
 | `Dockerfile` | The image. The build context is the repository root |
 | `Dockerfile.dockerignore` | The files that the build does not get (BuildKit reads it next to the Dockerfile) |
 | `.env.example` | The settings for your computer. Copy it to `.env` |
 | `wvt-data/` | The default data folder, mounted at `/data` |
+| `no-sdk/` | An empty SDK folder, for a build with only one vendor SDK |
 
 The image has:
 
@@ -20,8 +22,8 @@ The image has:
 - Mesa, for OpenGL without a GPU. If OpenGL is not available, wvt uses its software renderer.
 - `zenity`, for the **Browse** buttons. The dialogs show the folders of the container.
 
-The image does not have the BB60 or Sidekiq backends, because their SDKs are not open source.
-Refer to [Vendor SDKs](#vendor-sdks).
+The image does not have the BB60 or Sidekiq backends, because their SDKs are not open source. To
+add them, use `compose.vendor.yaml`. Refer to [Vendor SDKs](#vendor-sdks).
 
 ## What you need
 
@@ -76,6 +78,9 @@ the source, use `docker compose build` or `docker compose run --build --rm wvt`.
 | `WVT_RENDER_GID` | `44` | `wvt-sdr`: the group of the GPU (`stat -c %g /dev/dri/renderD128`) |
 | `WVT_IMAGE` | `wvt:latest`, `wvt:cuda` | The image |
 | `WVT_BUILD_HASH` | `docker` | The commit in **Help > About** and in the log (`git rev-parse --short HEAD`) |
+| `COMPOSE_FILE` | `compose.yaml` | `compose.yaml:compose.vendor.yaml`: build and run with the vendor SDKs |
+| `WVT_SIDEKIQ_SDK` | `../third_party/sidekiq_sdk/sidekiq_sdk_v4.26.0` | `compose.vendor.yaml`: the Sidekiq SDK folder |
+| `WVT_SIGNALHOUND_SDK` | `../third_party/signal_hound_sdk` | `compose.vendor.yaml`: the Signal Hound SDK folder |
 
 You can also set a variable for one command: `WVT_DATA=~/captures docker compose run --rm wvt`.
 
@@ -178,7 +183,48 @@ WVT_BUILD_HASH=$(git rev-parse --short HEAD) docker compose build
 
 ### Vendor SDKs
 
-To build the BB60 or the Sidekiq backend, give the SDK folder to the build as a build context:
+The BB60 and Sidekiq backends need the SDKs from Signal Hound and Epiq Solutions. The SDKs are not
+open source, so they are not in the repository and not in the default image. `compose.vendor.yaml`
+gives the SDK folders to the build as build contexts.
+
+1. Unpack the SDKs on the computer that builds the image. The defaults are the folders that
+   `build/wvt` also uses:
+
+   | SDK | Default folder | The folder must have |
+   |---|---|---|
+   | Sidekiq | `third_party/sidekiq_sdk/sidekiq_sdk_v4.26.0` | `sidekiq_core/inc/sidekiq_api.h` |
+   | Signal Hound | `third_party/signal_hound_sdk` | `bb_api.h` and `libbb_api.so.*` (in a subfolder) |
+
+   For different folders, set `WVT_SIDEKIQ_SDK` and `WVT_SIGNALHOUND_SDK` in `.env`. A relative
+   path is relative to this folder.
+
+2. In `.env`, select the override file:
+
+   ```sh
+   COMPOSE_FILE=compose.yaml:compose.vendor.yaml
+   ```
+
+3. Build and run as usual:
+
+   ```sh
+   docker compose build                     # the image wvt:vendor
+   docker compose build wvt-cuda            # the image wvt:cuda-vendor
+   docker compose run --rm wvt-sdr          # the BB60 and the Sidekiq need wvt-sdr or wvt-cuda
+   ```
+
+   Or, without `COMPOSE_FILE`:
+   `docker compose -f compose.yaml -f compose.vendor.yaml build`.
+
+The build log shows `Signal Hound BB60 support enabled` and `Sidekiq support enabled` when it
+finds the SDKs. If it does not find an SDK, the build continues without that backend. To stop the
+build instead, add the build argument
+`WVT_CMAKE_ARGS: "-DWVT_WITH_BB=ON -DWVT_WITH_SKIQ=ON"` to `x-vendor-build` in `compose.vendor.yaml`
+(under `args:`).
+
+To build only one of the two backends, set the variable of the other SDK to `./no-sdk` (an empty
+folder). For example, only the BB60: `WVT_SIDEKIQ_SDK=./no-sdk`.
+
+With `docker build`, from the repository root:
 
 ```sh
 docker build -f docker/Dockerfile -t wvt:vendor \
@@ -186,11 +232,19 @@ docker build -f docker/Dockerfile -t wvt:vendor \
     --build-context signalhound_sdk=third_party/signal_hound_sdk .
 ```
 
-Then set `WVT_IMAGE=wvt:vendor` in `.env`.
+> **Warning:** An image with a vendor SDK has the SDK in it. Do not push this image to a public
+> registry. To copy it to a different computer, use `docker save` (refer to
+> [Copy the image to a different computer](#copy-the-image-to-a-different-computer)) or a private
+> registry.
 
-> **Warning:** An image with a vendor SDK has the SDK in it. Do not publish this image.
+On the computer that runs the image:
 
-The Sidekiq card also needs the kernel drivers of the SDK on the host.
+- **BB60:** a USB device. Use `wvt-sdr` or `wvt-cuda`, and install the udev rule of the Signal Hound
+  SDK on the host.
+- **Sidekiq on USB:** use `wvt-sdr` or `wvt-cuda`.
+- **Sidekiq on PCIe** (M.2, mPCIe, X2, X4): load the kernel drivers of the Sidekiq SDK on the host.
+  `compose.yaml` does not give the PCIe device files to the container. Find them on the host after
+  the drivers load, then add them to `devices:` of the service in `compose.vendor.yaml`.
 
 ### Copy the image to a different computer
 
@@ -200,8 +254,8 @@ docker save wvt:latest | gzip > wvt-image.tar.gz
 docker load < wvt-image.tar.gz
 ```
 
-Then copy this folder to the other computer. Set `WVT_CONFIG_DIR` in `.env` to a config folder
-there. The image is for the CPU type of the computer that built it (`amd64` or `arm64`).
+Use the image name that you built, for example `wvt:vendor`. Then copy this folder to the other
+computer. Set `WVT_CONFIG_DIR` in `.env` to a config folder there. The image is for the CPU type of the computer that built it (`amd64` or `arm64`).
 
 ## Problems
 
