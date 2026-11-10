@@ -15,6 +15,7 @@
 #include <sstream>
 
 #include "common/paths.h"
+#include "net/zmq_format_proto.h"
 
 namespace {
 
@@ -269,6 +270,7 @@ struct Parser {
     std::set<std::string> seen;
     bool haveSocket = false, haveTransport = false, haveMode = false, haveSamples = false;
     bool haveTopic = false, haveGroup = false, haveFixedRate = false;
+    bool haveHeaderKeys = false, haveProtoKeys = false, haveEndian = false, haveOrder = false;
     // The fields that are set, with their names, for the header size check.
     std::vector<std::pair<std::string, const FormatField*>> fields;
 
@@ -376,15 +378,131 @@ struct Parser {
         return true;
     }
 
+    // "6" or "6.1": field numbers, the second in the sub-message of the first.
+    bool protoPath(const std::string& key, const std::string& text, std::vector<uint32_t>& path) {
+        path.clear();
+        const std::string t = trim(text);
+        size_t at = 0;
+        while (true) {
+            const size_t dot = t.find('.', at);
+            const std::string part = t.substr(at, dot == std::string::npos ? std::string::npos : dot - at);
+            errno = 0;
+            const unsigned long long v = part.empty() || part.size() > 10 || part.find_first_not_of("0123456789") != std::string::npos
+                                             ? 0
+                                             : std::strtoull(part.c_str(), nullptr, 10);
+            if (v < 1 || v > pb::kMaxField)
+                return fail(key + ": bad field number '" + part + "' in '" + t +
+                            "' (1 to 536870911; a field in a sub-message is 6.1)");
+            path.push_back((uint32_t)v);
+            if (path.size() > kMaxProtoPath) return fail(key + ": more than " + std::to_string(kMaxProtoPath) + " field numbers");
+            if (dot == std::string::npos) return true;
+            at = dot + 1;
+        }
+    }
+
+    static std::vector<std::string> words(const std::string& s) {
+        std::vector<std::string> out;
+        std::istringstream in(s);
+        for (std::string w; in >> w;) out.push_back(w);
+        return out;
+    }
+
+    // "TYPE PATH [* SCALE]"; for the arrays "[packed | unpacked] TYPE PATH".
+    enum class Role { Number, Counter, Array, Bytes };  // Bytes: samples, which may be bytes
+    bool protoField(const std::string& key, const std::string& value, ProtoField& out, Role role) {
+        ProtoField fld;
+        std::string v = value;
+        if (const size_t star = v.find('*'); star != std::string::npos) {
+            if (role != Role::Number) return fail(key + ": a scale is allowed only for fc, rate, gain and time_ns");
+            if (!parseNumber(trim(v.substr(star + 1)), fld.scale) || fld.scale == 0)
+                return fail(key + ": bad scale '" + trim(v.substr(star + 1)) + "'");
+            v = v.substr(0, star);
+        }
+        std::vector<std::string> w = words(v);
+        bool packing = false;
+        if (!w.empty() && (role == Role::Array || role == Role::Bytes) && (lower(w[0]) == "packed" || lower(w[0]) == "unpacked")) {
+            fld.packed = lower(w[0]) == "packed";
+            packing = true;
+            w.erase(w.begin());
+        }
+        if (w.size() != 2) return fail(key + ": write TYPE FIELD, e.g. double 3, or uint32 6.1 for a field in a sub-message");
+        if (!parseProtoType(lower(w[0]), fld.type))
+            return fail(key + ": unknown type '" + w[0] + "' (double, float, int32, int64, uint32, uint64, sint32, sint64, "
+                              "fixed32, fixed64, sfixed32, sfixed64, bool, enum, bytes, string)");
+        const ProtoType t = fld.type;
+        switch (role) {
+            case Role::Number:
+                if (!protoIsFloat(t) && !protoIsInteger(t)) return fail(key + ": must be a number type, not " + w[0]);
+                break;
+            case Role::Counter:
+                if (!protoIsInteger(t)) return fail(key + ": must be an integer type (int32 ... sfixed64), not " + w[0]);
+                break;
+            case Role::Array:
+            case Role::Bytes:
+                if (t == ProtoType::Bytes && role == Role::Bytes) {
+                    if (packing) return fail(key + ": packed and unpacked are for number arrays, not bytes");
+                    break;
+                }
+                if (!protoIsFloat(t) && !protoIsInteger(t))
+                    return fail(key + ": the samples are " + (role == Role::Bytes ? "bytes, or " : "") +
+                                "an array of float, double or an integer type, not " + w[0]);
+                break;
+        }
+        if (!protoPath(key, w[1], fld.path)) return false;
+        fld.set = true;
+        out = fld;
+        return true;
+    }
+
+    // "TYPE PATH == VALUE", "string PATH == \"text\"" or "present PATH".
+    bool protoMatch(const std::string& key, const std::string& raw) {
+        ProtoMatch m;
+        m.name = key.substr(6);
+        if (m.name.empty()) return fail("match: write match.NAME = ...");
+        if (f.proto.matches.size() >= 32) return fail(key + ": at most 32 matches");
+        const size_t eq = raw.find("==");
+        const std::vector<std::string> w = words(eq == std::string::npos ? raw : raw.substr(0, eq));
+        if (w.size() == 2 && lower(w[0]) == "present" && eq == std::string::npos) {
+            m.kind = ProtoMatch::Kind::Present;
+            if (!protoPath(key, w[1], m.path)) return false;
+        } else {
+            if (w.size() != 2 || eq == std::string::npos)
+                return fail(key + ": write TYPE FIELD == VALUE, string FIELD == \"text\", or present FIELD");
+            if (!parseProtoType(lower(w[0]), m.type)) return fail(key + ": unknown type '" + w[0] + "'");
+            if (!protoPath(key, w[1], m.path)) return false;
+            const std::string v = trim(raw.substr(eq + 2));
+            if (m.type == ProtoType::String || m.type == ProtoType::Bytes) {
+                if (v.size() < 2 || v.front() != '"' || v.back() != '"') return fail(key + ": write the text in quotes");
+                m.kind = ProtoMatch::Kind::Text;
+                m.text = v.substr(1, v.size() - 2);
+            } else {
+                m.kind = ProtoMatch::Kind::Value;
+                std::string e;
+                if (!protoRawFromText(m.type, v, m.raw, e)) return fail(key + ": " + e);
+            }
+        }
+        if (std::any_of(f.proto.matches.begin(), f.proto.matches.end(), [&](const ProtoMatch& x) { return x.name == m.name; }))
+            return fail(key + " is set twice");
+        f.proto.matches.push_back(m);
+        return true;
+    }
+
     bool key(const std::string& k, const std::string& raw) {
         const std::string v = unquote(raw);
         const std::string lv = lower(v);
         if (!seen.insert(section + "." + k).second && k.rfind("match.", 0) != 0)
             warn(k + " is set twice in [" + section + "]; the last value is used");
         if (section == "format") {
-            if (k == "name") f.name = v;
-            else if (k == "description") f.description = v;
-            else unknownKey(k, {"name", "description"});
+            if (k == "name") {
+                f.name = v;
+            } else if (k == "description") {
+                f.description = v;
+            } else if (k == "encoding") {
+                if (lv != "binary" && lv != "protobuf") return fail("encoding: '" + v + "' is not binary or protobuf");
+                f.encoding = lv == "protobuf" ? FormatEncoding::Protobuf : FormatEncoding::Binary;
+            } else {
+                unknownKey(k, {"name", "description", "encoding"});
+            }
         } else if (section == "socket") {
             if (k == "type") {
                 haveSocket = true;
@@ -429,6 +547,7 @@ struct Parser {
                 unknownKey(k, {"type", "transport", "mode", "address", "topic", "group", "frames", "max_bytes"});
             }
         } else if (section == "header") {
+            haveHeaderKeys = true;
             if (k == "bytes") {
                 uint64_t n = 0;
                 bool neg = false;
@@ -470,14 +589,31 @@ struct Parser {
                 }
                 if (!found) return fail("format: '" + v + "' is not cu8, ci8, ci16, ci32, cf32 or cf64");
             } else if (k == "endian") {
+                haveEndian = true;
                 if (lv != "little" && lv != "big") return fail("endian: '" + v + "' is not little or big");
                 f.bigEndian = lv == "big";
             } else if (k == "order") {
+                haveOrder = true;
                 if (lv != "iq" && lv != "qi") return fail("order: '" + v + "' is not iq or qi");
                 f.swapIQ = lv == "qi";
             } else {
                 unknownKey(k, {"format", "endian", "order"});
             }
+        } else if (section == "protobuf") {
+            haveProtoKeys = true;
+            ProtoLayout& L = f.proto;
+            if (k.rfind("match.", 0) == 0) return protoMatch(k, raw);
+            if (k == "fc") return protoField(k, v, L.fc, Role::Number);
+            if (k == "rate") return protoField(k, v, L.rate, Role::Number);
+            if (k == "gain") return protoField(k, v, L.gain, Role::Number);
+            if (k == "time_ns") return protoField(k, v, L.timeNs, Role::Number);
+            if (k == "index") return protoField(k, v, L.index, Role::Counter);
+            if (k == "seq") return protoField(k, v, L.seq, Role::Counter);
+            if (k == "samples") return protoField(k, v, L.samples, Role::Bytes);
+            if (k == "i") return protoField(k, v, L.i, Role::Array);
+            if (k == "q") return protoField(k, v, L.q, Role::Array);
+            if (k == "count") warn("count is not used: the length of the samples field gives the count");
+            else unknownKey(k, {"fc", "rate", "gain", "time_ns", "index", "seq", "samples", "i", "q"});
         } else if (section == "stream") {
             double d = 0;
             if (k != "rate" && k != "fc" && k != "gain") {
@@ -512,8 +648,8 @@ struct Parser {
                 if (l.back() != ']') return fail("a section is [name]");
                 section = lower(trim(l.substr(1, l.size() - 2)));
                 if (section != "format" && section != "socket" && section != "header" && section != "samples" &&
-                    section != "stream") {
-                    warn("unknown section [" + section + "] (format, socket, header, samples, stream); its keys are ignored");
+                    section != "stream" && section != "protobuf") {
+                    warn("unknown section [" + section + "] (format, socket, header, protobuf, samples, stream); its keys are ignored");
                 }
                 continue;
             }
@@ -525,6 +661,77 @@ struct Parser {
         }
         line = 0;
         return check();
+    }
+
+    // The checks of a protobuf format that need the whole file.
+    template <class Fail>
+    bool checkProto(Fail&& failFile) {
+        ProtoLayout& L = f.proto;
+        if (haveHeaderKeys) return failFile("[header] is for encoding = binary; a protobuf format uses [protobuf]");
+        if (L.samples.set && (L.i.set || L.q.set)) return failFile("set samples, or i and q, in [protobuf], not both");
+        if (!L.samples.set && !(L.i.set && L.q.set))
+            return failFile("the samples are missing: set samples (I and Q in one field), or i and q, in [protobuf]");
+        if (L.i.set && L.i.type != L.q.type) return failFile("i and q must have the same type");
+        const ProtoType et = L.samples.set ? L.samples.type : L.i.type;
+        if (et == ProtoType::Bytes) {
+            if (!haveSamples) return failFile("[samples] format is missing (samples is bytes: [samples] gives their layout)");
+        } else if (protoIsFloat(et)) {
+            if (haveSamples && f.sampleFmt != SampleFormat::CF32 && f.sampleFmt != SampleFormat::CF64)
+                warnings.push_back(name + ": [samples] format is not used: the samples are " + protoTypeName(et));
+            f.sampleFmt = et == ProtoType::Float ? SampleFormat::CF32 : SampleFormat::CF64;
+        } else {
+            if (!haveSamples) f.sampleFmt = SampleFormat::CI16;
+            if (f.sampleFmt != SampleFormat::CU8 && f.sampleFmt != SampleFormat::CI8 && f.sampleFmt != SampleFormat::CI16 &&
+                f.sampleFmt != SampleFormat::CI32)
+                return failFile(std::string("[samples] format: ") + protoTypeName(et) +
+                                " samples are values of cu8, ci8, ci16 or ci32");
+            if (!protoIsSigned(et) && f.sampleFmt != SampleFormat::CU8)
+                return failFile(std::string(protoTypeName(et)) + " has no negative values: use a signed type (sint32), or format = cu8");
+        }
+        if (et != ProtoType::Bytes) {
+            if (haveEndian) warnings.push_back(name + ": [samples] endian is not used: protobuf numbers are little endian");
+            f.bigEndian = false;
+        }
+        if (L.i.set) {
+            if (haveOrder) warnings.push_back(name + ": [samples] order is not used with i and q");
+            f.swapIQ = false;
+        }
+        if (!L.rate.set && !haveFixedRate) return failFile("the sample rate is missing: set rate in [protobuf] or in [stream]");
+        if (L.index.set && L.seq.set) return failFile("set index or seq in [protobuf], not both");
+
+        // Each field once; only a "present" match may hold other fields.
+        struct Use {
+            std::string name;
+            const std::vector<uint32_t>* path;
+            bool present;
+        };
+        std::vector<Use> uses;
+        const std::pair<const char*, const ProtoField*> fields[] = {
+            {"fc", &L.fc}, {"rate", &L.rate}, {"gain", &L.gain}, {"time_ns", &L.timeNs}, {"index", &L.index},
+            {"seq", &L.seq}, {"samples", &L.samples}, {"i", &L.i}, {"q", &L.q}};
+        for (const auto& [n, fld] : fields)
+            if (fld->set) uses.push_back({n, &fld->path, false});
+        for (const ProtoMatch& m : L.matches)
+            uses.push_back({"match." + m.name, &m.path, m.kind == ProtoMatch::Kind::Present});
+        auto text = [](const std::vector<uint32_t>& p) {
+            std::string s;
+            for (uint32_t x : p) s += (s.empty() ? "" : ".") + std::to_string(x);
+            return s;
+        };
+        for (size_t a = 0; a < uses.size(); ++a) {
+            for (size_t b = 0; b < uses.size(); ++b) {
+                if (a == b) continue;
+                const auto& pa = *uses[a].path;
+                const auto& pb2 = *uses[b].path;
+                if (a < b && pa == pb2)
+                    return failFile(uses[a].name + " and " + uses[b].name + " are both field " + text(pa));
+                if (pa.size() < pb2.size() && std::equal(pa.begin(), pa.end(), pb2.begin()) && !uses[a].present)
+                    return failFile(uses[b].name + " (field " + text(pb2) + ") is inside " + uses[a].name + " (field " +
+                                    text(pa) + "), which is not a sub-message");
+            }
+        }
+        if (f.name.empty()) f.name = f.id.empty() ? name : f.id;
+        return true;
     }
 
     // The checks that need the whole file.
@@ -542,6 +749,8 @@ struct Parser {
         if (f.socket == FormatSocket::Dish && !f.bind) return failFile("type = dish receives with mode = bind");
         if (haveTopic && f.socket != FormatSocket::Sub) warnings.push_back(name + ": topic is used only with type = sub");
         if (haveGroup && f.socket != FormatSocket::Dish) warnings.push_back(name + ": group is used only with type = dish");
+        if (f.encoding == FormatEncoding::Protobuf) return checkProto(failFile);
+        if (haveProtoKeys) return failFile("[protobuf] is used only with encoding = protobuf in [format]");
         if (!haveSamples) return failFile("[samples] format is missing");
         if (!f.rate.set && !haveFixedRate)
             return failFile("the sample rate is missing: set rate in [header] or in [stream]");
@@ -688,6 +897,7 @@ bool decodeStreamMessage(const StreamFormat& f, const uint8_t* p, size_t n, Stre
         why = "too large (" + std::to_string(n) + " bytes; max_bytes = " + std::to_string(f.maxBytes) + ")";
         return false;
     }
+    if (f.encoding == FormatEncoding::Protobuf) return decodeProtoMessage(f, p, n, m, extra, scratch, why);
     if (n < f.headerBytes) {
         why = "too short (" + std::to_string(n) + " bytes, the header is " + std::to_string(f.headerBytes) + ")";
         return false;
@@ -764,23 +974,29 @@ bool decodeStreamMessage(const StreamFormat& f, const uint8_t* p, size_t n, Stre
     }
     h.count = (uint32_t)count;  // at most kMaxMaxBytes / 2
 
-    const SampleFormat out = h.fmt;
-    if (out == f.sampleFmt && !f.swapIQ && (!f.bigEndian || bps == 2)) {
+    decodeSampleBody(f.sampleFmt, f.bigEndian, f.swapIQ, h.fmt, body, count, m, scratch);
+    return true;
+}
+
+void decodeSampleBody(SampleFormat fmt, bool bigEndian, bool swapIQ, SampleFormat ring, const uint8_t* body,
+                      size_t count, StreamMessage& m, std::vector<uint8_t>& scratch) {
+    const auto bps = (size_t)formatBytesPerSample(fmt);
+    if (ring == fmt && !swapIQ && (!bigEndian || bps == 2)) {
         // The ring's format as it is (cu8 has no byte order).
         m.samples = count ? body : nullptr;
         m.sampleBytes = count * bps;
-        return true;
+        return;
     }
-    if (out == f.sampleFmt) {
+    if (ring == fmt) {
         // The same format, with the bytes or I and Q in another order.
         scratch.resize(count * bps);
-        reorderSamples(body, scratch.data(), count, bps, f.swapIQ, f.bigEndian && bps > 2);
+        reorderSamples(body, scratch.data(), count, bps, swapIQ, bigEndian && bps > 2);
     } else {
         // Another format: to cf32.
         FormatParams fp;
-        fp.fmt = f.sampleFmt;
-        fp.bigEndian = f.bigEndian;
-        fp.swapIQ = f.swapIQ;
+        fp.fmt = fmt;
+        fp.bigEndian = bigEndian;
+        fp.swapIQ = swapIQ;
         thread_local std::vector<std::complex<float>> tmp;
         tmp.resize(count);
         decodeSamples(fp, body, (int64_t)count, tmp.data());
@@ -789,7 +1005,32 @@ bool decodeStreamMessage(const StreamFormat& f, const uint8_t* p, size_t n, Stre
     }
     m.samples = count ? scratch.data() : nullptr;
     m.sampleBytes = scratch.size();
-    return true;
+}
+
+void encodeSampleBody(SampleFormat fmt, bool bigEndian, bool swapIQ, SampleFormat native, const uint8_t* samples,
+                      size_t count, uint8_t* body) {
+    const auto bps = (size_t)formatBytesPerSample(fmt);
+    const bool swapBytes = bigEndian && bps > 2;
+    if (native == fmt && !swapIQ && !swapBytes) {
+        memcpy(body, samples, count * bps);
+    } else if (native == fmt) {
+        reorderSamples(samples, body, count, bps, swapIQ, swapBytes);
+    } else {
+        // Through cf32, as the decoder does the other way.
+        thread_local std::vector<std::complex<float>> tmp;
+        thread_local std::vector<uint8_t> packed;
+        tmp.resize(count);
+        FormatParams fp;
+        fp.fmt = native;
+        decodeSamples(fp, samples, (int64_t)count, tmp.data());
+        if (!swapIQ && !swapBytes) {
+            encodeSamples(fmt, tmp.data(), (int64_t)count, body);
+        } else {
+            packed.resize(count * bps);
+            encodeSamples(fmt, tmp.data(), (int64_t)count, packed.data());
+            reorderSamples(packed.data(), body, count, bps, swapIQ, swapBytes);
+        }
+    }
 }
 
 namespace {
@@ -818,6 +1059,27 @@ std::string streamFormatSummary(const StreamFormat& f) {
         s += f.address;
     }
     if (f.builtin) return s + ", the wvt header";
+    if (f.encoding == FormatEncoding::Protobuf) {
+        // "protobuf, float samples in field 10", "protobuf, sint32 i and q in fields 4.1 and 4.2 (ci16)"
+        const ProtoLayout& L = f.proto;
+        auto path = [](const ProtoField& x) {
+            std::string t;
+            for (uint32_t n : x.path) t += (t.empty() ? "" : ".") + std::to_string(n);
+            return t;
+        };
+        const ProtoField& a = L.samples.set ? L.samples : L.i;
+        s += ", protobuf, ";
+        s += protoTypeName(a.type);
+        s += L.samples.set ? " samples in field " + path(a) : " i and q in fields " + path(L.i) + " and " + path(L.q);
+        if (!protoIsFloat(a.type)) {
+            s += " (";
+            s += formatName(f.sampleFmt);
+            if (f.bigEndian) s += " big endian";
+            s += ")";
+        }
+        if (f.swapIQ) s += " (Q, I)";
+        return s;
+    }
     s += ", ";
     s += formatName(f.sampleFmt);
     if (f.bigEndian) s += " big endian";
@@ -899,6 +1161,14 @@ bool formatEndpoint(const StreamFormat& f, const std::string& typed, FormatEndpo
 
 int fieldTypeBits(FieldType t) { return 8 * typeBytes(t); }
 
+int streamSeqBits(const StreamFormat& f) {
+    return f.encoding == FormatEncoding::Protobuf ? protoCounterBits(f.proto.seq.type) : fieldTypeBits(f.seq.type);
+}
+
+bool streamRateInMessage(const StreamFormat& f) {
+    return f.encoding == FormatEncoding::Protobuf ? f.proto.rate.set : f.rate.set;
+}
+
 MessageCounter::MessageCounter(int bits) : mask_(bits >= 64 ? ~0ULL : (1ULL << bits) - 1) {}
 
 MessageCounter::Result MessageCounter::next(uint64_t seq) {
@@ -951,15 +1221,28 @@ bool checkPublishFormat(const StreamFormat& f, std::string& err) {
         return false;
     }
     if (publishMaxSamples(f) == 0) {
-        err = "the format '" + f.name + "': no sample fits in a message after the header of " +
-              std::to_string(f.headerBytes) + " bytes";
+        err = "the format '" + f.name + "': no sample fits in a message" +
+              (f.encoding == FormatEncoding::Protobuf ? std::string(" (max_bytes)")
+                                                      : " after the header of " + std::to_string(f.headerBytes) + " bytes");
         return false;
     }
     return true;
 }
 
+size_t publishMaxBytes(const StreamFormat& f) {
+    if (f.builtin) return kDatagramBytes;
+    const size_t limit = f.socket == FormatSocket::Dish ? kDatagramBytes : std::min(f.maxBytes, kTcpMessageBytes);
+    if (f.encoding == FormatEncoding::Protobuf) {
+        size_t bytes = 0;
+        protoMaxSamples(f, limit, &bytes);
+        return bytes;
+    }
+    return f.headerBytes + publishMaxSamples(f) * (size_t)formatBytesPerSample(f.sampleFmt);
+}
+
 size_t publishMaxSamples(const StreamFormat& f) {
     const size_t limit = f.socket == FormatSocket::Dish ? kDatagramBytes : std::min(f.maxBytes, kTcpMessageBytes);
+    if (f.encoding == FormatEncoding::Protobuf) return protoMaxSamples(f, std::min(limit, f.maxBytes));
     const auto bps = (size_t)formatBytesPerSample(f.sampleFmt);
     size_t n = limit > f.headerBytes ? (limit - f.headerBytes) / bps : 0;
     if (f.count.set) {
@@ -977,6 +1260,7 @@ bool publishEndpoint(const StreamFormat& f, const std::string& typed, FormatEndp
 
 bool encodeStreamMessage(const StreamFormat& f, const StreamHeader& h, uint64_t seq, SampleFormat native,
                          const uint8_t* samples, size_t count, std::vector<uint8_t>& out, std::string& why) {
+    if (f.encoding == FormatEncoding::Protobuf) return encodeProtoMessage(f, h, seq, native, samples, count, out, why);
     const auto bps = (size_t)formatBytesPerSample(f.sampleFmt);
     out.assign(f.headerBytes + count * bps, 0);
     uint8_t* p = out.data();
@@ -994,29 +1278,7 @@ bool encodeStreamMessage(const StreamFormat& f, const StreamHeader& h, uint64_t 
     if (f.count.set && !writeNumber(f.count, (double)count, "count", p, why)) return false;
     for (const FormatMatch& m : f.matches) std::copy(m.bytes.begin(), m.bytes.end(), p + m.offset);
 
-    if (count == 0) return true;
-    uint8_t* body = p + f.headerBytes;
-    const bool swapBytes = f.bigEndian && bps > 2;
-    if (native == f.sampleFmt && !f.swapIQ && !swapBytes) {
-        memcpy(body, samples, count * bps);
-    } else if (native == f.sampleFmt) {
-        reorderSamples(samples, body, count, bps, f.swapIQ, swapBytes);
-    } else {
-        // Through cf32, as the decoder does the other way.
-        thread_local std::vector<std::complex<float>> tmp;
-        thread_local std::vector<uint8_t> packed;
-        tmp.resize(count);
-        FormatParams fp;
-        fp.fmt = native;
-        decodeSamples(fp, samples, (int64_t)count, tmp.data());
-        if (!f.swapIQ && !swapBytes) {
-            encodeSamples(f.sampleFmt, tmp.data(), (int64_t)count, body);
-        } else {
-            packed.resize(count * bps);
-            encodeSamples(f.sampleFmt, tmp.data(), (int64_t)count, packed.data());
-            reorderSamples(packed.data(), body, count, bps, f.swapIQ, swapBytes);
-        }
-    }
+    if (count) encodeSampleBody(f.sampleFmt, f.bigEndian, f.swapIQ, native, samples, count, p + f.headerBytes);
     return true;
 }
 

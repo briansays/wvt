@@ -1,0 +1,30 @@
+// The example schema of config/zmq_protobuf_iq.ini (issue #118). wvt does
+// not read this file: the format file names the fields by their numbers.
+// It is here to show a sender what to send, and to test with protoc:
+//
+//   protoc --encode=wvt.example.Envelope protobuf_iq.proto < message.txt > message.bin
+syntax = "proto3";
+
+package wvt.example;
+
+// Each ZMQ message is one Envelope. A source can send other messages (here
+// a status text) on the same socket; wvt uses only the ones with samples.
+message Envelope {
+  oneof body {
+    Status status = 1;
+    IqData iq = 2;
+  }
+}
+
+message Status {
+  string text = 1;
+}
+
+message IqData {
+  uint64 seq = 1;             // 1 more in each message: wvt finds lost messages
+  double fc_hz = 2;           // center frequency
+  double rate_hz = 3;         // sample rate, S/s
+  float gain_db = 4;
+  fixed64 time_ns = 5;        // time of the first sample, ns since 1970
+  repeated float samples = 6; // I, Q, I, Q ... (packed, full scale 1.0)
+}

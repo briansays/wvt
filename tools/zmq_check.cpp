@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "common/sample_ring.h"
+#include "net/protobuf_wire.h"
 #include "net/zmq_format.h"
 #include "net/zmq_pub.h"
 #include "net/zmq_wire.h"
@@ -409,7 +410,7 @@ void checkFormats() {
 
     // The examples in config/.
     const auto list = scanStreamFormats(WVT_CONFIG_EXAMPLES);
-    bool allOk = list.size() == 5;
+    bool allOk = list.size() == 6;
     std::string bad;
     for (const auto& e : list) {
         if (!e.ok() || !e.warnings.empty()) {
@@ -417,7 +418,7 @@ void checkFormats() {
             bad += " " + e.format.id + ": " + e.error + (e.warnings.empty() ? "" : e.warnings[0]);
         }
     }
-    check(allOk, "the 4 example files load without errors or warnings" + bad);
+    check(allOk, "the 5 example files load without errors or warnings" + bad);
     const auto* gr = findStreamFormat(list, "gnuradio_sub_cf32");
     const auto* raw = findStreamFormat(list, "raw_pull_ci16");
     const auto* ex = findStreamFormat(list, "example_header");
@@ -856,6 +857,288 @@ void checkEncode() {
     setStreamFormatDir("");
 }
 
+// ---- Protobuf message formats (issue #118) ---------------------------------
+
+std::vector<uint8_t> fromHex(const char* hex) {
+    std::vector<uint8_t> v;
+    for (const char* c = hex; c[0] && c[1]; c += 2) {
+        auto nib = [](char x) { return x <= '9' ? x - '0' : x - 'a' + 10; };
+        v.push_back((uint8_t)(nib(c[0]) << 4 | nib(c[1])));
+    }
+    return v;
+}
+
+float f32At(const uint8_t* p, size_t i) {
+    float v = 0;
+    memcpy(&v, p + 4 * i, 4);
+    return v;
+}
+
+void checkProtobufWire() {
+    printf("protobuf wire format (issue #118)\n");
+    std::string why;
+    uint64_t v = 0;
+    const uint8_t max[] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01};
+    check(pb::readVarint(max, 10, v) == 10 && v == ~0ULL, "a 10-byte varint is 2^64 - 1");
+    const uint8_t longer[] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01};
+    check(pb::readVarint(longer, 11, v) == 0, "an 11-byte varint is rejected");
+    check(pb::readVarint(max, 3, v) == 0, "a varint that is cut off is rejected");
+    bool zz = true;
+    for (int64_t x : {0LL, 1LL, -1LL, 63LL, -64LL, 2147483647LL, -2147483648LL, INT64_MAX, INT64_MIN})
+        zz = zz && pb::unzigzag(pb::zigzag(x)) == x;
+    check(zz && pb::zigzag(-1) == 1 && pb::zigzag(1) == 2, "zigzag");
+    std::vector<uint8_t> out;
+    for (uint64_t x : {0ULL, 127ULL, 128ULL, 300ULL, ~0ULL}) {
+        out.clear();
+        pb::putVarint(out, x);
+        check(out.size() == pb::varintSize(x) && pb::readVarint(out.data(), out.size(), v) == out.size() && v == x,
+              "varint " + std::to_string(x) + " round trip in " + std::to_string(out.size()) + " bytes");
+    }
+
+    auto reads = [&](const std::vector<uint8_t>& m, std::string& w) {
+        pb::Reader r(m.data(), m.size());
+        pb::Field f;
+        while (r.next(f, w)) {
+        }
+        return w.empty();
+    };
+    check(reads(fromHex("0807120268691d0000803f"), why), "varint, len and i32 fields " + why);
+    check(reads(fromHex("0805"), why), "one varint field");
+    check(!reads(fromHex("0a05010203"), why) && why.find("past the end") != std::string::npos, "a length past the end: " + why);
+    check(!reads(fromHex("0b"), why) && why.find("group") != std::string::npos, "a group: " + why);
+    check(!reads(fromHex("0001"), why) && why.find("field number 0") != std::string::npos, "field number 0: " + why);
+    check(!reads(fromHex("0d0000"), why) && why.find("cut off") != std::string::npos, "an i32 that is cut off: " + why);
+}
+
+void checkProtobufFormats() {
+    printf("protobuf message formats (issue #118)\n");
+    setStreamFormatDir(WVT_CONFIG_EXAMPLES);
+    std::string err, why;
+    std::vector<std::string> warn;
+    std::vector<uint8_t> scratch;
+    StreamMessage m;
+    FormatExtra extra;
+
+    // The example, with a message from protoc (config/protobuf_iq.proto):
+    // iq { seq: 7 fc_hz: 915e6 rate_hz: 2.4e6 gain_db: -12.5
+    //      time_ns: 1793750400123456789 samples: [0.5, -0.25, 1, 0] }
+    StreamFormat ex;
+    check(resolveStreamFormat("protobuf_iq", ex, err) && ex.encoding == FormatEncoding::Protobuf,
+          "protobuf_iq.ini loads " + err);
+    check(streamFormatSummary(ex) == "sub, tcp connect 127.0.0.1:5558, protobuf, float samples in field 2.6",
+          "summary: " + streamFormatSummary(ex));
+    const std::vector<uint8_t> iq = fromHex(
+        "123408071100000060e544cb411900000000804f42412500004" "8c1" "2915cd12377caee4183210"
+        "0000003f000080be0000803f00000000");
+    check(decodes(ex, iq, m, scratch, &why, &extra), "the protoc message decodes " + why);
+    check(m.h.fc == 915e6 && m.h.rate == 2.4e6 && m.h.gain == -12.5 && m.h.timeNs == 1793750400123456789ULL &&
+              extra.hasSeq && extra.seq == 7 && !extra.hasIndex,
+          "fc, rate, gain, time_ns and seq from the sub-message");
+    check(m.h.fmt == SampleFormat::CF32 && m.h.count == 2 && m.samples == iq.data() + iq.size() - 16 &&
+              f32At(m.samples, 0) == 0.5f && f32At(m.samples, 1) == -0.25f && f32At(m.samples, 2) == 1.f &&
+              f32At(m.samples, 3) == 0.f,
+          "packed float samples are cf32 in the message (no copy)");
+    check(!decodes(ex, fromHex("0a040a026869"), m, scratch, &why) && why == "match.iq does not match",
+          "a Status message is ignored: " + why);
+    check(decodes(ex, fromHex("12091900000000" "80842e41"), m, scratch, &why, &extra) && m.h.count == 0 &&
+              m.h.rate == 1e6 && m.h.fc == 0 && extra.hasSeq && extra.seq == 0,
+          "fields that proto3 leaves out are 0, no samples " + why);
+    check(!decodes(ex, fromHex("12020801"), m, scratch, &why) && why.find("no rate") != std::string::npos,
+          "no rate in the message and none in the file: " + why);
+    bool prefixes = true;
+    for (size_t k = 1; k < iq.size(); ++k) {
+        const std::vector<uint8_t> cut(iq.begin(), iq.begin() + (ptrdiff_t)k);
+        prefixes = prefixes && !decodes(ex, cut, m, scratch, &why) && !why.empty();
+    }
+    check(prefixes, "each cut-off message is rejected with a reason");
+
+    // The encoder writes the same bytes as protoc.
+    {
+        StreamHeader h;
+        h.fc = 915e6;
+        h.rate = 2.4e6;
+        h.gain = -12.5;
+        h.timeNs = 1793750400123456789ULL;
+        const float s[4] = {0.5f, -0.25f, 1.f, 0.f};
+        std::vector<uint8_t> out;
+        check(encodeStreamMessage(ex, h, 7, SampleFormat::CF32, (const uint8_t*)s, 2, out, why) && out == iq,
+              "the publisher writes the same bytes as protoc " + why);
+    }
+
+    // i and q in sint32 arrays, a string match in a sub-message, from protoc:
+    // kind: 3 i: [100, -200, 32767] q: [-32768, 0, 1] rate: 1e6
+    // index: 123456789012 meta { name: "rx1" fc_khz: 433920 }
+    StreamFormat fl;
+    const char* flat = "[format]\nencoding = protobuf\n[socket]\ntype = pull\n"
+                       "[protobuf]\nmatch.kind = uint32 1 == 3\nmatch.name = string 6.1 == \"rx1\"\n"
+                       "i = sint32 2\nq = sint32 3\nrate = double 4\nindex = int64 5\nfc = uint32 6.2 * 1e3\n";
+    check(formatFrom(flat, fl, err, &warn) && warn.empty(), "i and q arrays, matches " + err);
+    const std::vector<uint8_t> fm = fromHex(
+        "08031207c8018f03feff031a05ffff030002210000000080842e412894b4e4f4cb0332090a037278311080be1a");
+    check(decodes(fl, fm, m, scratch, &why, &extra) && m.h.fmt == SampleFormat::CI16 && m.h.count == 3 &&
+              m.h.rate == 1e6 && m.h.fc == 433.92e6 && extra.hasIndex && m.h.index == 123456789012ULL,
+          "i and q decode to ci16, fc in kHz from the sub-message " + why);
+    check(m.samples && i16At(m.samples, 0) == 100 && i16At(m.samples, 1) == -32768 && i16At(m.samples, 2) == -200 &&
+              i16At(m.samples, 3) == 0 && i16At(m.samples, 4) == 32767 && i16At(m.samples, 5) == 1 &&
+              m.samples >= scratch.data() && m.samples < scratch.data() + scratch.size(),
+          "I and Q interleaved, in scratch");
+    {
+        std::vector<uint8_t> other = fm;
+        other[1] = 4;  // kind 4
+        check(!decodes(fl, other, m, scratch, &why) && why == "match.kind does not match", "another kind: " + why);
+        StreamFormat f2;
+        formatFrom(std::string(flat) + "[samples]\nformat = ci8\n", f2, err);
+        check(!decodes(f2, fm, m, scratch, &why) && why.find("does not fit in ci8") != std::string::npos,
+              "a value out of the range of [samples] format: " + why);
+        formatFrom(std::string(flat) + "[samples]\nformat = ci32\n", f2, err);
+        check(decodes(f2, fm, m, scratch, &why) && m.h.fmt == SampleFormat::CF32 &&
+                  f32At(m.samples, 1) == -32768.f / 2147483648.f,
+              "ci32 values to cf32 " + why);
+    }
+    {
+        // The encoder and the decoder agree; the encoder writes in field order.
+        StreamHeader h;
+        h.rate = 1e6;
+        h.fc = 433.92e6;
+        h.index = 123456789012ULL;
+        const int16_t s[6] = {100, -32768, -200, 0, 32767, 1};
+        std::vector<uint8_t> out;
+        check(encodeStreamMessage(fl, h, 0, SampleFormat::CI16, (const uint8_t*)s, 3, out, why) && out == fm,
+              "the publisher writes the same bytes as protoc (i and q) " + why);
+    }
+
+    // bytes samples: data: "\x01...\x08" rate_mhz: 2.5, big-endian ci16.
+    StreamFormat rb;
+    check(formatFrom("[format]\nencoding = protobuf\n[socket]\ntype = sub\n[protobuf]\nsamples = bytes 1\n"
+                     "rate = float 2 * 1e6\n[samples]\nformat = ci16\nendian = big\n",
+                     rb, err),
+          "bytes samples " + err);
+    const std::vector<uint8_t> rm = fromHex("0a0801020304050607081500002040");
+    check(decodes(rb, rm, m, scratch, &why) && m.h.rate == 2.5e6 && m.h.count == 2 && i16At(m.samples, 0) == 0x0102 &&
+              i16At(m.samples, 3) == 0x0708,
+          "big-endian ci16 in a bytes field, the rate in MS/s " + why);
+    check(!decodes(rb, fromHex("0a030102031500002040"), m, scratch, &why) && why.find("not whole samples") != std::string::npos,
+          "bytes that are not whole samples: " + why);
+
+    // proto2: unpacked repeated int32 (negative values take 10 bytes).
+    // iq: [1, -2, 300, -128] rate: 48000 seq: -1
+    const std::vector<uint8_t> om =
+        fromHex("080108feffffffffffffffff0108ac020880ffffffffffffffff0111000000000070e7401801");
+    StreamFormat o;
+    check(formatFrom("[format]\nencoding = protobuf\n[socket]\ntype = sub\n[protobuf]\nsamples = unpacked int32 1\n"
+                     "rate = double 2\n",
+                     o, err),
+          "unpacked int32 " + err);
+    check(decodes(o, om, m, scratch, &why) && m.h.rate == 48000 && m.h.count == 2 && i16At(m.samples, 0) == 1 &&
+              i16At(m.samples, 1) == -2 && i16At(m.samples, 2) == 300 && i16At(m.samples, 3) == -128,
+          "unpacked int32 elements to ci16 " + why);
+    {
+        StreamHeader h;
+        h.rate = 48000;
+        const int16_t s[4] = {1, -2, 300, -128};
+        std::vector<uint8_t> out;
+        const std::vector<uint8_t> want(om.begin(), om.end() - 2);  // without seq
+        check(encodeStreamMessage(o, h, 0, SampleFormat::CI16, (const uint8_t*)s, 2, out, why) && out == want,
+              "the publisher writes unpacked elements as protoc does " + why);
+    }
+    StreamFormat os;
+    formatFrom("[format]\nencoding = protobuf\n[socket]\ntype = sub\n[protobuf]\nsamples = int32 1\nrate = double 2\n"
+               "seq = sint64 3\n",
+               os, err);
+    check(!decodes(os, om, m, scratch, &why) && why == "negative message counter", "seq -1: " + why);
+    StreamFormat wrong;
+    formatFrom("[format]\nencoding = protobuf\n[socket]\ntype = sub\n[protobuf]\nsamples = int32 1\nrate = float 2\n",
+               wrong, err);
+    check(!decodes(wrong, om, m, scratch, &why) && why.find("wire type i64, not i32") != std::string::npos,
+          "a field of another type: " + why);
+    StreamFormat odd;
+    formatFrom("[format]\nencoding = protobuf\n[socket]\ntype = sub\n[protobuf]\nsamples = float 1\n[stream]\nrate = 1e6\n",
+               odd, err);
+    check(!decodes(odd, fromHex("0a0c0000803f0000803f0000803f"), m, scratch, &why) &&
+              why.find("not I and Q pairs") != std::string::npos,
+          "an odd number of values: " + why);
+    check(!decodes(odd, fromHex("0a03000000"), m, scratch, &why) && why.find("not whole float") != std::string::npos,
+          "a packed float run that is not whole values: " + why);
+
+    // Each publish round trip, through each element type.
+    for (const char* elem : {"float", "double", "sint32", "int32", "sfixed32", "int64", "packed sint64",
+                             "unpacked float", "unpacked sint32", "bytes"}) {
+        StreamFormat f;
+        const std::string text = std::string("[format]\nencoding = protobuf\n[socket]\ntype = pull\n[protobuf]\n") +
+                                 "match.v = uint32 1 == 2\nseq = uint32 3\nfc = double 4.1\nrate = double 4.2\n" +
+                                 "samples = " + elem + " 5\n" + (strcmp(elem, "bytes") == 0 ? "[samples]\nformat = ci16\norder = qi\n" : "");
+        if (!formatFrom(text, f, err)) {
+            check(false, std::string(elem) + ": " + err);
+            continue;
+        }
+        StreamHeader h;
+        h.fc = 100e6;
+        h.rate = 1e6;
+        int16_t s[16];
+        for (int k = 0; k < 16; ++k) s[k] = (int16_t)(k * 1000 - 8000);
+        std::vector<uint8_t> out;
+        bool ok = encodeStreamMessage(f, h, 41, SampleFormat::CI16, (const uint8_t*)s, 8, out, why);
+        ok = ok && decodes(f, out, m, scratch, &why, &extra) && m.h.count == 8 && extra.seq == 41 && m.h.fc == 100e6;
+        for (int k = 0; ok && k < 16; ++k) {
+            const double got = m.h.fmt == SampleFormat::CI16 ? i16At(m.samples, (size_t)k) : f32At(m.samples, (size_t)k) * 32768.0;
+            ok = std::lround(got) == s[k];
+        }
+        // The largest message fits in the limit.
+        const size_t n = publishMaxSamples(f);
+        std::vector<int16_t> big(2 * n, -32768);
+        ok = ok && n > 1000 && encodeStreamMessage(f, h, ~0ULL, SampleFormat::CI16, (const uint8_t*)big.data(), n, out, why) &&
+             out.size() <= publishMaxBytes(f) && out.size() <= (256u << 10) && decodes(f, out, m, scratch, &why) && m.h.count == n;
+        check(ok, std::string(elem) + ": encode, decode, and " + std::to_string(n) + " samples in " +
+                      std::to_string(out.size()) + " bytes " + why);
+    }
+
+    // Bad files.
+    const std::pair<const char*, const char*> bad[] = {
+        {"[format]\nencoding = protobuf\n[socket]\ntype = sub\n[header]\nbytes = 4\n[protobuf]\nsamples = float 1\nrate = double 2\n",
+         "[header] is for encoding = binary"},
+        {"[socket]\ntype = sub\n[protobuf]\nsamples = float 1\n[samples]\nformat = cf32\n[stream]\nrate = 1e6\n",
+         "only with encoding = protobuf"},
+        {"[format]\nencoding = protobuf\n[socket]\ntype = sub\n[protobuf]\nrate = double 2\n", "the samples are missing"},
+        {"[format]\nencoding = protobuf\n[socket]\ntype = sub\n[protobuf]\nsamples = float 1\n", "the sample rate is missing"},
+        {"[format]\nencoding = protobuf\n[socket]\ntype = sub\n[protobuf]\nsamples = float8 1\n", "unknown type 'float8'"},
+        {"[format]\nencoding = protobuf\n[socket]\ntype = sub\n[protobuf]\nsamples = float 0\n", "bad field number '0'"},
+        {"[format]\nencoding = protobuf\n[socket]\ntype = sub\n[protobuf]\nsamples = float 1..2\n", "bad field number ''"},
+        {"[format]\nencoding = protobuf\n[socket]\ntype = sub\n[protobuf]\nsamples = float 2.1\nrate = double 2\n",
+         "is inside rate (field 2), which is not a sub-message"},
+        {"[format]\nencoding = protobuf\n[socket]\ntype = sub\n[protobuf]\nsamples = float 1\nrate = double 1\n",
+         "are both field 1"},
+        {"[format]\nencoding = protobuf\n[socket]\ntype = sub\n[protobuf]\nsamples = uint32 1\nrate = double 2\n",
+         "has no negative values"},
+        {"[format]\nencoding = protobuf\n[socket]\ntype = sub\n[protobuf]\nsamples = bytes 1\nrate = double 2\n",
+         "[samples] format is missing"},
+        {"[format]\nencoding = protobuf\n[socket]\ntype = sub\n[protobuf]\nsamples = packed bytes 1\nrate = double 2\n",
+         "packed and unpacked are for number arrays"},
+        {"[format]\nencoding = protobuf\n[socket]\ntype = sub\n[protobuf]\ni = float 1\nq = double 2\nrate = double 3\n",
+         "i and q must have the same type"},
+        {"[format]\nencoding = protobuf\n[socket]\ntype = sub\n[protobuf]\nsamples = float 1\nrate = double 2\nseq = double 3\n",
+         "must be an integer type"},
+        {"[format]\nencoding = protobuf\n[socket]\ntype = sub\n[protobuf]\nsamples = float 1\nrate = double 2\n"
+         "match.x = uint32 3 == -1\n",
+         "-1 does not fit in uint32"},
+        {"[format]\nencoding = protobuf\n[socket]\ntype = sub\n[protobuf]\nsamples = float 1\nrate = double 2\n"
+         "match.x = uint32 3\n",
+         "write TYPE FIELD == VALUE"},
+        {"[format]\nencoding = json\n", "is not binary or protobuf"},
+    };
+    for (const auto& [text, want] : bad) {
+        StreamFormat f;
+        const bool ok = formatFrom(text, f, err);
+        check(!ok && err.find(want) != std::string::npos, std::string("rejected: ") + err);
+    }
+    StreamFormat wf;
+    check(formatFrom("[format]\nencoding = protobuf\n[socket]\ntype = sub\n[protobuf]\nsamples = float 1\nrate = double 2\n"
+                     "count = uint32 3\n[samples]\nendian = big\n",
+                     wf, err, &warn) &&
+              warn.size() == 2,
+          "warnings: count and endian are not used (" + std::to_string(warn.size()) + ")");
+    setStreamFormatDir("");
+}
+
 #ifdef WVT_HAVE_ZMQ
 void checkSockets() {
     printf("libzmq (RADIO / DISH on udp://)\n");
@@ -1022,6 +1305,53 @@ void checkFormatDevice() {
     std::string err;
     StreamConfig cfg;
     cfg.driver = "zmq";
+
+    // Protobuf (issue #118): IqData and Status messages on one PUB socket.
+    {
+        constexpr int n = 50;
+        StreamFormat pf;
+        resolveStreamFormat("protobuf_iq", pf, err);
+        Sender tx(ZMQ_PUB);
+        tx.run([&pf](uint64_t seq) {
+            if (seq % 3 == 2) return std::vector<std::vector<uint8_t>>{fromHex("0a0a0a086f7665726c6f6164")};  // a Status
+            const uint64_t msg = seq - seq / 3;  // the IqData messages count without the Status messages
+            StreamHeader h;
+            h.fc = 433.92e6;
+            h.rate = 250e3;
+            h.gain = 7.5;
+            std::vector<float> v(2 * n);
+            for (int k = 0; k < n; ++k) {
+                v[2 * (size_t)k] = (float)(msg * n + (uint64_t)k) / 65536.f;
+                v[2 * (size_t)k + 1] = -0.5f;
+            }
+            std::vector<uint8_t> out;
+            std::string why;
+            encodeStreamMessage(pf, h, msg, SampleFormat::CF32, (const uint8_t*)v.data(), n, out, why);
+            return std::vector<std::vector<uint8_t>>{out};
+        });
+        cfg.format = "protobuf_iq";
+        cfg.args = tx.address();
+        auto dev = openDevice(cfg, err);
+        check(dev && dev->sampleRate() == 250e3 && dev->centerFreq() == 433.92e6 && dev->format() == SampleFormat::CF32,
+              "protobuf: opens with the rate and frequency of the message " + err);
+        if (dev) {
+            Received rx;
+            startInto(*dev, rx, 8);
+            const bool got = waitFor([&] { return receivedBytes(rx) >= 20 * n * 8; }, 3);
+            dev->stop();
+            std::lock_guard<std::mutex> lk(rx.m);
+            bool order = got && rx.bytes.size() >= 8;
+            float prev = 0;
+            for (size_t at = 0; order && at + 8 <= rx.bytes.size(); at += 8) {
+                const float i = f32At(rx.bytes.data() + at, 0);
+                order = (at == 0 || i == prev + 1.f / 65536.f) && f32At(rx.bytes.data() + at, 1) == -0.5f;
+                prev = i;
+            }
+            check(order, "protobuf: the samples arrive in order, the Status messages are skipped (" +
+                             std::to_string(rx.bytes.size() / 8) + " samples)");
+            check(rx.gaps.empty(), "protobuf: seq counts the IqData messages: no gaps");
+        }
+    }
 
     // 1. GNU Radio PUB Sink: raw cf32 on PUB / SUB.
     {
@@ -1344,6 +1674,35 @@ void checkFormatPublisher() {
     publishAndReceive("example_header", "*:" + a.substr(a.rfind(':') + 1), a, 1e6, 100e6, true);
     // RADIO to DISH on udp, with the sample index: loss is exact.
     publishAndReceive("wvt_ci16", "127.0.0.1:15930", "127.0.0.1:15930", 1e6, 100e6, false);
+    // Protobuf (issue #118): packed float in a oneof, the values from the message.
+    a = "127.0.0.1:" + std::to_string(freeTcpPort());
+    publishAndReceive("protobuf_iq", a, a, 1e6, 100e6, true);
+    {
+        // sint32 i and q arrays in a sub-message on PUSH / PULL, and unpacked
+        // int32 with a message counter on udp (RADIO / DISH).
+        const char* tmp = getenv("TMPDIR");
+        const std::string dir = std::string(tmp && *tmp ? tmp : "/tmp") + "/wvt_zmq_pb_" + std::to_string(getpid());
+        mkdir(dir.c_str(), 0755);
+        const std::pair<const char*, const char*> files[] = {
+            {"zmq_pb_iq.ini", "[format]\nencoding = protobuf\n[socket]\ntype = pull\n[protobuf]\n"
+                              "index = uint64 1\nfc = double 2\nrate = uint32 3 * 1e3\ni = sint32 4.1\nq = sint32 4.2\n"},
+            {"zmq_pb_udp.ini", "[format]\nencoding = protobuf\n[socket]\ntype = dish\n[protobuf]\n"
+                               "seq = uint32 1\nsamples = unpacked int32 2\n[stream]\nrate = 1e6\nfc = 100e6\n"},
+        };
+        for (const auto& [name, text] : files) {
+            if (FILE* fp = fopen((dir + "/" + name).c_str(), "w")) {
+                fputs(text, fp);
+                fclose(fp);
+            }
+        }
+        setStreamFormatDir(dir);
+        a = "127.0.0.1:" + std::to_string(freeTcpPort());
+        publishAndReceive("pb_iq", a, a, 1e6, 100e6, true);
+        publishAndReceive("pb_udp", "127.0.0.1:15931", "127.0.0.1:15931", 1e6, 100e6, false);
+        for (const auto& [name, text] : files) unlink((dir + "/" + name).c_str());
+        rmdir(dir.c_str());
+        setStreamFormatDir(WVT_CONFIG_EXAMPLES);
+    }
 
     // A topic: two frames, the topic and the data.
     {
@@ -1709,6 +2068,8 @@ int main() {
     checkTracker();
     checkFormats();
     checkEncode();
+    checkProtobufWire();
+    checkProtobufFormats();
 #ifdef WVT_HAVE_ZMQ
     checkSockets();
     checkPublisher();

@@ -36,6 +36,8 @@ compile_commands.json
 !/config/zmq_raw_pull_ci16.ini
 !/config/zmq_example_header.ini
 !/config/zmq_wvt_ci16.ini
+!/config/zmq_protobuf_iq.ini
+!/config/protobuf_iq.proto
 
 # Archived documentation pages and the design records (issue #109): kept
 # locally, not tracked

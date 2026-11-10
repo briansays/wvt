@@ -107,6 +107,8 @@ add_executable(wvt
   src/net/zmq_wire.cpp
   src/net/zmq_pub.cpp
   src/net/zmq_format.cpp
+  src/net/zmq_format_proto.cpp
+  src/net/protobuf_wire.cpp
   src/io/recorder.cpp
   src/device/sdr_device.cpp
   src/device/sdr_sim.cpp
@@ -908,6 +910,7 @@ endif()
 # ZMQ streaming self-test (issue #96): the wire format in every build; with
 # ZMQ also the sockets, the publisher, and a zmq device in a live engine
 add_executable(zmq_check tools/zmq_check.cpp src/net/zmq_wire.cpp src/net/zmq_pub.cpp src/net/zmq_format.cpp
+  src/net/zmq_format_proto.cpp src/net/protobuf_wire.cpp
   src/common/paths.cpp src/io/iq_file.cpp src/common/json.cpp src/common/log.cpp)
 target_include_directories(zmq_check PRIVATE src)
 target_compile_definitions(zmq_check PRIVATE WVT_CONFIG_EXAMPLES="${CMAKE_SOURCE_DIR}/config")
@@ -989,7 +992,7 @@ if(WVT_FUZZ)
   set(_fuzz_parse_si src/common/ui_util.cpp src/common/log.cpp)
   set(_fuzz_config src/app/config.cpp src/common/paths.cpp src/net/zmq_wire.cpp)
   set(_fuzz_zmq_wire src/net/zmq_wire.cpp)
-  set(_fuzz_zmq_format src/net/zmq_format.cpp src/net/zmq_wire.cpp src/common/paths.cpp src/io/iq_file.cpp src/common/json.cpp
+  set(_fuzz_zmq_format src/net/zmq_format.cpp src/net/zmq_format_proto.cpp src/net/protobuf_wire.cpp src/net/zmq_wire.cpp src/common/paths.cpp src/io/iq_file.cpp src/common/json.cpp
     src/common/log.cpp)
   foreach(_f json chain meta parse_si config zmq_wire zmq_format)
     add_executable(fuzz_${_f} tools/fuzz/fuzz_${_f}.cpp ${_fuzz_${_f}})
