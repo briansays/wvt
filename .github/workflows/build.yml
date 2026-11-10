@@ -33,11 +33,12 @@ jobs:
         timeout-minutes: 20
         run: |
           sudo apt-get $APT_OPTS update
-          sudo apt-get $APT_OPTS install -y build-essential cmake libx11-dev libgl1-mesa-dev librtlsdr-dev libuhd-dev xvfb
+          sudo apt-get $APT_OPTS install -y build-essential cmake libx11-dev libgl1-mesa-dev librtlsdr-dev libuhd-dev libprotobuf-dev libprotoc-dev xvfb
       - name: Configure
         # WVT_BB_SIM and WVT_SKIQ_SIM build the BB60 and Sidekiq backends against simulated devices (no SDK in CI).
         # WVT_WITH_ZMQ=ON: the configure downloads libzmq and builds it with the draft API (issue #96).
-        run: cmake -S . -B build -DWVT_WERROR=ON -DWVT_WITH_RTLSDR=ON -DWVT_WITH_UHD=ON -DWVT_WITH_CUDA=OFF -DWVT_BB_SIM=ON -DWVT_SKIQ_SIM=ON -DWVT_WITH_ZMQ=ON
+        # WVT_WITH_PROTOBUF=ON: .proto field names with libprotobuf 3.21 (issue #118); macOS tests the current release.
+        run: cmake -S . -B build -DWVT_WERROR=ON -DWVT_WITH_RTLSDR=ON -DWVT_WITH_UHD=ON -DWVT_WITH_CUDA=OFF -DWVT_BB_SIM=ON -DWVT_SKIQ_SIM=ON -DWVT_WITH_ZMQ=ON -DWVT_WITH_PROTOBUF=ON
       - name: Build
         run: cmake --build build -j "$(nproc)"
       - name: Self-tests
@@ -61,10 +62,10 @@ jobs:
         # XQuartz gives the X11 and GLX libraries; Accelerate and Metal come with macOS.
         run: |
           brew install --cask xquartz
-          brew install pkgconf librtlsdr uhd
+          brew install pkgconf librtlsdr uhd protobuf
       - name: Configure
         run: >
-          cmake -S . -B build -DWVT_WERROR=ON -DWVT_WITH_METAL=ON -DWVT_WITH_RTLSDR=ON -DWVT_WITH_UHD=ON -DWVT_BB_SIM=ON -DWVT_SKIQ_SIM=ON -DWVT_WITH_ZMQ=ON
+          cmake -S . -B build -DWVT_WERROR=ON -DWVT_WITH_METAL=ON -DWVT_WITH_RTLSDR=ON -DWVT_WITH_UHD=ON -DWVT_BB_SIM=ON -DWVT_SKIQ_SIM=ON -DWVT_WITH_ZMQ=ON -DWVT_WITH_PROTOBUF=ON
       - name: Build
         run: cmake --build build -j "$(sysctl -n hw.ncpu)"
       - name: Self-tests

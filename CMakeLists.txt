@@ -109,6 +109,7 @@ add_executable(wvt
   src/net/zmq_format.cpp
   src/net/zmq_format_proto.cpp
   src/net/protobuf_wire.cpp
+  src/net/proto_schema.cpp
   src/io/recorder.cpp
   src/device/sdr_device.cpp
   src/device/sdr_sim.cpp
@@ -645,6 +646,51 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
+# Optional field names from .proto files for the Protobuf ZMQ formats (issue
+# #118). wvt reads Protobuf messages without libprotobuf; with it, a format
+# file can name a .proto file and use its field names. OFF by default; AUTO
+# uses libprotobuf if CMake finds it, ON requires it.
+# ---------------------------------------------------------------------------
+set(WVT_WITH_PROTOBUF OFF CACHE STRING "Read .proto files for the field names of the ZMQ Protobuf formats (OFF, ON, AUTO)")
+set_property(CACHE WVT_WITH_PROTOBUF PROPERTY STRINGS OFF ON AUTO)
+add_library(wvt_protobuf INTERFACE)
+set(WVT_PROTOBUF_OK FALSE)
+if(NOT WVT_WITH_PROTOBUF STREQUAL "OFF")
+  # The CMake package of libprotobuf (3.22 and later, with abseil), else the
+  # FindProtobuf module of CMake (older packages, such as Ubuntu 24.04).
+  find_package(Protobuf CONFIG QUIET)
+  if(NOT Protobuf_FOUND)
+    find_package(Protobuf MODULE QUIET)
+  endif()
+  # The .proto parser (compiler/importer.h) is in libprotobuf, but some
+  # packages put its headers apart (Debian and Ubuntu: libprotoc-dev).
+  if(Protobuf_FOUND AND TARGET protobuf::libprotobuf)
+    get_target_property(_pb_inc protobuf::libprotobuf INTERFACE_INCLUDE_DIRECTORIES)
+    find_path(WVT_PROTOBUF_IMPORTER_DIR google/protobuf/compiler/importer.h HINTS ${_pb_inc} ${Protobuf_INCLUDE_DIRS})
+    if(NOT WVT_PROTOBUF_IMPORTER_DIR)
+      set(Protobuf_FOUND FALSE)
+      set(_pb_why "libprotobuf ${Protobuf_VERSION} has no google/protobuf/compiler/importer.h (install libprotoc-dev)")
+    endif()
+  else()
+    set(_pb_why "libprotobuf not found (install libprotobuf-dev and libprotoc-dev, or protobuf)")
+  endif()
+  if(Protobuf_FOUND)
+    target_include_directories(wvt_protobuf INTERFACE ${WVT_PROTOBUF_IMPORTER_DIR})
+    target_link_libraries(wvt_protobuf INTERFACE protobuf::libprotobuf)
+    target_compile_definitions(wvt_protobuf INTERFACE WVT_HAVE_PROTOBUF)
+    set(WVT_PROTOBUF_OK TRUE)
+    message(STATUS "wvt: .proto field names for the ZMQ Protobuf formats enabled (libprotobuf ${Protobuf_VERSION})")
+  elseif(WVT_WITH_PROTOBUF STREQUAL "ON")
+    message(FATAL_ERROR "WVT_WITH_PROTOBUF=ON but ${_pb_why}")
+  else()
+    message(STATUS "wvt: .proto field names disabled (${_pb_why})")
+  endif()
+else()
+  message(STATUS "wvt: .proto field names disabled (WVT_WITH_PROTOBUF=OFF)")
+endif()
+target_link_libraries(wvt PRIVATE wvt_protobuf)
+
+# ---------------------------------------------------------------------------
 # Optional NVIDIA GPU acceleration (issue #3). AUTO builds the CUDA backend
 # when the CUDA toolkit (12.0 or later, with cuFFT) is found, ON requires it.
 # A CUDA build still runs on computers without a GPU: wvt checks at start.
@@ -910,11 +956,11 @@ endif()
 # ZMQ streaming self-test (issue #96): the wire format in every build; with
 # ZMQ also the sockets, the publisher, and a zmq device in a live engine
 add_executable(zmq_check tools/zmq_check.cpp src/net/zmq_wire.cpp src/net/zmq_pub.cpp src/net/zmq_format.cpp
-  src/net/zmq_format_proto.cpp src/net/protobuf_wire.cpp
+  src/net/zmq_format_proto.cpp src/net/protobuf_wire.cpp src/net/proto_schema.cpp
   src/common/paths.cpp src/io/iq_file.cpp src/common/json.cpp src/common/log.cpp)
 target_include_directories(zmq_check PRIVATE src)
 target_compile_definitions(zmq_check PRIVATE WVT_CONFIG_EXAMPLES="${CMAKE_SOURCE_DIR}/config")
-target_link_libraries(zmq_check PRIVATE Threads::Threads)
+target_link_libraries(zmq_check PRIVATE Threads::Threads wvt_protobuf)
 target_compile_options(zmq_check PRIVATE ${WVT_WARNINGS})
 if(WVT_ZMQ_OK)
   target_sources(zmq_check PRIVATE src/device/sdr_zmq.cpp src/device/live.cpp src/io/recorder.cpp src/device/sdr_device.cpp
@@ -992,7 +1038,7 @@ if(WVT_FUZZ)
   set(_fuzz_parse_si src/common/ui_util.cpp src/common/log.cpp)
   set(_fuzz_config src/app/config.cpp src/common/paths.cpp src/net/zmq_wire.cpp)
   set(_fuzz_zmq_wire src/net/zmq_wire.cpp)
-  set(_fuzz_zmq_format src/net/zmq_format.cpp src/net/zmq_format_proto.cpp src/net/protobuf_wire.cpp src/net/zmq_wire.cpp src/common/paths.cpp src/io/iq_file.cpp src/common/json.cpp
+  set(_fuzz_zmq_format src/net/zmq_format.cpp src/net/zmq_format_proto.cpp src/net/protobuf_wire.cpp src/net/proto_schema.cpp src/net/zmq_wire.cpp src/common/paths.cpp src/io/iq_file.cpp src/common/json.cpp
     src/common/log.cpp)
   foreach(_f json chain meta parse_si config zmq_wire zmq_format)
     add_executable(fuzz_${_f} tools/fuzz/fuzz_${_f}.cpp ${_fuzz_${_f}})

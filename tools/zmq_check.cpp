@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "common/sample_ring.h"
+#include "net/proto_schema.h"
 #include "net/protobuf_wire.h"
 #include "net/zmq_format.h"
 #include "net/zmq_pub.h"
@@ -884,7 +885,7 @@ void checkProtobufWire() {
     check(pb::readVarint(longer, 11, v) == 0, "an 11-byte varint is rejected");
     check(pb::readVarint(max, 3, v) == 0, "a varint that is cut off is rejected");
     bool zz = true;
-    for (int64_t x : {0LL, 1LL, -1LL, 63LL, -64LL, 2147483647LL, -2147483648LL, INT64_MAX, INT64_MIN})
+    for (int64_t x : std::initializer_list<int64_t>{0, 1, -1, 63, -64, 2147483647, -2147483648LL, INT64_MAX, INT64_MIN})
         zz = zz && pb::unzigzag(pb::zigzag(x)) == x;
     check(zz && pb::zigzag(-1) == 1 && pb::zigzag(1) == 2, "zigzag");
     std::vector<uint8_t> out;
@@ -1137,6 +1138,135 @@ void checkProtobufFormats() {
               warn.size() == 2,
           "warnings: count and endian are not used (" + std::to_string(warn.size()) + ")");
     setStreamFormatDir("");
+}
+
+// ---- .proto field names (issue #118, phase 2) ------------------------------
+
+#ifdef WVT_HAVE_PROTOBUF
+bool sameField(const ProtoField& a, const ProtoField& b) {
+    return a.set == b.set && a.type == b.type && a.path == b.path && a.scale == b.scale && a.packed == b.packed;
+}
+#endif
+
+void checkProtoSchema() {
+    printf(".proto field names (issue #118, phase 2)\n");
+    std::string err, why;
+    std::vector<std::string> warn;
+    const char* tmp = getenv("TMPDIR");
+    const std::string dir = std::string(tmp && *tmp ? tmp : "/tmp") + "/wvt_zmq_schema_" + std::to_string(getpid());
+    mkdir(dir.c_str(), 0755);
+    auto put = [&](const std::string& name, const char* text) {
+        if (FILE* fp = fopen((dir + "/" + name).c_str(), "w")) {
+            fputs(text, fp);
+            fclose(fp);
+        }
+    };
+    // A format file in `dir`, with `body` after [protobuf].
+    auto load = [&](const std::string& body, StreamFormat& f) {
+        put("zmq_t.ini", ("[format]\nencoding = protobuf\n[socket]\ntype = sub\n[protobuf]\n" + body).c_str());
+        warn.clear();
+        err.clear();
+        return loadStreamFormat(dir + "/zmq_t.ini", f, warn, err);
+    };
+    put("flat.proto",
+        "syntax = \"proto3\";\n"
+        "enum Kind { KIND_UNKNOWN = 0; DATA = 3; STATUS = 4; }\n"
+        "message Meta { string name = 1; uint32 fc_khz = 2; }\n"
+        "message Flat {\n"
+        "  Kind kind = 1; repeated sint32 i = 2; repeated sint32 q = 3; double rate = 4; int64 index = 5;\n"
+        "  Meta meta = 6; map<string, int32> tags = 7; float level = 8;\n"
+        "  repeated float old_iq = 9 [packed = false];\n"
+        "}\n"
+        "message Other { int32 x = 1; }\n");
+
+#ifdef WVT_HAVE_PROTOBUF
+    check(ProtoSchema::available(), "wvt is built with libprotobuf");
+    // The example with names gives the same layout as with numbers.
+    {
+        StreamFormat byNumber, byName;
+        setStreamFormatDir(WVT_CONFIG_EXAMPLES);
+        check(resolveStreamFormat("protobuf_iq", byNumber, err), "the example with numbers " + err);
+        setStreamFormatDir("");
+        const std::string proto = std::string(WVT_CONFIG_EXAMPLES) + "/protobuf_iq.proto";
+        check(load("proto = " + proto + "\nmessage = Envelope\nmatch.iq = present iq\nseq = iq.seq\nfc = iq.fc_hz\n"
+                   "rate = iq.rate_hz\ngain = float iq.gain_db\ntime_ns = iq.time_ns\nsamples = iq.samples\n",
+                   byName) && warn.empty(),
+              "names from protobuf_iq.proto (absolute path, message in the package) " + err);
+        const ProtoLayout& a = byNumber.proto;
+        const ProtoLayout& b = byName.proto;
+        check(sameField(a.seq, b.seq) && sameField(a.fc, b.fc) && sameField(a.rate, b.rate) && sameField(a.gain, b.gain) &&
+                  sameField(a.timeNs, b.timeNs) && sameField(a.samples, b.samples) && b.matches.size() == 1 &&
+                  b.matches[0].path == a.matches[0].path && b.matches[0].kind == ProtoMatch::Kind::Present,
+              "the same fields, types and paths as the file with numbers");
+        check(b.schemaMessage == "wvt.example.Envelope" && b.samples.name == "iq.samples",
+              "summary: " + streamFormatSummary(byName));
+    }
+    // Relative path, enum by name, string match, i and q, packed from the .proto.
+    {
+        StreamFormat f;
+        check(load("proto = flat.proto\nmessage = Flat\nmatch.kind = kind == DATA\nmatch.name = meta.name == \"rx1\"\n"
+                   "i = i\nq = q\nrate = rate\nindex = index\nfc = meta.fc_khz * 1e3\n",
+                   f),
+              "names from flat.proto next to the format file " + err);
+        const std::vector<uint8_t> fm = fromHex(
+            "08031207c8018f03feff031a05ffff030002210000000080842e412894b4e4f4cb0332090a037278311080be1a");
+        StreamMessage m;
+        FormatExtra extra;
+        std::vector<uint8_t> scratch;
+        check(decodes(f, fm, m, scratch, &why, &extra) && m.h.count == 3 && m.h.fc == 433.92e6 && m.h.index == 123456789012ULL &&
+                  i16At(m.samples, 1) == -32768,
+              "the protoc message decodes with the names " + why);
+        std::vector<uint8_t> other = fm;
+        other[1] = 4;  // kind STATUS
+        check(!decodes(f, other, m, scratch, &why) && why == "match.kind does not match", "kind STATUS is ignored: " + why);
+        check(f.proto.i.packed, "proto3 packs repeated sint32");
+        check(load("proto = flat.proto\nmessage = Flat\nsamples = old_iq\n[stream]\nrate = 1e6\n", f) && !f.proto.samples.packed,
+              "[packed = false] in the .proto: the publisher writes it unpacked " + err);
+        check(load("proto = flat.proto\nmessage = Flat\nsamples = packed old_iq\n[stream]\nrate = 1e6\n", f) &&
+                  f.proto.samples.packed,
+              "packed before the name wins over the .proto " + err);
+        check(load("proto = flat.proto\nmessage = Flat\nsamples = sint32 2\nq = 3\n[stream]\nrate = 1e6\n", f) == false &&
+                  err.find("set samples, or i and q") != std::string::npos,
+              "numbers and explicit types also work with a .proto: " + err);
+        check(load("proto = flat.proto\nmessage = Flat\ni = 2\nq = sint32 q\nrate = 4\n", f), "names and numbers mixed " + err);
+    }
+    // Errors.
+    const std::pair<std::string, const char*> bad[] = {
+        {"proto = flat.proto\nmessage = Flat\nsamples = iq\nrate = rate\n", "Flat has no field 'iq' (kind, i, q, rate"},
+        {"proto = flat.proto\nmessage = Flat\nsamples = i\nrate = rate.x\n", "rate is not a message"},
+        {"proto = flat.proto\nmessage = Flat\nsamples = i\nrate = tags\n", "tags is a map"},
+        {"proto = flat.proto\nmessage = Flat\nsamples = level\nrate = rate\n", "level is not repeated"},
+        {"proto = flat.proto\nmessage = Flat\nsamples = i\nrate = rate\nseq = i\n", "i is repeated"},
+        {"proto = flat.proto\nmessage = Flat\ni = i\nq = q\nrate = float rate\n", "rate is double in the .proto file, not float"},
+        {"proto = flat.proto\nmessage = Flat\ni = i\nq = q\nrate = rate\nmatch.k = kind == DAT\n", "Kind has no value 'DAT'"},
+        {"proto = flat.proto\nmessage = Flat\ni = i\nq = q\nrate = rate\nmatch.m = meta == 1\n", "meta is a message"},
+        {"proto = flat.proto\nmessage = Flat\ni = meta\nq = q\nrate = rate\n", "not a message"},
+        {"proto = flat.proto\ni = i\nq = q\nrate = rate\n", "has 3 top-level messages"},
+        {"proto = flat.proto\nmessage = Nope\ni = i\nq = q\nrate = rate\n", "no message 'Nope' in flat.proto (Meta, Flat, Other)"},
+        {"proto = missing.proto\nmessage = Flat\ni = i\nq = q\nrate = rate\n", "proto: missing.proto"},
+        {"proto = broken.proto\ni = i\nq = q\nrate = rate\n", "broken.proto:2:"},
+        {"message = Flat\ni = i\nq = q\nrate = rate\n", "message needs proto = FILE"},
+    };
+    put("broken.proto", "syntax = \"proto3\";\nmessage A { int32 x = }\n");
+    for (const auto& [body, want] : bad) {
+        StreamFormat f;
+        check(!load(body, f) && err.find(want) != std::string::npos, "rejected: " + err);
+    }
+#else
+    check(!ProtoSchema::available(), "wvt is built without libprotobuf");
+    StreamFormat nf;
+    check(!load("proto = flat.proto\nmessage = Flat\ni = i\nq = q\nrate = rate\n", nf) &&
+              err.find("built without WVT_WITH_PROTOBUF") != std::string::npos,
+          "proto = FILE without libprotobuf: " + err);
+#endif
+    // Names without proto = FILE, in every build.
+    StreamFormat f;
+    check(!load("samples = float iq.samples\nrate = double 3\n", f) && err.find("'iq' is a name") != std::string::npos,
+          "a name without proto: " + err);
+    check(!load("samples = 2.6\nrate = double 3\n", f) && err.find("can be left out with proto = FILE") != std::string::npos,
+          "no type without proto: " + err);
+    for (const char* name : {"zmq_t.ini", "flat.proto", "broken.proto"}) unlink((dir + "/" + name).c_str());
+    rmdir(dir.c_str());
 }
 
 #ifdef WVT_HAVE_ZMQ
@@ -2070,6 +2200,7 @@ int main() {
     checkEncode();
     checkProtobufWire();
     checkProtobufFormats();
+    checkProtoSchema();
 #ifdef WVT_HAVE_ZMQ
     checkSockets();
     checkPublisher();

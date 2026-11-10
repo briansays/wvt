@@ -10,11 +10,13 @@
 #include <fstream>
 #include <initializer_list>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <sstream>
 
 #include "common/paths.h"
+#include "net/proto_schema.h"
 #include "net/zmq_format_proto.h"
 
 namespace {
@@ -271,6 +273,15 @@ struct Parser {
     bool haveSocket = false, haveTransport = false, haveMode = false, haveSamples = false;
     bool haveTopic = false, haveGroup = false, haveFixedRate = false;
     bool haveHeaderKeys = false, haveProtoKeys = false, haveEndian = false, haveOrder = false;
+    // [protobuf]: the keys are read at the end, after proto and message.
+    struct Pending {
+        std::string key, value, raw;
+        int line;
+    };
+    std::vector<Pending> pending;
+    std::string protoFile, protoMessage;
+    int protoFileLine = 0, protoMessageLine = 0;
+    std::unique_ptr<ProtoSchema> schema;  // with proto = FILE
     // The fields that are set, with their names, for the header size check.
     std::vector<std::pair<std::string, const FormatField*>> fields;
 
@@ -390,6 +401,9 @@ struct Parser {
             const unsigned long long v = part.empty() || part.size() > 10 || part.find_first_not_of("0123456789") != std::string::npos
                                              ? 0
                                              : std::strtoull(part.c_str(), nullptr, 10);
+            if (!part.empty() && std::isalpha((unsigned char)part[0]))
+                return fail(key + ": '" + part + "' is a name: field names need proto = FILE in [protobuf]; "
+                                  "else write the field number");
             if (v < 1 || v > pb::kMaxField)
                 return fail(key + ": bad field number '" + part + "' in '" + t +
                             "' (1 to 536870911; a field in a sub-message is 6.1)");
@@ -407,7 +421,33 @@ struct Parser {
         return out;
     }
 
-    // "TYPE PATH [* SCALE]"; for the arrays "[packed | unpacked] TYPE PATH".
+    // The field at `pathText`, with its type: from `typeWord`, or from the
+    // .proto file (proto = FILE), where the two must agree.
+    bool protoTarget(const std::string& key, const std::string* typeWord, const std::string& pathText, ProtoType& type,
+                     std::vector<uint32_t>& path, ProtoSchemaField& sf) {
+        sf = ProtoSchemaField{};
+        ProtoType declared = ProtoType::Double;
+        if (typeWord && !parseProtoType(lower(*typeWord), declared))
+            return fail(key + ": unknown type '" + *typeWord + "' (double, float, int32, int64, uint32, uint64, sint32, "
+                              "sint64, fixed32, fixed64, sfixed32, sfixed64, bool, enum, bytes, string)");
+        if (!schema) {
+            if (!typeWord)
+                return fail(key + ": write TYPE FIELD, e.g. double 3, or uint32 6.1 for a field in a sub-message "
+                                  "(the type can be left out with proto = FILE in [protobuf])");
+            type = declared;
+            return protoPath(key, pathText, path);
+        }
+        std::string e;
+        if (!schema->resolve(trim(pathText), sf, e)) return fail(key + ": " + e);
+        if (typeWord && (sf.message || declared != sf.type))
+            return fail(key + ": " + sf.name + " is " + (sf.message ? "a message" : protoTypeName(sf.type)) +
+                        " in the .proto file, not " + *typeWord);
+        type = sf.type;
+        path = sf.path;
+        return true;
+    }
+
+    // "[TYPE] PATH [* SCALE]"; for the arrays "[packed | unpacked] [TYPE] PATH".
     enum class Role { Number, Counter, Array, Bytes };  // Bytes: samples, which may be bytes
     bool protoField(const std::string& key, const std::string& value, ProtoField& out, Role role) {
         ProtoField fld;
@@ -420,41 +460,51 @@ struct Parser {
         }
         std::vector<std::string> w = words(v);
         bool packing = false;
-        if (!w.empty() && (role == Role::Array || role == Role::Bytes) && (lower(w[0]) == "packed" || lower(w[0]) == "unpacked")) {
+        const bool array = role == Role::Array || role == Role::Bytes;
+        if (!w.empty() && array && (lower(w[0]) == "packed" || lower(w[0]) == "unpacked")) {
             fld.packed = lower(w[0]) == "packed";
             packing = true;
             w.erase(w.begin());
         }
-        if (w.size() != 2) return fail(key + ": write TYPE FIELD, e.g. double 3, or uint32 6.1 for a field in a sub-message");
-        if (!parseProtoType(lower(w[0]), fld.type))
-            return fail(key + ": unknown type '" + w[0] + "' (double, float, int32, int64, uint32, uint64, sint32, sint64, "
-                              "fixed32, fixed64, sfixed32, sfixed64, bool, enum, bytes, string)");
+        if (w.empty() || w.size() > 2)
+            return fail(key + ": write TYPE FIELD, e.g. double 3, or uint32 6.1 for a field in a sub-message");
+        ProtoSchemaField sf;
+        if (!protoTarget(key, w.size() == 2 ? &w[0] : nullptr, w.back(), fld.type, fld.path, sf)) return false;
         const ProtoType t = fld.type;
+        const std::string tn = sf.message ? "a message" : protoTypeName(t);
         switch (role) {
             case Role::Number:
-                if (!protoIsFloat(t) && !protoIsInteger(t)) return fail(key + ": must be a number type, not " + w[0]);
+                if (sf.message || (!protoIsFloat(t) && !protoIsInteger(t))) return fail(key + ": must be a number type, not " + tn);
                 break;
             case Role::Counter:
-                if (!protoIsInteger(t)) return fail(key + ": must be an integer type (int32 ... sfixed64), not " + w[0]);
+                if (sf.message || !protoIsInteger(t)) return fail(key + ": must be an integer type (int32 ... sfixed64), not " + tn);
                 break;
             case Role::Array:
             case Role::Bytes:
-                if (t == ProtoType::Bytes && role == Role::Bytes) {
+                if (t == ProtoType::Bytes && role == Role::Bytes && !sf.message) {
                     if (packing) return fail(key + ": packed and unpacked are for number arrays, not bytes");
                     break;
                 }
-                if (!protoIsFloat(t) && !protoIsInteger(t))
+                if (sf.message || (!protoIsFloat(t) && !protoIsInteger(t)))
                     return fail(key + ": the samples are " + (role == Role::Bytes ? "bytes, or " : "") +
-                                "an array of float, double or an integer type, not " + w[0]);
+                                "an array of float, double or an integer type, not " + tn);
                 break;
         }
-        if (!protoPath(key, w[1], fld.path)) return false;
+        if (schema) {
+            fld.name = sf.name;
+            // The .proto file says if the field is repeated, and if it is packed.
+            if (array && t != ProtoType::Bytes && !sf.repeated)
+                return fail(key + ": " + sf.name + " is not repeated: the samples are an array");
+            if (!array && sf.repeated) return fail(key + ": " + sf.name + " is repeated: wvt reads one value");
+            if (array && !packing) fld.packed = sf.packed;
+        }
         fld.set = true;
         out = fld;
         return true;
     }
 
-    // "TYPE PATH == VALUE", "string PATH == \"text\"" or "present PATH".
+    // "[TYPE] PATH == VALUE", "[string] PATH == \"text\"" or "present PATH".
+    // With proto = FILE, the VALUE of an enum can be its name.
     bool protoMatch(const std::string& key, const std::string& raw) {
         ProtoMatch m;
         m.name = key.substr(6);
@@ -462,14 +512,22 @@ struct Parser {
         if (f.proto.matches.size() >= 32) return fail(key + ": at most 32 matches");
         const size_t eq = raw.find("==");
         const std::vector<std::string> w = words(eq == std::string::npos ? raw : raw.substr(0, eq));
+        ProtoSchemaField sf;
         if (w.size() == 2 && lower(w[0]) == "present" && eq == std::string::npos) {
             m.kind = ProtoMatch::Kind::Present;
-            if (!protoPath(key, w[1], m.path)) return false;
+            if (schema) {
+                std::string e;
+                if (!schema->resolve(w[1], sf, e)) return fail(key + ": " + e);
+                m.path = sf.path;
+            } else if (!protoPath(key, w[1], m.path)) {
+                return false;
+            }
         } else {
-            if (w.size() != 2 || eq == std::string::npos)
+            if (w.empty() || w.size() > 2 || eq == std::string::npos)
                 return fail(key + ": write TYPE FIELD == VALUE, string FIELD == \"text\", or present FIELD");
-            if (!parseProtoType(lower(w[0]), m.type)) return fail(key + ": unknown type '" + w[0] + "'");
-            if (!protoPath(key, w[1], m.path)) return false;
+            if (!protoTarget(key, w.size() == 2 ? &w[0] : nullptr, w.back(), m.type, m.path, sf)) return false;
+            if (sf.message) return fail(key + ": " + sf.name + " is a message: use present " + w.back());
+            if (sf.repeated) return fail(key + ": " + sf.name + " is repeated: wvt matches one value");
             const std::string v = trim(raw.substr(eq + 2));
             if (m.type == ProtoType::String || m.type == ProtoType::Bytes) {
                 if (v.size() < 2 || v.front() != '"' || v.back() != '"') return fail(key + ": write the text in quotes");
@@ -477,13 +535,60 @@ struct Parser {
                 m.text = v.substr(1, v.size() - 2);
             } else {
                 m.kind = ProtoMatch::Kind::Value;
-                std::string e;
-                if (!protoRawFromText(m.type, v, m.raw, e)) return fail(key + ": " + e);
+                std::string number = v, e;
+                if (m.type == ProtoType::Enum && schema && !v.empty() && (std::isalpha((unsigned char)v[0]) || v[0] == '_')) {
+                    int64_t n = 0;
+                    if (!schema->enumValue(sf, v, n, e)) return fail(key + ": " + e);
+                    number = std::to_string(n);
+                }
+                if (!protoRawFromText(m.type, number, m.raw, e)) return fail(key + ": " + e);
             }
         }
         if (std::any_of(f.proto.matches.begin(), f.proto.matches.end(), [&](const ProtoMatch& x) { return x.name == m.name; }))
             return fail(key + " is set twice");
         f.proto.matches.push_back(m);
+        return true;
+    }
+
+    // A [protobuf] key, after proto and message are known.
+    bool protoKey(const Pending& p) {
+        line = p.line;
+        ProtoLayout& L = f.proto;
+        const std::string& k = p.key;
+        if (k.rfind("match.", 0) == 0) return protoMatch(k, p.raw);
+        if (k == "fc") return protoField(k, p.value, L.fc, Role::Number);
+        if (k == "rate") return protoField(k, p.value, L.rate, Role::Number);
+        if (k == "gain") return protoField(k, p.value, L.gain, Role::Number);
+        if (k == "time_ns") return protoField(k, p.value, L.timeNs, Role::Number);
+        if (k == "index") return protoField(k, p.value, L.index, Role::Counter);
+        if (k == "seq") return protoField(k, p.value, L.seq, Role::Counter);
+        if (k == "samples") return protoField(k, p.value, L.samples, Role::Bytes);
+        if (k == "i") return protoField(k, p.value, L.i, Role::Array);
+        return protoField(k, p.value, L.q, Role::Array);  // q
+    }
+
+    // Reads the .proto file (proto = FILE), then the [protobuf] keys.
+    bool protoKeys() {
+        if (!protoMessage.empty() && protoFile.empty()) {
+            line = protoMessageLine;
+            return fail("message needs proto = FILE (the .proto file)");
+        }
+        if (!protoFile.empty()) {
+            line = protoFileLine;
+            std::string path = protoFile;
+            if (path.front() != '/') {
+                const size_t slash = f.path.rfind('/');
+                if (slash != std::string::npos) path = f.path.substr(0, slash + 1) + path;
+            }
+            schema = std::make_unique<ProtoSchema>();
+            std::string e;
+            if (!schema->load(path, protoMessage, e)) return fail("proto: " + e);
+            f.proto.schemaFile = protoFile;
+            f.proto.schemaMessage = schema->messageName();
+        }
+        for (const Pending& p : pending)
+            if (!protoKey(p)) return false;
+        line = 0;
         return true;
     }
 
@@ -601,19 +706,21 @@ struct Parser {
             }
         } else if (section == "protobuf") {
             haveProtoKeys = true;
-            ProtoLayout& L = f.proto;
-            if (k.rfind("match.", 0) == 0) return protoMatch(k, raw);
-            if (k == "fc") return protoField(k, v, L.fc, Role::Number);
-            if (k == "rate") return protoField(k, v, L.rate, Role::Number);
-            if (k == "gain") return protoField(k, v, L.gain, Role::Number);
-            if (k == "time_ns") return protoField(k, v, L.timeNs, Role::Number);
-            if (k == "index") return protoField(k, v, L.index, Role::Counter);
-            if (k == "seq") return protoField(k, v, L.seq, Role::Counter);
-            if (k == "samples") return protoField(k, v, L.samples, Role::Bytes);
-            if (k == "i") return protoField(k, v, L.i, Role::Array);
-            if (k == "q") return protoField(k, v, L.q, Role::Array);
-            if (k == "count") warn("count is not used: the length of the samples field gives the count");
-            else unknownKey(k, {"fc", "rate", "gain", "time_ns", "index", "seq", "samples", "i", "q"});
+            if (k == "proto") {
+                if (v.empty()) return fail("proto: the .proto file is missing");
+                protoFile = v;
+                protoFileLine = line;
+            } else if (k == "message") {
+                protoMessage = v;
+                protoMessageLine = line;
+            } else if (k.rfind("match.", 0) == 0 || k == "fc" || k == "rate" || k == "gain" || k == "time_ns" ||
+                       k == "index" || k == "seq" || k == "samples" || k == "i" || k == "q") {
+                pending.push_back({k, v, raw, line});  // after proto and message
+            } else if (k == "count") {
+                warn("count is not used: the length of the samples field gives the count");
+            } else {
+                unknownKey(k, {"proto", "message", "fc", "rate", "gain", "time_ns", "index", "seq", "samples", "i", "q"});
+            }
         } else if (section == "stream") {
             double d = 0;
             if (k != "rate" && k != "fc" && k != "gain") {
@@ -666,6 +773,7 @@ struct Parser {
     // The checks of a protobuf format that need the whole file.
     template <class Fail>
     bool checkProto(Fail&& failFile) {
+        if (!protoKeys()) return false;
         ProtoLayout& L = f.proto;
         if (haveHeaderKeys) return failFile("[header] is for encoding = binary; a protobuf format uses [protobuf]");
         if (L.samples.set && (L.i.set || L.q.set)) return failFile("set samples, or i and q, in [protobuf], not both");
@@ -1063,12 +1171,14 @@ std::string streamFormatSummary(const StreamFormat& f) {
         // "protobuf, float samples in field 10", "protobuf, sint32 i and q in fields 4.1 and 4.2 (ci16)"
         const ProtoLayout& L = f.proto;
         auto path = [](const ProtoField& x) {
+            if (!x.name.empty()) return x.name;
             std::string t;
             for (uint32_t n : x.path) t += (t.empty() ? "" : ".") + std::to_string(n);
             return t;
         };
         const ProtoField& a = L.samples.set ? L.samples : L.i;
         s += ", protobuf, ";
+        if (!L.schemaMessage.empty()) s += L.schemaMessage + " (" + L.schemaFile + "), ";
         s += protoTypeName(a.type);
         s += L.samples.set ? " samples in field " + path(a) : " i and q in fields " + path(L.i) + " and " + path(L.q);
         if (!protoIsFloat(a.type)) {

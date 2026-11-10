@@ -268,6 +268,7 @@ scripts/build.sh -- -DCMAKE_CUDA_ARCHITECTURES=89  # extra CMake arguments
 | [`WVT_SKIQ_SIM`](#wvt_skiq_sim) | `ON`, `OFF` | `OFF` | All |
 | [`WVT_WITH_ZMQ`](#wvt_with_zmq) | `AUTO`, `ON`, `OFF` | `AUTO` | All |
 | [`WVT_ZMQ_SOURCE_DIR`](#wvt_zmq_source_dir) | A folder | Empty | All |
+| [`WVT_WITH_PROTOBUF`](#wvt_with_protobuf) | `AUTO`, `ON`, `OFF` | `OFF` | All |
 | [`WVT_WITH_AUDIO`](#wvt_with_audio) | `AUTO`, `ON`, `OFF` | `AUTO` | All |
 | [`WVT_WITH_NFD`](#wvt_with_nfd) | `ON`, `OFF` | `ON` | All |
 | [`WVT_WITH_CUDA`](#wvt_with_cuda) | `AUTO`, `ON`, `OFF` | `AUTO` | Linux |
@@ -431,6 +432,25 @@ cmake -S . -B build -DWVT_ZMQ_SOURCE_DIR=$PWD/zeromq-4.3.5
 ```
 
 CMake does not check this folder. Use a release that you checked.
+
+##### WVT_WITH_PROTOBUF
+
+Lets a [Protobuf message format](#protobuf-messages) name a `.proto` file and use its field names.
+Refer to [Field names from a .proto file](#field-names-from-a-proto-file). wvt receives and
+publishes Protobuf messages also without this option: then the format files give field numbers.
+
+wvt uses libprotobuf only when it reads a format file, not for each message. Install it:
+
+| System | Command |
+|---|---|
+| Debian / Ubuntu | `sudo apt install libprotobuf-dev libprotoc-dev` |
+| Fedora | `sudo dnf install protobuf-devel` |
+| macOS | `brew install protobuf` |
+
+On Debian and Ubuntu, `libprotoc-dev` has the headers of the `.proto` parser. Without it, CMake
+shows *libprotobuf ... has no google/protobuf/compiler/importer.h*.
+
+Output: `wvt: .proto field names for the ZMQ Protobuf formats enabled (libprotobuf 3.21.12)`.
 
 ##### WVT_WITH_AUDIO
 
@@ -3641,6 +3661,49 @@ With `i` and `q`, `[samples] order` is not used.
 | `present FIELD` | `match.iq = present 2` | The field. Use it for a `oneof`: wvt then uses only the messages with samples |
 
 The publisher writes each match value in each message. For `present`, it writes the sub-message.
+
+##### Field names from a .proto file
+
+If wvt is built with [`WVT_WITH_PROTOBUF`](#wvt_with_protobuf), a format file can name the `.proto`
+file of the source. Then you can use the field names in place of the numbers, and you can leave
+out the types:
+
+```ini
+[protobuf]
+proto    = protobuf_iq.proto        # next to this file, or an absolute path
+message  = wvt.example.Envelope     # or Envelope (in the package of the file)
+match.iq = present iq
+seq      = iq.seq
+fc       = iq.fc_hz
+rate     = iq.rate_hz
+gain     = iq.gain_db
+time_ns  = iq.time_ns
+samples  = iq.samples
+```
+
+| Key | Function |
+|---|---|
+| `proto` | The `.proto` file. A relative path is from the folder of the format file. The files that it imports must be in the same folder |
+| `message` | The message of each ZMQ message: the full name, or the name in the package of the file. Not necessary if the file has only one top-level message |
+
+With `proto`:
+
+- A field is `NAME` or `PARENT.NAME`. Numbers also work, and you can use names and numbers in one
+  path: `iq.6`.
+- The `.proto` file gives the type. If you also write a type, it must be the type of the
+  `.proto` file.
+- `samples`, `i` and `q` must be `repeated` fields (or a `bytes` field for `samples`). The other
+  fields must not be `repeated`.
+- The `.proto` file tells the publisher if an array is packed. `packed` or `unpacked` before the
+  name wins.
+- A match on an `enum` can use the name of the value: `match.kind = kind == DATA`.
+- wvt does not read `map` fields and groups.
+
+An error in the `.proto` file shows its line and column, for example *zmq_x.ini:6: proto:
+x.proto:12:5: Expected ";".*
+
+A wvt without `WVT_WITH_PROTOBUF` shows an error for a file with `proto`. To use the file in such a
+wvt, remove `proto` and `message`, and write `TYPE NUMBER` for each field.
 
 ##### Publish Protobuf messages
 

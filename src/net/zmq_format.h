@@ -28,7 +28,8 @@
 // [protobuf] section in place of [header]. Each field is named by its number
 // in the .proto file; a dotted path reaches a field in a sub-message:
 //
-//   [protobuf] match.NAME = PTYPE PATH == VALUE | string PATH == "text" | present PATH,
+//   [protobuf] proto = FILE, message = NAME   (WVT_WITH_PROTOBUF: field names)
+//              match.NAME = PTYPE PATH == VALUE | string PATH == "text" | present PATH,
 //              fc | rate | gain | time_ns | index | seq = PTYPE PATH [* SCALE],
 //              samples = [packed | unpacked] ETYPE PATH  (I and Q interleaved),
 //              or i = ... and q = ... (two arrays)
@@ -37,7 +38,9 @@
 // fixed32, fixed64, sfixed32, sfixed64, bool, enum. ETYPE: the numeric
 // PTYPEs but bool and enum, or bytes (the samples as [samples] describes
 // them). Integer elements are values of [samples] format (cu8, ci8, ci16,
-// ci32; default ci16).
+// ci32; default ci16). With proto = FILE, PATH can use the field names
+// (iq.rate_hz), TYPE can be left out (the .proto file gives it), and an enum
+// match can use the name of the value.
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -65,6 +68,7 @@ struct ProtoField {
     bool set = false;
     ProtoType type = ProtoType::Double;
     std::vector<uint32_t> path;
+    std::string name;     // the names of the path, with proto = FILE ("iq.rate_hz"); else empty
     double scale = 1;     // fc, rate, gain, time_ns only
     bool packed = true;   // samples, i, q: how the publisher writes them (both are read)
 };
@@ -81,6 +85,8 @@ struct ProtoMatch {
 };
 
 struct ProtoLayout {
+    std::string schemaFile;     // proto = FILE (phase 2), as in the format file; empty: numbers only
+    std::string schemaMessage;  // the full name of the message in it
     std::vector<ProtoMatch> matches;
     ProtoField fc, rate, gain, timeNs, index, seq;
     ProtoField samples;  // I and Q interleaved; or
