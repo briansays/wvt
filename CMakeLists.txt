@@ -648,11 +648,11 @@ endif()
 # ---------------------------------------------------------------------------
 # Optional field names from .proto files for the Protobuf ZMQ formats (issue
 # #118). wvt reads Protobuf messages without libprotobuf; with it, a format
-# file can name a .proto file and use its field names. OFF by default; AUTO
-# uses libprotobuf if CMake finds it, ON requires it.
+# file can name a .proto file and use its field names. ON (the default)
+# requires libprotobuf; AUTO uses it if CMake finds it; OFF does not look.
 # ---------------------------------------------------------------------------
-set(WVT_WITH_PROTOBUF OFF CACHE STRING "Read .proto files for the field names of the ZMQ Protobuf formats (OFF, ON, AUTO)")
-set_property(CACHE WVT_WITH_PROTOBUF PROPERTY STRINGS OFF ON AUTO)
+set(WVT_WITH_PROTOBUF ON CACHE STRING "Read .proto files for the field names of the ZMQ Protobuf formats (ON, AUTO, OFF)")
+set_property(CACHE WVT_WITH_PROTOBUF PROPERTY STRINGS ON AUTO OFF)
 add_library(wvt_protobuf INTERFACE)
 set(WVT_PROTOBUF_OK FALSE)
 if(NOT WVT_WITH_PROTOBUF STREQUAL "OFF")
@@ -678,10 +678,19 @@ if(NOT WVT_WITH_PROTOBUF STREQUAL "OFF")
     target_include_directories(wvt_protobuf INTERFACE ${WVT_PROTOBUF_IMPORTER_DIR})
     target_link_libraries(wvt_protobuf INTERFACE protobuf::libprotobuf)
     target_compile_definitions(wvt_protobuf INTERFACE WVT_HAVE_PROTOBUF)
+    # With ASan, the abseil and protobuf headers change the layout of their
+    # types (for example the hash tables in DescriptorPool), but the installed
+    # library is built without ASan: the first lookup then crashes. The file
+    # that includes them is built without ASan (UBSan stays); the decoder of
+    # the messages does not use libprotobuf and keeps ASan.
+    if(WVT_SANITIZE STREQUAL "address")
+      set_source_files_properties(src/net/proto_schema.cpp PROPERTIES COMPILE_OPTIONS -fno-sanitize=address)
+    endif()
     set(WVT_PROTOBUF_OK TRUE)
     message(STATUS "wvt: .proto field names for the ZMQ Protobuf formats enabled (libprotobuf ${Protobuf_VERSION})")
   elseif(WVT_WITH_PROTOBUF STREQUAL "ON")
-    message(FATAL_ERROR "WVT_WITH_PROTOBUF=ON but ${_pb_why}")
+    message(FATAL_ERROR "WVT_WITH_PROTOBUF=ON (the default) but ${_pb_why}. "
+                        "To build without .proto field names, use -DWVT_WITH_PROTOBUF=OFF or AUTO")
   else()
     message(STATUS "wvt: .proto field names disabled (${_pb_why})")
   endif()
