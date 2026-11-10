@@ -23,6 +23,24 @@
 //   [stream]   rate, fc, gain: the values that the header does not give
 //
 // TYPE: u8, i8, u16le, u16be, i16le, ... u64be, i64be, f32le, f32be, f64le, f64be.
+//
+// A Protobuf format (issue #118, [format] encoding = protobuf) has a
+// [protobuf] section in place of [header]. Each field is named by its number
+// in the .proto file; a dotted path reaches a field in a sub-message:
+//
+//   [protobuf] proto = FILE, message = NAME   (WVT_WITH_PROTOBUF: field names)
+//              match.NAME = PTYPE PATH == VALUE | string PATH == "text" | present PATH,
+//              fc | rate | gain | time_ns | index | seq = PTYPE PATH [* SCALE],
+//              samples = [packed | unpacked] ETYPE PATH  (I and Q interleaved),
+//              or i = ... and q = ... (two arrays)
+//
+// PTYPE: double, float, int32, int64, uint32, uint64, sint32, sint64,
+// fixed32, fixed64, sfixed32, sfixed64, bool, enum. ETYPE: the numeric
+// PTYPEs but bool and enum, or bytes (the samples as [samples] describes
+// them). Integer elements are values of [samples] format (cu8, ci8, ci16,
+// ci32; default ci16). With proto = FILE, PATH can use the field names
+// (iq.rate_hz), TYPE can be left out (the .proto file gives it), and an enum
+// match can use the name of the value.
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -34,6 +52,46 @@
 enum class FormatSocket : uint8_t { Dish, Sub, Pull };
 
 enum class FieldType : uint8_t { U8, I8, U16, I16, U32, I32, U64, I64, F32, F64 };
+
+enum class FormatEncoding : uint8_t { Binary, Protobuf };
+
+// The scalar types of Protobuf (issue #118). The wire format alone does not
+// tell them apart (int32 and sint32 are both varints), so the file names one.
+enum class ProtoType : uint8_t {
+    Double, Float, Int32, Int64, Uint32, Uint64, Sint32, Sint64,
+    Fixed32, Fixed64, Sfixed32, Sfixed64, Bool, Enum, Bytes, String
+};
+
+// A field of a Protobuf message: its type and the path of field numbers
+// (one number, or more for a field in a sub-message).
+struct ProtoField {
+    bool set = false;
+    ProtoType type = ProtoType::Double;
+    std::vector<uint32_t> path;
+    std::string name;     // the names of the path, with proto = FILE ("iq.rate_hz"); else empty
+    double scale = 1;     // fc, rate, gain, time_ns only
+    bool packed = true;   // samples, i, q: how the publisher writes them (both are read)
+};
+
+// A value that each message must have, else it is not of this format.
+struct ProtoMatch {
+    enum class Kind : uint8_t { Value, Text, Present };
+    std::string name;
+    Kind kind = Kind::Value;
+    ProtoType type = ProtoType::Uint32;
+    std::vector<uint32_t> path;
+    uint64_t raw = 0;  // Value: the value as it is on the wire (the varint, or the bits)
+    std::string text;  // Text: the bytes
+};
+
+struct ProtoLayout {
+    std::string schemaFile;     // proto = FILE (phase 2), as in the format file; empty: numbers only
+    std::string schemaMessage;  // the full name of the message in it
+    std::vector<ProtoMatch> matches;
+    ProtoField fc, rate, gain, timeNs, index, seq;
+    ProtoField samples;  // I and Q interleaved; or
+    ProtoField i, q;     // two arrays of the same length
+};
 
 // A number in the header.
 struct FormatField {
@@ -57,6 +115,7 @@ struct StreamFormat {
     std::string description;  // the tooltip
     std::string path;         // the file; empty for the built-in format
     bool builtin = false;
+    FormatEncoding encoding = FormatEncoding::Binary;  // [format] encoding
 
     // [socket]
     FormatSocket socket = FormatSocket::Dish;
@@ -80,6 +139,9 @@ struct StreamFormat {
 
     // [stream]: used when the header has no field for the value
     double fixedRate = 0, fixedFc = 0, fixedGain = 0;
+
+    // [protobuf]: encoding = protobuf only
+    ProtoLayout proto;
 };
 
 // The built-in wvt wire format.
@@ -182,6 +244,14 @@ private:
 
 // The bits of a field type (for MessageCounter).
 int fieldTypeBits(FieldType t);
+// The bits of the message counter ([header] or [protobuf] seq) of f.
+int streamSeqBits(const StreamFormat& f);
+// True when the sample rate comes from each message (a rate field), not
+// from [stream].
+bool streamRateInMessage(const StreamFormat& f);
+
+// The name of a Protobuf type ("sint32").
+const char* protoTypeName(ProtoType t);
 
 // ---------------------------------------------------------------------------
 // Publishing with a format file (phase 6): the reverse of the subscriber.
@@ -199,6 +269,9 @@ bool checkPublishFormat(const StreamFormat& f, std::string& err);
 // most 8064 bytes, a tcp message at most max_bytes and 256 KiB, and a count
 // field limits it too. 0 if not even one sample fits.
 size_t publishMaxSamples(const StreamFormat& f);
+
+// The largest message that the publisher sends with format f.
+size_t publishMaxBytes(const StreamFormat& f);
 
 // Where the publisher sends with format f: as formatEndpoint, from the side
 // of the publisher (sub and pull formats: the other mode).

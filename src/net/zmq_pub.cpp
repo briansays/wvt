@@ -334,7 +334,7 @@ bool StreamPublisher::start(const std::shared_ptr<SampleRing>& ring, const Publi
         d.closeSocket();
         return false;
     }
-    const int64_t msgBytes = (int64_t)fmt.headerBytes + (int64_t)publishMaxSamples(fmt) * formatBytesPerSample(fmt.sampleFmt);
+    const auto msgBytes = (int64_t)publishMaxBytes(fmt);
     const int hwm = fmt.builtin || dish ? kSendHwm : (int)std::clamp<int64_t>(kSendQueueBytes / std::max<int64_t>(msgBytes, 1), 16, kSendHwm);
     const int sndbuf = kSendBuffer, linger = kLingerMs, hops = std::clamp(cfg.ttl, 1, 255);
     zmq_setsockopt(d.sock, ZMQ_SNDHWM, &hwm, sizeof hwm);
@@ -348,7 +348,7 @@ bool StreamPublisher::start(const std::shared_ptr<SampleRing>& ring, const Publi
         d.closeSocket();
         return false;
     }
-    if (!fmt.builtin && !fmt.rate.set && std::fabs(fmt.fixedRate - src.rate) > 1e-6 * src.rate)
+    if (!fmt.builtin && !streamRateInMessage(fmt) && std::fabs(fmt.fixedRate - src.rate) > 1e-6 * src.rate)
         LOG_WARN("stream", "format %s: the subscriber takes the rate %.6g S/s from [stream] of the file; the device "
                            "runs at %.6g S/s", fmt.id.c_str(), fmt.fixedRate, src.rate);
 

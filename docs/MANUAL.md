@@ -268,6 +268,7 @@ scripts/build.sh -- -DCMAKE_CUDA_ARCHITECTURES=89  # extra CMake arguments
 | [`WVT_SKIQ_SIM`](#wvt_skiq_sim) | `ON`, `OFF` | `OFF` | All |
 | [`WVT_WITH_ZMQ`](#wvt_with_zmq) | `AUTO`, `ON`, `OFF` | `AUTO` | All |
 | [`WVT_ZMQ_SOURCE_DIR`](#wvt_zmq_source_dir) | A folder | Empty | All |
+| [`WVT_WITH_PROTOBUF`](#wvt_with_protobuf) | `AUTO`, `ON`, `OFF` | `OFF` | All |
 | [`WVT_WITH_AUDIO`](#wvt_with_audio) | `AUTO`, `ON`, `OFF` | `AUTO` | All |
 | [`WVT_WITH_NFD`](#wvt_with_nfd) | `ON`, `OFF` | `ON` | All |
 | [`WVT_WITH_CUDA`](#wvt_with_cuda) | `AUTO`, `ON`, `OFF` | `AUTO` | Linux |
@@ -431,6 +432,25 @@ cmake -S . -B build -DWVT_ZMQ_SOURCE_DIR=$PWD/zeromq-4.3.5
 ```
 
 CMake does not check this folder. Use a release that you checked.
+
+##### WVT_WITH_PROTOBUF
+
+Lets a [Protobuf message format](#protobuf-messages) name a `.proto` file and use its field names.
+Refer to [Field names from a .proto file](#field-names-from-a-proto-file). wvt receives and
+publishes Protobuf messages also without this option: then the format files give field numbers.
+
+wvt uses libprotobuf only when it reads a format file, not for each message. Install it:
+
+| System | Command |
+|---|---|
+| Debian / Ubuntu | `sudo apt install libprotobuf-dev libprotoc-dev` |
+| Fedora | `sudo dnf install protobuf-devel` |
+| macOS | `brew install protobuf` |
+
+On Debian and Ubuntu, `libprotoc-dev` has the headers of the `.proto` parser. Without it, CMake
+shows *libprotobuf ... has no google/protobuf/compiler/importer.h*.
+
+Output: `wvt: .proto field names for the ZMQ Protobuf formats enabled (libprotobuf 3.21.12)`.
 
 ##### WVT_WITH_AUDIO
 
@@ -3406,7 +3426,8 @@ error.
 The file is an INI file:
 
 - A `[section]` line starts a section. The sections are `[format]`, `[socket]`, `[header]`,
-  `[samples]` and `[stream]`.
+  `[samples]` and `[stream]`. A Protobuf format has `[protobuf]` in place of `[header]`. Refer
+  to [Protobuf messages](#protobuf-messages).
 - Each setting is `key = value`.
 - `#` or `;` starts a comment, at the start of a line or after a space.
 - Write numbers as in `wvt.conf`, for example `2.4e6`. Do not use SI suffixes such as `2.4M`.
@@ -3451,6 +3472,7 @@ gain = 0        # the header has no gain
 |---|---|---|
 | `name` | The `NAME` of the file | The text in the **Format** list |
 | `description` | Empty | The tooltip in the **Format** list |
+| `encoding` | `binary` | `binary`: a header with fields at fixed offsets ([header]). `protobuf`: a Protocol Buffers message ([protobuf]). Refer to [Protobuf messages](#protobuf-messages) |
 
 ##### The [socket] section
 
@@ -3535,9 +3557,171 @@ The values that the header does not give.
 
 A field in the header wins over a value in `[stream]`.
 
+#### Protobuf messages
+
+A source can send each message as a Protocol Buffers (Protobuf) message. Set `encoding = protobuf`
+in `[format]`, and use a `[protobuf]` section in place of `[header]`. The `[socket]`, `[samples]`
+and `[stream]` sections are as for a binary format.
+
+wvt does not read `.proto` files. In the format file, you give each field by its number in the
+`.proto` file and by its type. This example is `config/zmq_protobuf_iq.ini` in the repository. Its
+schema is `config/protobuf_iq.proto`:
+
+```proto
+message Envelope {
+  oneof body {
+    Status status = 1;
+    IqData iq = 2;
+  }
+}
+message IqData {
+  uint64 seq = 1;
+  double fc_hz = 2;
+  double rate_hz = 3;
+  float gain_db = 4;
+  fixed64 time_ns = 5;
+  repeated float samples = 6;   // I, Q, I, Q ...
+}
+```
+
+```ini
+[format]
+name     = Protobuf IQ (example)
+encoding = protobuf
+
+[socket]
+type    = sub
+address = 127.0.0.1:5558
+
+[protobuf]
+match.iq = present 2      # only the messages with IqData; a Status is ignored
+seq      = uint64 2.1     # message counter
+fc       = double 2.2
+rate     = double 2.3
+gain     = float 2.4
+time_ns  = fixed64 2.5
+samples  = float 2.6      # I, Q, I, Q ...
+```
+
+##### Fields
+
+A field is `TYPE FIELD`, for example `double 3`. `FIELD` is the field number. For a field in a
+sub-message, write the numbers with a dot: `2.6` is field 6 of the message in field 2. A path can
+have up to 16 numbers.
+
+`TYPE` is the type in the `.proto` file: `double`, `float`, `int32`, `int64`, `uint32`, `uint64`,
+`sint32`, `sint64`, `fixed32`, `fixed64`, `sfixed32`, `sfixed64`, `bool`, `enum`, `bytes` or
+`string`. Use the type of the `.proto` file exactly. For example, `int32` and `sint32` have the same
+wire type, but a different encoding, so the wrong type gives wrong values. A field with a different
+wire type stops the message, and wvt shows the reason.
+
+| Key | Function |
+|---|---|
+| `fc`, `rate`, `gain`, `time_ns` | As in [The [header] section](#the-header-section). A number type. They can have a scale: `rate = uint32 3 * 1e3` reads a rate in kS/s |
+| `index`, `seq` | As in [The [header] section](#the-header-section). An integer type, no scale |
+| `samples` | The samples, with I and Q in one field. Refer to [Samples](#samples) |
+| `i`, `q` | The samples, with I and Q in two fields of the same type and length |
+| `match.NAME` | A value that each message must have. Refer to [Matches](#matches) |
+
+Proto3 does not send a field that has the value 0. Thus, wvt uses these values for a field that is
+not in a message:
+
+- `fc`, `gain`: the value in `[stream]`, else 0.
+- `rate`: the value in `[stream]`. If `[stream]` has no rate, wvt ignores the message.
+- `index`, `seq`, `time_ns`: 0.
+
+If a message has the same field two times, wvt uses the last value, as Protobuf does.
+
+##### Samples
+
+`samples` (or `i` and `q`) is one of these:
+
+| Value | The samples |
+|---|---|
+| `float FIELD`, `double FIELD` | An array of numbers, full scale 1.0. wvt receives them as `cf32` |
+| `sint32 FIELD`, `int32 FIELD`, other integer types | An array of integers. `[samples] format` gives their range: `cu8`, `ci8`, `ci16` (default) or `ci32`. A value outside the range stops the message |
+| `bytes FIELD` | The samples as bytes. `[samples]` gives their format, byte order and I/Q order, as for a binary format. `samples` only |
+
+An array can be packed (the default of proto3) or unpacked (the default of proto2). wvt reads both.
+The publisher writes packed arrays. To write unpacked arrays, put `unpacked` before the type:
+`samples = unpacked int32 1`.
+
+For a packed `float` array in one field, wvt uses the samples where they are in the message. This
+is the fastest format. `sint32` is the best integer type: `int32` uses 10 bytes for each negative
+value. The unsigned types (`uint32`, `fixed32`, and others) work only with `format = cu8`.
+
+With `i` and `q`, `[samples] order` is not used.
+
+##### Matches
+
+| Form | Example | The message must have |
+|---|---|---|
+| `TYPE FIELD == VALUE` | `match.kind = uint32 1 == 3` | This value in the field. A field that is not in the message has the value 0 |
+| `string FIELD == "TEXT"` | `match.name = string 6.1 == "rx1"` | This text (or these bytes, with `bytes`) |
+| `present FIELD` | `match.iq = present 2` | The field. Use it for a `oneof`: wvt then uses only the messages with samples |
+
+The publisher writes each match value in each message. For `present`, it writes the sub-message.
+
+##### Field names from a .proto file
+
+If wvt is built with [`WVT_WITH_PROTOBUF`](#wvt_with_protobuf), a format file can name the `.proto`
+file of the source. Then you can use the field names in place of the numbers, and you can leave
+out the types:
+
+```ini
+[protobuf]
+proto    = protobuf_iq.proto        # next to this file, or an absolute path
+message  = wvt.example.Envelope     # or Envelope (in the package of the file)
+match.iq = present iq
+seq      = iq.seq
+fc       = iq.fc_hz
+rate     = iq.rate_hz
+gain     = iq.gain_db
+time_ns  = iq.time_ns
+samples  = iq.samples
+```
+
+| Key | Function |
+|---|---|
+| `proto` | The `.proto` file. A relative path is from the folder of the format file. The files that it imports must be in the same folder |
+| `message` | The message of each ZMQ message: the full name, or the name in the package of the file. Not necessary if the file has only one top-level message |
+
+With `proto`:
+
+- A field is `NAME` or `PARENT.NAME`. Numbers also work, and you can use names and numbers in one
+  path: `iq.6`.
+- The `.proto` file gives the type. If you also write a type, it must be the type of the
+  `.proto` file.
+- `samples`, `i` and `q` must be `repeated` fields (or a `bytes` field for `samples`). The other
+  fields must not be `repeated`.
+- The `.proto` file tells the publisher if an array is packed. `packed` or `unpacked` before the
+  name wins.
+- A match on an `enum` can use the name of the value: `match.kind = kind == DATA`.
+- wvt does not read `map` fields and groups.
+
+An error in the `.proto` file shows its line and column, for example *zmq_x.ini:6: proto:
+x.proto:12:5: Expected ";".*
+
+A wvt without `WVT_WITH_PROTOBUF` shows an error for a file with `proto`. To use the file in such a
+wvt, remove `proto` and `message`, and write `TYPE NUMBER` for each field.
+
+##### Publish Protobuf messages
+
+The publisher writes the fields in the order of their numbers, as `protoc` does. It writes each
+field, also a field with the value 0. A message is at most `max_bytes` (on `tcp`, also at most 256
+KiB) or 8064 bytes (on `udp`). wvt calculates the number of samples in each message from the largest
+size of each field.
+
+To test a format file with a sender, encode a message with `protoc` and send it:
+
+```sh
+echo 'iq { rate_hz: 1e6 samples: [0.5, -0.5] }' |
+  protoc --encode=wvt.example.Envelope config/protobuf_iq.proto > message.bin
+```
+
 #### Lost messages
 
-wvt finds lost messages with a counter in the header:
+wvt finds lost messages with a counter in the header (or in the Protobuf message):
 
 - With `index`, wvt knows the exact number of lost samples. If the index goes back by more than the
   samples of 1 s, wvt shows that the source started again.

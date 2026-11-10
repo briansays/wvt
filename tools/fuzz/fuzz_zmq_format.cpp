@@ -5,6 +5,8 @@
 // a few fixed formats (and with the format from the input, if it parses).
 // A message that decodes is encoded again (the publisher's side) and decoded
 // a second time: the count and the samples must stay the same.
+// The Protobuf formats (issue #118) go through the same steps, so the input
+// is also read as a Protobuf message with nested fields, arrays and matches.
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -36,6 +38,19 @@ const std::vector<StreamFormat>& fixedFormats() {
              "[stream]\nrate = 1e6\n"),
         make("[socket]\ntype = sub\n[samples]\nformat = ci8\n[stream]\nrate = 1e6\n"),
         make("[socket]\ntype = sub\n[samples]\nformat = cf32\n[stream]\nrate = 1e6\n"),
+        // Protobuf: the example of config/, i and q arrays, bytes, unpacked varints.
+        make("[format]\nencoding = protobuf\n[socket]\ntype = sub\n[protobuf]\nmatch.iq = present 2\n"
+             "seq = uint64 2.1\nfc = double 2.2\nrate = double 2.3\ngain = float 2.4\ntime_ns = fixed64 2.5\n"
+             "samples = float 2.6\n"),
+        make("[format]\nencoding = protobuf\n[socket]\ntype = pull\n[protobuf]\nmatch.kind = uint32 1 == 3\n"
+             "match.name = string 6.1 == \"rx1\"\ni = sint32 2\nq = sint32 3\nrate = double 4\nindex = int64 5\n"
+             "fc = uint32 6.2 * 1e3\n"),
+        make("[format]\nencoding = protobuf\n[socket]\ntype = sub\n[protobuf]\nsamples = bytes 1\n"
+             "rate = float 2 * 1e6\n[samples]\nformat = ci16\nendian = big\norder = qi\n"),
+        make("[format]\nencoding = protobuf\n[socket]\ntype = dish\n[protobuf]\nsamples = unpacked int32 1\n"
+             "seq = sint64 3\n[samples]\nformat = cu8\n[stream]\nrate = 1e6\n"),
+        make("[format]\nencoding = protobuf\n[socket]\ntype = sub\n[protobuf]\ni = double 1.1.1\nq = double 1.1.2\n"
+             "[stream]\nrate = 1e6\n"),
     };
     return list;
 }
@@ -68,7 +83,9 @@ void decodeWith(const StreamFormat& f, const uint8_t* data, size_t size) {
         if (why.empty()) __builtin_trap();
         return;  // a value that does not fit after the scale (rounding)
     }
-    if (out.size() != f.headerBytes + n * (size_t)formatBytesPerSample(f.sampleFmt)) __builtin_trap();
+    if (f.encoding == FormatEncoding::Binary && out.size() != f.headerBytes + n * (size_t)formatBytesPerSample(f.sampleFmt))
+        __builtin_trap();
+    if (n == publishMaxSamples(f) && out.size() > publishMaxBytes(f)) __builtin_trap();
     StreamMessage m2;
     FormatExtra x2;
     // A match that overlaps a field can change the field, so the decode may fail; it must not crash.
@@ -115,7 +132,19 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
             if (!inside(*fld)) __builtin_trap();
         for (const FormatMatch& m : f.matches)
             if (m.offset + m.bytes.size() > f.headerBytes || m.bytes.empty()) __builtin_trap();
-        if (!f.rate.set && !(f.fixedRate > 0)) __builtin_trap();
+        if (f.encoding == FormatEncoding::Protobuf) {
+            // A protobuf format has no header, a rate, the samples, and paths of 1 to 16 fields.
+            const ProtoLayout& L = f.proto;
+            if (f.headerBytes || f.fc.set || f.rate.set || !f.matches.empty()) __builtin_trap();
+            if (!L.rate.set && !(f.fixedRate > 0)) __builtin_trap();
+            if (L.samples.set == (L.i.set && L.q.set) || L.i.set != L.q.set) __builtin_trap();
+            for (const ProtoField* fld : {&L.fc, &L.rate, &L.gain, &L.timeNs, &L.index, &L.seq, &L.samples, &L.i, &L.q})
+                if (fld->set && (fld->path.empty() || fld->path.size() > 16)) __builtin_trap();
+            for (const ProtoMatch& m : L.matches)
+                if (m.path.empty() || m.path.size() > 16) __builtin_trap();
+        } else {
+            if (!f.rate.set && !(f.fixedRate > 0)) __builtin_trap();
+        }
         if (f.headerBytes >= f.maxBytes) __builtin_trap();
         decodeWith(f, data, size);
     } else if (err.empty()) {

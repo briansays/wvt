@@ -266,7 +266,7 @@ private:
 
     void run() {
         StreamTracker tracker;
-        MessageCounter counter(fieldTypeBits(fmt_.seq.type));
+        MessageCounter counter(streamSeqBits(fmt_));
         int64_t bad = 0, badLogged = 0, late = 0;
         auto lastBadLog = std::chrono::steady_clock::now() - kBadLogPeriod;
         bool firstDone = false;

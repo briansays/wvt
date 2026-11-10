@@ -10,6 +10,8 @@ This folder holds the user configuration files of wvt (issue #101):
   - `zmq_raw_pull_ci16.ini`: raw `ci16` samples from a PUSH socket.
   - `zmq_example_header.ini`: a template for a format with a binary header.
   - `zmq_wvt_ci16.ini`: the built-in wvt format, written as a file.
+  - `zmq_protobuf_iq.ini`: a Protobuf message format. `protobuf_iq.proto` is its schema (wvt does not
+    read it). Refer to [Protobuf messages](../docs/MANUAL.md#protobuf-messages).
 
   Choose one in the **Format** list next to the *ZMQ stream* device's **Address**, with
   `--zmq-format NAME`, or with `zmq.format = NAME` in `wvt.conf`. `wvt --list-zmq-formats` lists
