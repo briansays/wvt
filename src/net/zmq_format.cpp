@@ -401,12 +401,22 @@ struct Parser {
             const unsigned long long v = part.empty() || part.size() > 10 || part.find_first_not_of("0123456789") != std::string::npos
                                              ? 0
                                              : std::strtoull(part.c_str(), nullptr, 10);
-            if (!part.empty() && std::isalpha((unsigned char)part[0]))
-                return fail(key + ": '" + part + "' is a name: field names need proto = FILE in [protobuf]; "
-                                  "else write the field number");
-            if (v < 1 || v > pb::kMaxField)
-                return fail(key + ": bad field number '" + part + "' in '" + t +
-                            "' (1 to 536870911; a field in a sub-message is 6.1)");
+            if (!part.empty() && std::isalpha((unsigned char)part[0])) {
+                std::string m = key;
+                m += ": '";
+                m += part;
+                m += "' is a name: field names need proto = FILE in [protobuf]; else write the field number";
+                return fail(m);
+            }
+            if (v < 1 || v > pb::kMaxField) {
+                std::string m = key;
+                m += ": bad field number '";
+                m += part;
+                m += "' in '";
+                m += t;
+                m += "' (1 to 536870911; a field in a sub-message is 6.1)";
+                return fail(m);
+            }
             path.push_back((uint32_t)v);
             if (path.size() > kMaxProtoPath) return fail(key + ": more than " + std::to_string(kMaxProtoPath) + " field numbers");
             if (dot == std::string::npos) return true;
@@ -499,7 +509,7 @@ struct Parser {
             if (array && !packing) fld.packed = sf.packed;
         }
         fld.set = true;
-        out = fld;
+        out = std::move(fld);
         return true;
     }
 
@@ -1185,7 +1195,7 @@ std::string streamFormatSummary(const StreamFormat& f) {
             s += " (";
             s += formatName(f.sampleFmt);
             if (f.bigEndian) s += " big endian";
-            s += ")";
+            s += ')';
         }
         if (f.swapIQ) s += " (Q, I)";
         return s;

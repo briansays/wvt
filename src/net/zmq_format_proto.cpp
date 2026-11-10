@@ -790,7 +790,7 @@ bool encodeProtoMessage(const StreamFormat& f, const StreamHeader& h, uint64_t s
             int64_t v = 0;
             switch (elemFmt) {
                 case SampleFormat::CU8: v = q[0]; break;
-                case SampleFormat::CI8: v = (int8_t)q[0]; break;
+                case SampleFormat::CI8: v = q[0] < 128 ? (int64_t)q[0] : (int64_t)q[0] - 256; break;
                 case SampleFormat::CI32: {
                     int32_t x = 0;
                     memcpy(&x, q, 4);

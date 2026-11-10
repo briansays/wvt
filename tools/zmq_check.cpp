@@ -1150,7 +1150,7 @@ bool sameField(const ProtoField& a, const ProtoField& b) {
 
 void checkProtoSchema() {
     printf(".proto field names (issue #118, phase 2)\n");
-    std::string err, why;
+    std::string err;
     std::vector<std::string> warn;
     const char* tmp = getenv("TMPDIR");
     const std::string dir = std::string(tmp && *tmp ? tmp : "/tmp") + "/wvt_zmq_schema_" + std::to_string(getpid());
@@ -1180,6 +1180,7 @@ void checkProtoSchema() {
         "message Other { int32 x = 1; }\n");
 
 #ifdef WVT_HAVE_PROTOBUF
+    std::string why;
     check(ProtoSchema::available(), "wvt is built with libprotobuf");
     // The example with names gives the same layout as with numbers.
     {
