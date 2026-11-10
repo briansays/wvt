@@ -40,20 +40,22 @@ This manual has four parts:
 - A C++20 compiler.
 - CMake 3.16 or later. A CUDA build needs CMake 3.18 or later.
 - The X11 and OpenGL headers and libraries.
+- libprotobuf, with the headers of its `.proto` parser. Refer to
+  [WVT_WITH_PROTOBUF](#wvt_with_protobuf) to build without it.
 
 The repository contains Dear ImGui 1.91.9, ImPlot 0.16, miniaudio 0.11.25 and stb_image_write 1.16
 in `third_party/`. Thus the build does not need network access. The UI font is in the binary.
 
 #### Install the packages
 
-Install the compiler, CMake and the X11 and OpenGL packages for your system:
+Install the compiler, CMake, the X11 and OpenGL packages and libprotobuf for your system:
 
 | System | Command |
 |---|---|
-| Debian / Ubuntu | `sudo apt install build-essential cmake libx11-dev libgl1-mesa-dev` |
-| Fedora | `sudo dnf install gcc-c++ cmake libX11-devel mesa-libGL-devel` |
-| Arch | `sudo pacman -S base-devel cmake libx11 mesa` |
-| macOS | Install [XQuartz](https://www.xquartz.org) and the Xcode Command Line Tools |
+| Debian / Ubuntu | `sudo apt install build-essential cmake libx11-dev libgl1-mesa-dev libprotobuf-dev libprotoc-dev` |
+| Fedora | `sudo dnf install gcc-c++ cmake libX11-devel mesa-libGL-devel protobuf-devel` |
+| Arch | `sudo pacman -S base-devel cmake libx11 mesa protobuf` |
+| macOS | Install [XQuartz](https://www.xquartz.org) and the Xcode Command Line Tools, then `brew install protobuf` |
 
 On Linux, also install `zenity` (for example, `sudo apt install zenity`) to choose files in a
 dialog. Without it, you type the paths. Refer to [WVT_WITH_NFD](#wvt_with_nfd).
@@ -223,7 +225,8 @@ scripts/build.sh [options] [-- extra CMake arguments]
 | `--clean` | Delete the build folder first |
 | `--test` | Run the self-checks (`ctest`) after the build |
 | `-n`, `--dry-run` | Show the commands, but do not run them |
-| `--no-rtlsdr`, `--no-uhd`, `--no-bb`, `--no-skiq`, `--no-audio`, `--no-cuda`, `--no-metal` | Build without the feature (`WVT_WITH_...=OFF`) |
+| `--no-rtlsdr`, `--no-uhd`, `--no-bb`, `--no-skiq`, `--no-audio`, `--no-cuda`, `--no-metal`, `--no-protobuf` | Build without the feature (`WVT_WITH_...=OFF`) |
+| `--auto-protobuf` | Use libprotobuf only if it is found (`WVT_WITH_PROTOBUF=AUTO`). Without the option, the build stops if libprotobuf is missing |
 | `--with-rtlsdr`, `--with-uhd`, `--with-bb`, `--with-skiq`, `--with-audio`, `--with-cuda`, `--with-metal` | The feature must be in the build. The configure step stops if its library is missing (`WVT_WITH_...=ON`) |
 | `--no-gpu` | The same as `--no-cuda --no-metal` |
 | `--minimal` | Build without all the features: the file viewer, the simulator and the signal generator only |
@@ -231,7 +234,8 @@ scripts/build.sh [options] [-- extra CMake arguments]
 | `--sanitize KIND` | `address` or `thread` (`WVT_SANITIZE`) |
 
 Without a `--no-` or `--with-` option, a feature is in the build if CMake finds its library. This
-is the same as a `cmake` build without options.
+is the same as a `cmake` build without options. libprotobuf is different: the build stops if it is
+missing, unless you give `--no-protobuf` or `--auto-protobuf`.
 
 To build for a different architecture:
 
@@ -268,7 +272,7 @@ scripts/build.sh -- -DCMAKE_CUDA_ARCHITECTURES=89  # extra CMake arguments
 | [`WVT_SKIQ_SIM`](#wvt_skiq_sim) | `ON`, `OFF` | `OFF` | All |
 | [`WVT_WITH_ZMQ`](#wvt_with_zmq) | `AUTO`, `ON`, `OFF` | `AUTO` | All |
 | [`WVT_ZMQ_SOURCE_DIR`](#wvt_zmq_source_dir) | A folder | Empty | All |
-| [`WVT_WITH_PROTOBUF`](#wvt_with_protobuf) | `AUTO`, `ON`, `OFF` | `OFF` | All |
+| [`WVT_WITH_PROTOBUF`](#wvt_with_protobuf) | `AUTO`, `ON`, `OFF` | `ON` | All |
 | [`WVT_WITH_AUDIO`](#wvt_with_audio) | `AUTO`, `ON`, `OFF` | `AUTO` | All |
 | [`WVT_WITH_NFD`](#wvt_with_nfd) | `ON`, `OFF` | `ON` | All |
 | [`WVT_WITH_CUDA`](#wvt_with_cuda) | `AUTO`, `ON`, `OFF` | `AUTO` | Linux |
@@ -439,13 +443,12 @@ Lets a [Protobuf message format](#protobuf-messages) name a `.proto` file and us
 Refer to [Field names from a .proto file](#field-names-from-a-proto-file). wvt receives and
 publishes Protobuf messages also without this option: then the format files give field numbers.
 
-wvt uses libprotobuf only when it reads a format file, not for each message. Install it:
+The default is `ON`: the build needs libprotobuf (refer to
+[Install the packages](#install-the-packages)). Unlike the other options, the default is not
+`AUTO`, so that a build does not lose the function without a message. To build without
+libprotobuf, use `-DWVT_WITH_PROTOBUF=OFF` (or `AUTO`), or `scripts/build.sh --no-protobuf`.
 
-| System | Command |
-|---|---|
-| Debian / Ubuntu | `sudo apt install libprotobuf-dev libprotoc-dev` |
-| Fedora | `sudo dnf install protobuf-devel` |
-| macOS | `brew install protobuf` |
+wvt uses libprotobuf only when it reads a format file, not for each message.
 
 On Debian and Ubuntu, `libprotoc-dev` has the headers of the `.proto` parser. Without it, CMake
 shows *libprotobuf ... has no google/protobuf/compiler/importer.h*.

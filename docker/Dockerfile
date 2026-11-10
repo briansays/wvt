@@ -37,6 +37,7 @@ RUN apt-get update \
       build-essential cmake pkg-config ca-certificates \
       libx11-dev libgl1-mesa-dev librtlsdr-dev libuhd-dev libboost-dev libboost-system-dev \
       libusb-1.0-0-dev libglib2.0-dev libtirpc-dev \
+      libprotobuf-dev libprotoc-dev \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=sidekiq_sdk / /opt/sidekiq_sdk/
@@ -76,13 +77,14 @@ ARG UHD_IMAGES=b2xx
 ARG ZENITY=1
 # libgl1-mesa-dri and libglx-mesa0: GLX on the X server of the host (Mesa). With
 # no GLX, wvt uses its software renderer. libasound2t64 and libpulse0: miniaudio
-# loads one of them for the audio window.
+# loads one of them for the audio window. libprotobuf32t64: the .proto field
+# names of the ZMQ Protobuf formats (WVT_WITH_PROTOBUF).
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ca-certificates libx11-6 libgl1 libglx-mesa0 libgl1-mesa-dri \
       librtlsdr2 libuhd4.6.0t64 uhd-host \
       libusb-1.0-0 libglib2.0-0t64 libtirpc3t64 \
-      libasound2t64 libpulse0 \
+      libasound2t64 libpulse0 libprotobuf32t64 \
       $( [ "${ZENITY}" = 1 ] && echo zenity ) \
  && if [ "${UHD_IMAGES}" = all ]; then uhd_images_downloader; \
     elif [ "${UHD_IMAGES}" != none ]; then uhd_images_downloader -t "${UHD_IMAGES}"; fi \

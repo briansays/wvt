@@ -35,6 +35,8 @@ features (default: each one is on if its library is found):
       --no-audio         no audio playback          (--with-audio)
       --no-cuda          no CUDA GPU backend        (--with-cuda)
       --no-metal         no Metal GPU backend       (--with-metal)
+      --no-protobuf      no .proto field names for the ZMQ Protobuf formats (on by default: stops if
+                         libprotobuf is missing; --auto-protobuf: only if it is found)
       --no-gpu           same as --no-cuda --no-metal
       --minimal          all of the above off: file viewer, simulator and generator only
 
@@ -109,8 +111,10 @@ while [ $# -gt 0 ]; do
         --no-audio) feature AUDIO OFF ;;
         --no-cuda) feature CUDA OFF ;;
         --no-metal) feature METAL OFF ;;
+        --no-protobuf) feature PROTOBUF OFF ;;
+        --auto-protobuf) feature PROTOBUF AUTO ;;
         --no-gpu) feature CUDA OFF; feature METAL OFF ;;
-        --minimal) for f in RTLSDR UHD BB SKIQ AUDIO CUDA METAL; do feature $f OFF; done ;;
+        --minimal) for f in RTLSDR UHD BB SKIQ AUDIO CUDA METAL PROTOBUF; do feature $f OFF; done ;;
         --with-rtlsdr) feature RTLSDR ON ;;
         --with-uhd) feature UHD ON ;;
         --with-bb) feature BB ON ;;
